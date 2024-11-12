@@ -1,2 +1,2 @@
-# bopep
-Bayesian optimization for finding peptide binders to proteins
+# Bayesian Optimization for identifying endogenous peptide binders
+
