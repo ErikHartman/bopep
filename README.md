@@ -37,6 +37,10 @@ source bopep_env/bin/activate  # On Windows, use `bopep_env\Scripts\activate`
 
 Remember to export the `PATH` variable and make sure `colabfold_batch` is callable by running:
 ```bash
+# For bash or zsh
+# e.g. export PATH="/home/moriwaki/Desktop/localcolabfold/colabfold-conda/bin:$PATH"
+export PATH="/path/to/your/localcolabfold/colabfold-conda/bin:$PATH"
+
 colabfold_batch --help
 ```
 This should work if you follow the instructions in the LocalColabFold git repo.
