@@ -8,7 +8,7 @@ def embed(peptide_sequences, model_path="esm2_t33_650M_UR50D.pt"):
     
     # Check if the model file exists
     if os.path.exists(model_path):
-        model, alphabet = esm.pretrained.load_model_and_alphabet_local(model_path)
+        model, alphabet = esm.pretrained.load_model_and_alphabet_local(model_path, map_location="gpu")
         print(f"Loaded model from local path: {model_path}")
     else:
         # Download the model if it does not exist locally
