@@ -35,6 +35,12 @@ source bopep_env/bin/activate  # On Windows, use `bopep_env\Scripts\activate`
 
 1. **Install LocalColabFold**: LocalColabFold is a fantastic package that allows you to run ColabFold locally. Follow the installation procedure [here](https://github.com/YoshitakaMo/localcolabfold) to install it.
 
+Remember to export the `PATH` variable and make sure `colabfold_batch` is callable by running:
+```bash
+colabfold_batch --help
+```
+This should work if you follow the instructions in the LocalColabFold git repo.
+
 
 2. **Install PyRosetta**: PyRosetta is freely available for academic users. Any commercial usage requires the purchasing of a license.
 
@@ -42,6 +48,10 @@ source bopep_env/bin/activate  # On Windows, use `bopep_env\Scripts\activate`
    - Install PyRosetta in your environment using the [pyrosetta-installer](https://pypi.org/project/pyrosetta-installer/) with pip: 
     ```bash
    pip install pyrosetta-installer
+   ```
+   - Then run:
+   ```bash
+   python -c 'import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()'
    ```
 
 
@@ -54,7 +64,7 @@ source bopep_env/bin/activate  # On Windows, use `bopep_env\Scripts\activate`
 
 ### Step 4: Running the Optimization Process
 
-After the setup is complete, you can run the bayesian optimization process as described below. Make sure the virtual environment is activated.
+After the setup is complete, you can run the Bayesian optimization process as described below. Make sure the virtual environment is activated.
 
 ADD CODE EXAMPLES.
 
