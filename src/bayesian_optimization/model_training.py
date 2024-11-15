@@ -8,7 +8,7 @@ logging.basicConfig(
 )
 
 
-def prepare_data(peptide_embeddings, scores, objective_weights):
+def prepare_data(peptide_embeddings, scores, objective_weights, feature_range=(0.1, 1)):
     """
     Prepare the data for model training.
 
@@ -52,7 +52,7 @@ def prepare_data(peptide_embeddings, scores, objective_weights):
         obj_values = np.array(
             [obj_dict[obj_name] for obj_dict in objectives_dict_list]
         ).reshape(-1, 1)
-        scaler = MinMaxScaler(feature_range=(0.1, 1))
+        scaler = MinMaxScaler(feature_range=feature_range)
         scaled_values = scaler.fit_transform(obj_values).flatten()
         for i, obj_dict in enumerate(objectives_dict_list):
             obj_dict[obj_name] = scaled_values[i]
@@ -95,16 +95,16 @@ def prepare_data(peptide_embeddings, scores, objective_weights):
     return X_scaled, y, X_scaler
 
 
-def train_single_model(X, y, random_state, params):
+def train_single_model(X, y, random_state, hopt_params):
 
     early_stopping_model = MLPRegressor(
-        hidden_layer_sizes=params.get("hidden_layer_sizes", (256, 128, 64, 32, 16, 8)),
-        activation=params.get("activation", "relu"),
+        hidden_layer_sizes=hopt_params.get("hidden_layer_sizes", (256, 128, 64, 32, 16, 8)),
+        activation=hopt_params.get("activation", "relu"),
         solver="adam",
-        alpha=params.get("alpha", 0.0001),
+        alpha=hopt_params.get("alpha", 0.0001),
         batch_size="auto",
         learning_rate="adaptive",
-        learning_rate_init=params.get("learning_rate_init", 0.001),
+        learning_rate_init=hopt_params.get("learning_rate_init", 0.001),
         max_iter=5000,
         shuffle=True,
         random_state=random_state,
@@ -119,13 +119,13 @@ def train_single_model(X, y, random_state, params):
     val_score = early_stopping_model.best_validation_score_
 
     full_training_model = MLPRegressor(
-        hidden_layer_sizes=params.get("hidden_layer_sizes", (256, 128, 64, 32, 16, 8)),
-        activation=params.get("activation", "relu"),
+        hidden_layer_sizes=hopt_params.get("hidden_layer_sizes", (256, 128, 64, 32, 16, 8)),
+        activation=hopt_params.get("activation", "relu"),
         solver="adam",
-        alpha=params.get("alpha", 0.0001),
+        alpha=hopt_params.get("alpha", 0.0001),
         batch_size="auto",
         learning_rate="adaptive",
-        learning_rate_init=params.get("learning_rate_init", 0.001),
+        learning_rate_init=hopt_params.get("learning_rate_init", 0.001),
         max_iter=max(n_iter_used, 100),
         shuffle=True,
         random_state=random_state,

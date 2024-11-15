@@ -3,14 +3,13 @@ import time
 import logging
 from joblib import Parallel, delayed
 
-# Import the train_single_model function from your module
 from .model_training import train_single_model
 
 
-def train_deep_ensemble_parallel(X_scaled, y, num_models=5, params=None):
+def train_deep_ensemble_parallel(X_scaled, y, num_models=5, params=None, threads=2):
 
     # Set n_jobs appropriately; Colab may not benefit from using too many threads
-    n_jobs = min(num_models, 2)  # Use up to 2 threads
+    n_jobs = min(num_models, threads)  # Use up to 2 threads
 
     start_time = time.time()
     logging.info(

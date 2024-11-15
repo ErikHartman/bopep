@@ -10,10 +10,10 @@ def select_next_peptides(
     models,
     scaler,
     y_train,
-    peptide_embeddings,
+    embeddings,
     docked_peptides,
     batch_size,
-    mode="exploration",
+    mode
 ):
     """
     Select the next batch of peptides using either an exploratory or exploitative approach,
@@ -21,13 +21,13 @@ def select_next_peptides(
     """
     # Filter out peptides that have already been docked
     remaining_peptides = [
-        pep for pep in peptide_embeddings if pep not in docked_peptides
+        pep for pep in embeddings if pep not in docked_peptides
     ]
 
     # Create feature vectors by concatenating embedding with peptide length
     X_remaining = []
     for pep in remaining_peptides:
-        embedding = peptide_embeddings[pep]
+        embedding = embeddings[pep]
         peptide_length = len(pep)
         feature_vector = np.concatenate((embedding, [peptide_length]))
         X_remaining.append(feature_vector)
