@@ -91,6 +91,7 @@ def run_bayesian_optimization(
     all_scores = {}
     validation_metrics_log = []
     total_iterations = 0
+    peptide_results = {}
 
     # Step 1: Initial Peptide Selection and Docking
     logging.info(f"Initializing with {n_initial} peptides (k-means)")
@@ -98,8 +99,9 @@ def run_bayesian_optimization(
     docked_peptides.update(initial_peptides)
 
     # Dock peptides using a function suitable for Colab
-    dock_peptides(
+    peptide_results = dock_peptides(
         initial_peptides,
+        peptide_results,
         target_structure=target_structure,
         target_sequence=target_sequence,
         num_models=num_models,
@@ -108,6 +110,8 @@ def run_bayesian_optimization(
         amber=amber,
         num_relax=1,
     )
+
+    print(peptide_results)
 
     # Extract initial scores
     scores = extract_scores(
@@ -207,13 +211,14 @@ def run_bayesian_optimization(
             docked_peptides.update(next_peptides)
 
             # Dock next peptides
-            dock_peptides(
-                next_peptides,
+            peptide_results = dock_peptides(
+                initial_peptides,
+                peptide_results,
                 target_structure=target_structure,
                 target_sequence=target_sequence,
                 num_models=num_models,
-                recycle_early_stop_tolerance=recycle_early_stop_tolerance,
                 num_recycles=num_recycles,
+                recycle_early_stop_tolerance=recycle_early_stop_tolerance,
                 amber=amber,
                 num_relax=1,
             )

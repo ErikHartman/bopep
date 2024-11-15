@@ -12,6 +12,7 @@ logging.basicConfig(
 
 def dock_peptides(
     peptide_list: List[Tuple[str, str]],
+    peptide_results: dict, 
     target_structure: str,
     output_dir: str = "/content/output",
     num_recycles: int = 1,
@@ -20,15 +21,15 @@ def dock_peptides(
     amber: bool = True,
     recycle_early_stop_tolerance=0.3,
     target_sequence: str = None,
+   
 ) -> None:
 
-    os.makedirs(output_dir, exist_ok=True)
-
     # Process peptides one by one
-    for peptide_name, peptide_sequence in peptide_list:
+
+    for peptide_sequence in peptide_list:
         combined_sequence = f"{target_sequence}:{peptide_sequence}"
         jobname = (
-            f"{os.path.basename(target_structure).replace('.pdb', '')}_{peptide_name}"
+            f"{os.path.basename(target_structure).replace('.pdb', '')}_{peptide_sequence}"
         )
         peptide_output_dir = os.path.join(output_dir, jobname)
         os.makedirs(peptide_output_dir, exist_ok=True)
@@ -42,9 +43,9 @@ def dock_peptides(
         # Prepare custom_template_path
         custom_template_path = peptide_output_dir
         queries = [(jobname, combined_sequence)]
-        logging.info(f"Docking peptide {peptide_name}...")
+        logging.info(f"Docking peptide {peptide_sequence}...")
 
-        run(
+        result = run(
             queries=queries,
             result_dir=peptide_output_dir,
             use_templates=True,
@@ -58,7 +59,10 @@ def dock_peptides(
             rank_by="iptm",
             use_amber=amber,
             pair_mode="unpaired",
+            save_recycles=False,
         )
+        peptide_results[peptide_sequence] = result
+    return peptide_results
 
 
 def extract_sequence_from_pdb(pdb_file, chain_id="A"):

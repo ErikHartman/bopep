@@ -74,12 +74,15 @@ def process_peptide(
     iptm_score = get_ipTM_from_zip(output_subdir)
 
     # Check if the peptide is proximate in multiple models
-    is_proximate = evaluate_binding_site_proximity_multiple_models(
-        output_subdir,
-        binding_site_residue_indices,
-        threshold=proximity_threshold,
-        required_matches=agreeing_models + 1,  # +1 since top model has to match
-    )
+    if binding_site_residue_indices: 
+        is_proximate = evaluate_binding_site_proximity_multiple_models(
+            output_subdir,
+            binding_site_residue_indices,
+            threshold=proximity_threshold,
+            required_matches=agreeing_models + 1,  # +1 since top model has to match
+        )
+    else:
+        is_proximate = True
 
     # Get PDB content from the highest-ranked model
     pdb_content = get_pdb_content_from_zip(output_subdir, rank_num=1, relaxed=True)
