@@ -47,6 +47,7 @@ def dock_peptides(
 
         result = run(
             queries=queries,
+            is_complex=True,
             result_dir=peptide_output_dir,
             use_templates=True,
             custom_template_path=custom_template_path,
