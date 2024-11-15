@@ -4,7 +4,6 @@ import re
 import json
 import zipfile
 from io import StringIO
-from multiprocessing import Pool
 
 import numpy as np
 from Bio.PDB import PDBParser
@@ -14,38 +13,58 @@ import pyrosetta
 from pyrosetta import Pose
 from pyrosetta.rosetta.core.import_pose import pose_from_pdbstring
 from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
+
 import logging
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-def process_peptide(peptide, docking_params, binding_site_residue_indices, proximity_threshold, agreeing_models):
+
+def process_peptide(
+    peptide,
+    target_structure,
+    binding_site_residue_indices,
+    proximity_threshold,
+    agreeing_models,
+    output_dir,
+):
     """
     Process and score a single peptide.
-    
+
     Parameters:
     - peptide: Peptide to score.
     - docking_params: Dictionary containing docking parameters.
     - binding_site_residue_indices: List of residue indices for receptor binding site.
-    
+
     Returns:
     - peptide: The peptide string (for identification).
     - scores: Calculated or loaded scores for the peptide.
     """
-    target_name = os.path.basename(docking_params["target_structure"]).replace(".pdb", "")
-    output_subdir = os.path.join(docking_params["output_dir"], f"{target_name}_{peptide}")
-    
+    target_name = os.path.basename(target_structure).replace(
+        ".pdb", ""
+    )
+    output_subdir = os.path.join(
+        output_dir, f"{target_name}_{peptide}"
+    )
+
     results_file = os.path.join(output_subdir, "results.json")
 
-    # Check if results.json exists and has all required scores 
+    # Check if results.json exists and has all required scores
     if os.path.exists(results_file):
         logging.info(f"Loading scores from {results_file} for peptide: {peptide}")
-        with open(results_file, 'r') as f:
+        with open(results_file, "r") as f:
             json_contents = json.load(f)
-            required_scores = ["iptm_score", "interface_sasa", 
-                               "interface_dG", "rosetta_score", "interface_delta_hbond_unsat", "packstat", "is_proximate"]
-            
+            required_scores = [
+                "iptm_score",
+                "interface_sasa",
+                "interface_dG",
+                "rosetta_score",
+                "interface_delta_hbond_unsat",
+                "packstat",
+                "is_proximate",
+            ]
+
             if all(score in json_contents for score in required_scores):
                 return peptide, json_contents  # Return the peptide and loaded scores
 
@@ -56,14 +75,23 @@ def process_peptide(peptide, docking_params, binding_site_residue_indices, proxi
 
     # Check if the peptide is proximate in multiple models
     is_proximate = evaluate_binding_site_proximity_multiple_models(
-        output_subdir, binding_site_residue_indices, threshold=proximity_threshold, required_matches=agreeing_models+1 # +1 since top model has to match
+        output_subdir,
+        binding_site_residue_indices,
+        threshold=proximity_threshold,
+        required_matches=agreeing_models + 1,  # +1 since top model has to match
     )
-    
+
     # Get PDB content from the highest-ranked model
     pdb_content = get_pdb_content_from_zip(output_subdir, rank_num=1, relaxed=True)
 
     # Calculate interface scores
-    interface_sasa, interface_dG, rosetta_score, interface_delta_hbond_unsat, packstat = compute_interface_scores(pdb_content)
+    (
+        interface_sasa,
+        interface_dG,
+        rosetta_score,
+        interface_delta_hbond_unsat,
+        packstat,
+    ) = compute_interface_scores(pdb_content)
 
     # Store the scores
     scores = {
@@ -79,27 +107,38 @@ def process_peptide(peptide, docking_params, binding_site_residue_indices, proxi
     # Save the results to results.json for future use
     logging.info(f"Saving results to {results_file} for peptide: {peptide}")
     os.makedirs(output_subdir, exist_ok=True)  # Ensure the directory exists
-    with open(results_file, 'w') as f:
+    with open(results_file, "w") as f:
         json.dump(scores, f)
 
-    return peptide, scores 
+    return peptide, scores
 
-def extract_scores(peptides, docking_params, binding_site_residue_indices, proximity_threshold, agreeing_models):
 
-    # Set up a multiprocessing pool and process peptides in parallel
-    num_processes = min(20, len(peptides))
-    logging.info(f"Processing {len(peptides)} peptides with {num_processes} CPUs...")
-    with Pool(processes=num_processes) as pool:
-        results = pool.starmap(
-            process_peptide, 
-            [(peptide, docking_params, binding_site_residue_indices, proximity_threshold, agreeing_models) for peptide in peptides]
+def extract_scores(
+    peptides,
+    target_structure,
+    binding_site_residue_indices,
+    proximity_threshold,
+    agreeing_models,
+):
+    logging.info(f"Processing {len(peptides)} peptides...")
+    scores = {}
+    for peptide in peptides:
+        peptide_name, score = process_peptide(
+            peptide,
+            target_structure,
+            binding_site_residue_indices,
+            proximity_threshold,
+            agreeing_models,
+            output_dir = "/content/output"
         )
-    scores = {peptide: score for peptide, score in results}
-
+        scores[peptide_name] = score
     logging.info(f"All scores have been processed.")
     return scores
 
-def is_peptide_within_threshold(pdb_content, binding_site_residue_indices, threshold=5.0):
+
+def is_peptide_within_threshold(
+    pdb_content, binding_site_residue_indices, threshold=5.0
+):
     """
     Determines if the peptide in the given PDB content is within the threshold distance
     to the receptor's binding site.
@@ -125,7 +164,9 @@ def is_peptide_within_threshold(pdb_content, binding_site_residue_indices, thres
         peptide_chain = model["B"]
 
         receptor_binding_site_atoms = [
-            atom for residue in receptor_chain if residue.id[1] in binding_site_residue_indices
+            atom
+            for residue in receptor_chain
+            if residue.id[1] in binding_site_residue_indices
             for atom in residue.get_atoms()
         ]
 
@@ -139,30 +180,32 @@ def is_peptide_within_threshold(pdb_content, binding_site_residue_indices, thres
             return False
 
         # Find atoms within distance threshold
+        receptor_coords = np.array([atom.coord for atom in receptor_binding_site_atoms])
         peptide_coords = np.array([atom.coord for atom in peptide_atoms])
-        peptide_tree = cKDTree(peptide_coords)
-        distances, _ = peptide_tree.query(
-            [atom.coord for atom in receptor_binding_site_atoms],
-            distance_upper_bound=threshold
-        )
-        return any(distance != float("inf") for distance in distances)
+
+        tree = cKDTree(peptide_coords)
+        distances, _ = tree.query(receptor_coords, distance_upper_bound=threshold)
+        return np.any(distances != float("inf"))
 
     except KeyError:
         print(f"Chains A or B not found in structure.")
         return False
-    
-def evaluate_binding_site_proximity(output_subdir, binding_site_residue_indices, threshold=5.0, rank_num=1):
+
+
+def evaluate_binding_site_proximity(
+    output_subdir, binding_site_residue_indices, threshold=5.0, rank_num=1
+):
     pdb_content = get_pdb_content_from_zip(output_subdir, rank_num=rank_num)
     if not pdb_content:
         return False
 
-    return is_peptide_within_threshold(pdb_content, binding_site_residue_indices, threshold)
+    return is_peptide_within_threshold(
+        pdb_content, binding_site_residue_indices, threshold
+    )
+
 
 def evaluate_binding_site_proximity_multiple_models(
-    output_subdir,
-    binding_site_residue_indices,
-    threshold=5.0,
-    required_matches=3
+    output_subdir, binding_site_residue_indices, threshold=5.0, required_matches=3
 ):
     """
     Evaluates if the docked peptide is within a given proximity to the receptor binding site
@@ -172,14 +215,18 @@ def evaluate_binding_site_proximity_multiple_models(
     matches_within_threshold = 0
 
     for rank_num in range(1, 6):  #  5 models
-        
+
         pdb_content = get_pdb_content_from_zip(output_subdir, rank_num=rank_num)
         if not pdb_content:
             continue
-        
-        peptide_within_threshold = is_peptide_within_threshold(pdb_content, binding_site_residue_indices, threshold)
 
-        if rank_num == 1 and peptide_within_threshold == False: # the top model must be within threshold
+        peptide_within_threshold = is_peptide_within_threshold(
+            pdb_content, binding_site_residue_indices, threshold
+        )
+
+        if (
+            rank_num == 1 and peptide_within_threshold == False
+        ):  # the top model must be within threshold
             return False
 
         if peptide_within_threshold:
@@ -204,7 +251,7 @@ def get_ipTM_from_zip(zip_dir):
     if not os.path.isdir(zip_dir):
         logging.error(f"Directory {zip_dir} does not exist.")
         return None
-    
+
     zip_pattern = os.path.join(zip_dir, "*.result.zip")
     zip_files = glob.glob(zip_pattern)
 
@@ -249,9 +296,9 @@ def get_pdb_content_from_zip(zip_dir, rank_num=1, relaxed=False):
 
     zip_file_path = zip_files[0]
     if relaxed:
-        pattern = fr"relaxed_rank_00{rank_num}_.*\.pdb"
+        pattern = rf"relaxed_rank_00{rank_num}_.*\.pdb"
     else:
-        pattern = fr"unrelaxed_rank_00{rank_num}_.*\.pdb"
+        pattern = rf"unrelaxed_rank_00{rank_num}_.*\.pdb"
 
     pdb_pattern = re.compile(pattern)
 
@@ -259,7 +306,7 @@ def get_pdb_content_from_zip(zip_dir, rank_num=1, relaxed=False):
         with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
             pdb_files = [f for f in zip_ref.namelist() if pdb_pattern.search(f)]
             if not pdb_files:
-                print(f"PDB file not found in zip for rank 1.")
+                print(f"PDB file not found in zip for rank {rank_num}.")
                 return None
 
             return zip_ref.read(pdb_files[0]).decode("utf-8")
@@ -269,8 +316,7 @@ def get_pdb_content_from_zip(zip_dir, rank_num=1, relaxed=False):
         return None
 
 
-
-def compute_interface_scores(pdb_content, receptor_chain_id='A', peptide_chain_id='B'):
+def compute_interface_scores(pdb_content, receptor_chain_id="A", peptide_chain_id="B"):
     # Create a Pose from the PDB content
     pose = Pose()
     pose_from_pdbstring(pose, pdb_content)
@@ -288,11 +334,15 @@ def compute_interface_scores(pdb_content, receptor_chain_id='A', peptide_chain_i
     ia = InterfaceAnalyzerMover(interface)
     ia.set_compute_packstat(True)
     ia.apply(pose)
-    interface_sasa = ia.get_interface_delta_sasa() 
+    interface_sasa = ia.get_interface_delta_sasa()
     interface_dG = ia.get_interface_dG()
     interface_delta_hbond_unsat = ia.get_interface_delta_hbond_unsat()
     packstat = ia.get_interface_packstat()
 
-    return interface_sasa, interface_dG, rosetta_score, interface_delta_hbond_unsat, packstat
-
-
+    return (
+        interface_sasa,
+        interface_dG,
+        rosetta_score,
+        interface_delta_hbond_unsat,
+        packstat,
+    )

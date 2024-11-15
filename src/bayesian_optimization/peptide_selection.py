@@ -5,13 +5,24 @@ from sklearn.cluster import MiniBatchKMeans
 from .ensemble import ensemble_predict
 from .acquisition import expected_improvement
 
-def select_next_peptides(models, scaler, y_train, peptide_embeddings, docked_peptides, batch_size, mode="exploration"):
+
+def select_next_peptides(
+    models,
+    scaler,
+    y_train,
+    peptide_embeddings,
+    docked_peptides,
+    batch_size,
+    mode="exploration",
+):
     """
     Select the next batch of peptides using either an exploratory or exploitative approach,
     ensuring diversity in the selected peptides while keeping high uncertainty.
     """
     # Filter out peptides that have already been docked
-    remaining_peptides = [pep for pep in peptide_embeddings if pep not in docked_peptides]
+    remaining_peptides = [
+        pep for pep in peptide_embeddings if pep not in docked_peptides
+    ]
 
     # Create feature vectors by concatenating embedding with peptide length
     X_remaining = []
@@ -22,41 +33,32 @@ def select_next_peptides(models, scaler, y_train, peptide_embeddings, docked_pep
         X_remaining.append(feature_vector)
 
     X_remaining = np.array(X_remaining)
-
     mu, sigma = ensemble_predict(models, scaler, X_remaining)
-
-    metrics = {
-        "peptide": remaining_peptides,
-        "mu": mu.tolist(),
-        "sigma": sigma.tolist(),
-        "EI": [],
-    }
 
     if mode == "exploration":
         # Exploration: Use a combination of uncertainty (sigma) and diversity (distance) using k-Center Greedy
         selected_indices = k_center_greedy_with_scores(X_remaining, sigma, batch_size)
-        metrics["EI"] = [None] * len(remaining_peptides)
     elif mode == "exploitation":
         # Exploitation: Select peptides using Expected Improvement (EI)
         best_score = max(y_train)
         acquisition_scores = expected_improvement(mu, sigma, best_score)
-        metrics["EI"] = acquisition_scores.tolist()
-        selected_indices = np.argsort(acquisition_scores)[-batch_size:] # pure EI
+        selected_indices = np.argsort(acquisition_scores)[-batch_size:]  # pure EI
     elif mode == "exploitation_weighted":
         best_score = max(y_train)
         acquisition_scores = expected_improvement(mu, sigma, best_score)
-        metrics["EI"] = acquisition_scores.tolist()
-        selected_indices = k_center_greedy_with_scores(X_remaining, acquisition_scores, batch_size)
+        selected_indices = k_center_greedy_with_scores(
+            X_remaining, acquisition_scores, batch_size
+        )
     elif mode == "exploitation_pure":
         selected_indices = np.argsort(mu)[-batch_size:]
-        metrics["EI"] = [None] * len(remaining_peptides)
     else:
-        raise ValueError("Invalid mode. Choose either 'exploration' or 'exploitation' or 'exploitation_weighted'.")
+        raise ValueError(
+            "Invalid mode. Choose either 'exploration' or 'exploitation' or 'exploitation_weighted'."
+        )
 
     next_peptides = [remaining_peptides[idx] for idx in selected_indices]
 
-    return next_peptides, metrics
-
+    return next_peptides
 
 
 def k_center_greedy_with_scores(X, score, num_samples):
@@ -86,7 +88,7 @@ def k_center_greedy_with_scores(X, score, num_samples):
         current_point = X[selected_indices[-1]].reshape(1, -1)
         dist = cdist(X, current_point, metric="euclidean").reshape(-1)
         distances = np.minimum(distances, dist)
-        combined_score = distances * score # Here is the key
+        combined_score = distances * score  # Here is the key
         next_index = np.argmax(combined_score)
         selected_indices.append(next_index)
 

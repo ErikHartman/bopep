@@ -7,6 +7,7 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+
 def prepare_data(peptide_embeddings, scores, objective_weights):
     """
     Prepare the data for model training.
@@ -32,14 +33,15 @@ def prepare_data(peptide_embeddings, scores, objective_weights):
         peptide_scores = scores[peptide]
 
         objectives = {
-            "iptm_score": peptide_scores["iptm_score"], 
+            "iptm_score": peptide_scores["iptm_score"],
             "interface_sasa": -peptide_scores["interface_sasa"],  # Inverted
             "rosetta_score": -peptide_scores["rosetta_score"],  # Inverted
             "interface_dG": -peptide_scores["interface_dG"],  # Inverted
-            "interface_delta_hbond_unsat": -peptide_scores["interface_delta_hbond_unsat"], # Inverted
-            "packstat": -peptide_scores["packstat"] # Inverted
+            "interface_delta_hbond_unsat": -peptide_scores[
+                "interface_delta_hbond_unsat"
+            ],  # Inverted
+            "packstat": -peptide_scores["packstat"],  # Inverted
         }
-
 
         # Collect the objectives and is_proximate flag
         objectives_dict_list.append(objectives)
@@ -47,7 +49,9 @@ def prepare_data(peptide_embeddings, scores, objective_weights):
 
     # Step 2: Scale each objective to [0.1, 1] using MinMaxScaler
     for obj_name in objective_weights.keys():
-        obj_values = np.array([obj_dict[obj_name] for obj_dict in objectives_dict_list]).reshape(-1, 1)
+        obj_values = np.array(
+            [obj_dict[obj_name] for obj_dict in objectives_dict_list]
+        ).reshape(-1, 1)
         scaler = MinMaxScaler(feature_range=(0.1, 1))
         scaled_values = scaler.fit_transform(obj_values).flatten()
         for i, obj_dict in enumerate(objectives_dict_list):
@@ -63,7 +67,8 @@ def prepare_data(peptide_embeddings, scores, objective_weights):
     scalarized_scores = []
     for obj_dict in objectives_dict_list:
         scalarized_score = sum(
-            obj_dict[obj_name] * weight for obj_name, weight in objective_weights.items()
+            obj_dict[obj_name] * weight
+            for obj_name, weight in objective_weights.items()
         )
         scalarized_scores.append(scalarized_score)
 
@@ -90,25 +95,23 @@ def prepare_data(peptide_embeddings, scores, objective_weights):
     return X_scaled, y, X_scaler
 
 
-
-
 def train_single_model(X, y, random_state, params):
 
     early_stopping_model = MLPRegressor(
-        hidden_layer_sizes=params.get('hidden_layer_sizes', (256, 128, 64, 32, 16, 8)),
-        activation=params.get('activation', 'relu'),
-        solver='adam',
-        alpha=params.get('alpha', 0.0001),
-        batch_size='auto',
-        learning_rate='adaptive',
-        learning_rate_init=params.get('learning_rate_init', 0.001),
+        hidden_layer_sizes=params.get("hidden_layer_sizes", (256, 128, 64, 32, 16, 8)),
+        activation=params.get("activation", "relu"),
+        solver="adam",
+        alpha=params.get("alpha", 0.0001),
+        batch_size="auto",
+        learning_rate="adaptive",
+        learning_rate_init=params.get("learning_rate_init", 0.001),
         max_iter=5000,
         shuffle=True,
         random_state=random_state,
         early_stopping=True,
-        validation_fraction=0.2, 
+        validation_fraction=0.2,
         n_iter_no_change=100,
-        tol= 1e-4,
+        tol=1e-4,
     )
 
     early_stopping_model.fit(X, y)
@@ -116,20 +119,19 @@ def train_single_model(X, y, random_state, params):
     val_score = early_stopping_model.best_validation_score_
 
     full_training_model = MLPRegressor(
-        hidden_layer_sizes=params.get('hidden_layer_sizes', (256, 128, 64, 32, 16, 8)),
-        activation=params.get('activation', 'relu'),
-        solver='adam',
-        alpha=params.get('alpha', 0.0001),
-        batch_size='auto',
-        learning_rate='adaptive',
-        learning_rate_init=params.get('learning_rate_init', 0.001),
-        max_iter=max(n_iter_used, 100), 
+        hidden_layer_sizes=params.get("hidden_layer_sizes", (256, 128, 64, 32, 16, 8)),
+        activation=params.get("activation", "relu"),
+        solver="adam",
+        alpha=params.get("alpha", 0.0001),
+        batch_size="auto",
+        learning_rate="adaptive",
+        learning_rate_init=params.get("learning_rate_init", 0.001),
+        max_iter=max(n_iter_used, 100),
         shuffle=True,
         random_state=random_state,
-        early_stopping=False,  
+        early_stopping=False,
     )
 
     full_training_model.fit(X, y)
 
     return full_training_model, val_score
-
