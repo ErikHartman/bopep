@@ -2,20 +2,19 @@ import time
 import logging
 import os
 
-from bayesian_optimization.model_training import prepare_data
-from bayesian_optimization.peptide_selection import (
+from .bayesian_optimization.model_training import prepare_data
+from .bayesian_optimization.peptide_selection import (
     select_next_peptides,
     select_initial_peptides,
 )
-from bayesian_optimization.ensemble import (
+from .bayesian_optimization.ensemble import (
     train_deep_ensemble_parallel,
 )
-from bayesian_optimization.hparam_opt import optimize_hyperparameters
-from docking.dock_peptides import dock_peptides
-from docking.scoring import extract_scores
+from .bayesian_optimization.hparam_opt import optimize_hyperparameters
+from .docking.dock_peptides import dock_peptides
+from .docking.scoring import extract_scores
 
-from logging_utils import save_results, save_validation_metrics
-
+from .logging_utils import save_results, save_validation_metrics
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
