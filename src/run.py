@@ -117,7 +117,7 @@ def run_bayesian_optimization(
     scores = extract_scores(
         peptides=initial_peptides,
         target_structure=target_structure,
-        binding_site_info=binding_site_residue_indices,
+        binding_site_residue_indices=binding_site_residue_indices,
         proximity_threshold=proximity_threshold,
         agreeing_models=agreeing_models,
     )
@@ -226,7 +226,7 @@ def run_bayesian_optimization(
             scores = extract_scores(
                 next_peptides,
                 target_structure=target_structure,
-                binding_site_info=binding_site_residue_indices,
+                binding_site_residue_indices=binding_site_residue_indices,
                 proximity_threshold=proximity_threshold,
                 agreeing_models=agreeing_models,
             )

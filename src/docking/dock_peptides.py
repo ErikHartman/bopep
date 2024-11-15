@@ -40,8 +40,6 @@ def dock_peptides(
         )
         shutil.copy2(target_structure, target_structure_copy)
 
-        # Prepare custom_template_path
-        custom_template_path = peptide_output_dir
         queries = [(jobname, combined_sequence, None)]
         logging.info(f"Docking peptide {peptide_sequence}...")
 
@@ -50,7 +48,7 @@ def dock_peptides(
             is_complex=True,
             result_dir=peptide_output_dir,
             use_templates=True,
-            custom_template_path=custom_template_path,
+            custom_template_path=target_structure_copy,
             model_type="alphafold2_multimer_v3",
             msa_mode="single_sequence",
             num_recycles=num_recycles,
