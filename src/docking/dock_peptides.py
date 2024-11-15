@@ -42,7 +42,7 @@ def dock_peptides(
 
         # Prepare custom_template_path
         custom_template_path = peptide_output_dir
-        queries = [(jobname, combined_sequence)]
+        queries = [(jobname, combined_sequence, None)]
         logging.info(f"Docking peptide {peptide_sequence}...")
 
         result = run(

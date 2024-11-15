@@ -145,7 +145,6 @@ def run_bayesian_optimization(
                 f"\n{phase_name} iteration {iteration + 1}/{iterations}, total dockings: {len(docked_peptides)}"
             )
 
-            # Step 1: Prepare the data
             X_scaled, y_train, X_scaler = prepare_data(
                 embeddings, all_scores, objective_weights
             )
