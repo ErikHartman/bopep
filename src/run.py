@@ -26,6 +26,7 @@ def run_bayesian_optimization(
     target_sequence,
     num_recycles=3,
     num_models=3,
+    relax_max_iterations=200,
     recycle_early_stop_tolerance=0.3,
     amber=True,
     binding_site_residue_indices=None,
@@ -108,6 +109,7 @@ def run_bayesian_optimization(
         num_recycles=num_recycles,
         recycle_early_stop_tolerance=recycle_early_stop_tolerance,
         amber=amber,
+        relax_max_iterations=relax_max_iterations,
         num_relax=1,
     )
 
@@ -218,6 +220,7 @@ def run_bayesian_optimization(
                 num_models=num_models,
                 num_recycles=num_recycles,
                 recycle_early_stop_tolerance=recycle_early_stop_tolerance,
+                relax_max_iterations=relax_max_iterations,
                 amber=amber,
                 num_relax=1,
             )
