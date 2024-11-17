@@ -17,6 +17,7 @@ def dock_peptides(
     output_dir: str = "/content/output",
     num_recycles: int = 1,
     num_relax: int = 1,
+    relax_max_iterations: int = 200,
     num_models: int = 1,
     amber: bool = True,
     recycle_early_stop_tolerance=0.3,
@@ -54,6 +55,7 @@ def dock_peptides(
             num_models=num_models,
             rank_by="iptm",
             use_amber=amber,
+            relax_max_iterations=relax_max_iterations,
             pair_mode="unpaired",
             save_recycles=False,
         )
