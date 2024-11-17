@@ -21,10 +21,7 @@ def dock_peptides(
     amber: bool = True,
     recycle_early_stop_tolerance=0.3,
     target_sequence: str = None,
-   
 ) -> None:
-
-    # Process peptides one by one
 
     for peptide_sequence in peptide_list:
         combined_sequence = f"{target_sequence}:{peptide_sequence}"
@@ -34,11 +31,12 @@ def dock_peptides(
         peptide_output_dir = os.path.join(output_dir, jobname)
         os.makedirs(peptide_output_dir, exist_ok=True)
 
-        # Copy target_structure to peptide_output_dir
-        target_structure_copy = os.path.join(
-            peptide_output_dir, os.path.basename(target_structure)
-        )
-        shutil.copy2(target_structure, target_structure_copy)
+        # Set up the template directory
+        custom_template_dir = peptide_output_dir
+        os.makedirs(custom_template_dir, exist_ok=True)
+
+        # Copy PDB file into the template directory
+        shutil.copy2(target_structure, os.path.join(custom_template_dir, os.path.basename(target_structure)))
 
         queries = [(jobname, combined_sequence, None)]
         logging.info(f"Docking peptide {peptide_sequence}...")
@@ -48,7 +46,7 @@ def dock_peptides(
             is_complex=True,
             result_dir=peptide_output_dir,
             use_templates=True,
-            custom_template_path=target_structure_copy,
+            custom_template_path=custom_template_dir,  # Now pointing to the directory
             model_type="alphafold2_multimer_v3",
             msa_mode="single_sequence",
             num_recycles=num_recycles,
@@ -61,7 +59,9 @@ def dock_peptides(
             save_recycles=False,
         )
         peptide_results[peptide_sequence] = result
+
     return peptide_results
+
 
 
 def extract_sequence_from_pdb(pdb_file, chain_id="A"):
