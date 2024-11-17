@@ -24,7 +24,6 @@ def dock_peptides(
 ) -> None:
 
     for peptide_sequence in peptide_list:
-        combined_sequence = f"{target_sequence}:{peptide_sequence}"
         jobname = (
             f"{os.path.basename(target_structure).replace('.pdb', '')}_{peptide_sequence}"
         )
@@ -38,7 +37,7 @@ def dock_peptides(
         # Copy PDB file into the template directory
         shutil.copy2(target_structure, os.path.join(custom_template_dir, os.path.basename(target_structure)))
 
-        queries = [(jobname, combined_sequence, None)]
+        queries = [(jobname, [target_sequence, peptide_sequence], None)] # I think this is right formatting
         logging.info(f"Docking peptide {peptide_sequence}...")
 
         result = run(
@@ -46,7 +45,7 @@ def dock_peptides(
             is_complex=True,
             result_dir=peptide_output_dir,
             use_templates=True,
-            custom_template_path=custom_template_dir,  # Now pointing to the directory
+            custom_template_path=custom_template_dir,
             model_type="alphafold2_multimer_v3",
             msa_mode="single_sequence",
             num_recycles=num_recycles,

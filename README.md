@@ -1,6 +1,6 @@
 # BoPep: Bayesian Optimization for identifying endogenous peptide binders
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ErikHartman/BoPep/blob/main/BoPep.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ErikHartman/bopep/blob/main/bopep.ipynb)
 
 This repository contains the code for `BoPep`, a tool for identifying peptide binders to proteins from large scale peptidomic data.
 
