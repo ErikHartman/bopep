@@ -20,7 +20,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-
 def process_peptide(
     peptide,
     target_structure,
@@ -86,6 +85,7 @@ def process_peptide(
 
     # Get PDB content from the highest-ranked model
     pdb_content = get_pdb_content_from_zip(output_subdir, rank_num=1, relaxed=True)
+    print(pdb_content)
 
     # Calculate interface scores
     (
@@ -122,6 +122,7 @@ def extract_scores(
     binding_site_residue_indices,
     proximity_threshold,
     agreeing_models,
+    output_dir
 ):
     logging.info(f"Processing {len(peptides)} peptides...")
     scores = {}
@@ -132,7 +133,7 @@ def extract_scores(
             binding_site_residue_indices,
             proximity_threshold,
             agreeing_models,
-            output_dir = "/content/output"
+            output_dir = output_dir
         )
         scores[peptide_name] = score
     logging.info(f"All scores have been processed.")

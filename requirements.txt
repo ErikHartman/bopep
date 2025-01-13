@@ -9,3 +9,5 @@ tqdm
 joblib
 torch
 biopython
+fair-esm
+pyrosetta-installer 

@@ -15,6 +15,9 @@ from .docking.dock_peptides import dock_peptides
 from .docking.scoring import extract_scores
 
 from .logging_utils import save_results, save_validation_metrics
+from .utils import extract_sequence_from_pdb
+
+import pyrosetta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,10 +26,9 @@ logging.basicConfig(level=logging.INFO)
 def run_bayesian_optimization(
     embeddings,
     target_structure,
-    target_sequence,
+    output_dir,
     num_recycles=3,
     num_models=3,
-    relax_max_iterations=200,
     recycle_early_stop_tolerance=0.3,
     amber=True,
     binding_site_residue_indices=None,
@@ -70,7 +72,9 @@ def run_bayesian_optimization(
     """
     start_time = time.time()
 
-    output_dir = ("/content/output",)
+    pyrosetta.init("-mute all")
+
+    target_sequence = extract_sequence_from_pdb(target_structure)
 
     # Set up objective weights
     objective_weights = {
@@ -92,7 +96,6 @@ def run_bayesian_optimization(
     all_scores = {}
     validation_metrics_log = []
     total_iterations = 0
-    peptide_results = {}
 
     # Step 1: Initial Peptide Selection and Docking
     logging.info(f"Initializing with {n_initial} peptides (k-means)")
@@ -100,20 +103,17 @@ def run_bayesian_optimization(
     docked_peptides.update(initial_peptides)
 
     # Dock peptides using a function suitable for Colab
-    peptide_results = dock_peptides(
-        initial_peptides,
-        peptide_results,
+    dock_peptides(
+        peptides=initial_peptides,
         target_structure=target_structure,
         target_sequence=target_sequence,
         num_models=num_models,
         num_recycles=num_recycles,
         recycle_early_stop_tolerance=recycle_early_stop_tolerance,
         amber=amber,
-        relax_max_iterations=relax_max_iterations,
         num_relax=1,
+        output_dir=output_dir,
     )
-
-    print(peptide_results)
 
     # Extract initial scores
     scores = extract_scores(
@@ -122,6 +122,7 @@ def run_bayesian_optimization(
         binding_site_residue_indices=binding_site_residue_indices,
         proximity_threshold=proximity_threshold,
         agreeing_models=agreeing_models,
+        output_dir=output_dir,
     )
     all_scores.update(scores)
 
@@ -131,7 +132,7 @@ def run_bayesian_optimization(
         output_dir,
         iteration=total_iterations,
         mode="initialization",
-        filename=os.path.join(output_dir, "results.csv"),
+        filename="results.csv",
     )
     total_iterations += 1
 
@@ -212,17 +213,16 @@ def run_bayesian_optimization(
             docked_peptides.update(next_peptides)
 
             # Dock next peptides
-            peptide_results = dock_peptides(
-                initial_peptides,
-                peptide_results,
+            dock_peptides(
+                next_peptides,
                 target_structure=target_structure,
                 target_sequence=target_sequence,
                 num_models=num_models,
                 num_recycles=num_recycles,
                 recycle_early_stop_tolerance=recycle_early_stop_tolerance,
-                relax_max_iterations=relax_max_iterations,
                 amber=amber,
                 num_relax=1,
+                output_dir=output_dir,
             )
 
             # Step 4: Score next peptides and update results
@@ -232,6 +232,7 @@ def run_bayesian_optimization(
                 binding_site_residue_indices=binding_site_residue_indices,
                 proximity_threshold=proximity_threshold,
                 agreeing_models=agreeing_models,
+                output_dir=output_dir,
             )
             all_scores.update(scores)
 
@@ -241,7 +242,7 @@ def run_bayesian_optimization(
                 output_dir,
                 iteration=total_iterations,
                 mode=mode,
-                filename=os.path.join(output_dir, "results.csv"),
+                filename="results.csv",
             )
 
             total_iterations += 1
