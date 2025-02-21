@@ -1,5 +1,17 @@
 import numpy as np
 from src.scoring.util import ChainData, parse_pdb_to_chains
+from .scorer import Scorer
+
+"""
+TODO:
+
+Take some of the utility functions that can be used
+by other scripts and put them in their own module.
+
+Then, refactor the code below to use those utility functions.
+
+This file should just contain a class for the EvoBind loss function.
+"""
 
 
 def find_interface_residues_by_cb(
@@ -82,24 +94,19 @@ def compute_min_dist_stats(
     return (rec_if_dist, pep_if_dist)
 
 
-class EvoBindLoss:
+class EvoBindLoss(Scorer):
     """
     Class that loads a PDB with two chains (receptor, peptide)
     and computes the "loss" function:
         loss = ((rec_if_dist + pep_if_dist) / 2) * (1 / pep_pLDDT)
     """
 
-    def __init__(self, pdb_path: str, dist_cutoff: float = 8.0):
-        self.pdb_path = pdb_path
-        self.dist_cutoff = dist_cutoff
-
-        # Parse the PDB into (receptor, peptide)
-        self.receptor, self.peptide = parse_pdb_to_chains(pdb_path)
-
-        # Precompute the average peptide pLDDT
-        self.pep_plddt = (
-            np.mean(self.peptide.b_factors) if len(self.peptide.b_factors) > 0 else 0.0
-        )
+    def __init__(self, dist_cutoff: float = 8.0):
+        self.dist_cutoff = dist_cutoff 
+        self.receptor = None
+        self.peptide = None
+        self.pep_plddt = 0.0
+        pass
 
     def compute_loss(self) -> float:
         """
@@ -118,3 +125,11 @@ class EvoBindLoss:
         )
         loss_value = ((rec_if_dist + pep_if_dist) / 2.0) * (1.0 / self.pep_plddt)
         return loss_value
+    
+    def score(self, pdb_path: str):
+        pdb_path = pdb_path
+        self.receptor, self.peptide = parse_pdb_to_chains(pdb_path)
+        self.pep_plddt = (
+            np.mean(self.peptide.b_factors) if len(self.peptide.b_factors) > 0 else 0.0
+        )
+        return self.compute_loss()
