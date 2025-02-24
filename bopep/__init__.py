@@ -1,0 +1,1 @@
+from bopep.scoring.scorer import Scorer
