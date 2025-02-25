@@ -22,7 +22,6 @@ def count_agreeing_pdbs(pdb_files,
         print("No PDB files provided.")
         return 0
     
-    # --- 1) Parse the reference (first PDB) ---
     ref_pdb = pdb_files[0]
     (ref_rec_coords, _,
      ref_pep_coords, _) = parse_pdb(ref_pdb,
@@ -34,7 +33,7 @@ def count_agreeing_pdbs(pdb_files,
     def rmsd(coords1, coords2):
         return np.sqrt(np.mean(np.sum((coords1 - coords2)**2, axis=1)))
 
-    # --- 2) For each PDB, align receptor & check RMSD of peptide ---
+
     agreeing_count = 0
     sup = SVDSuperimposer()
 
@@ -57,7 +56,6 @@ def count_agreeing_pdbs(pdb_files,
         # Compute peptide RMSD vs. reference
         current_rmsd = rmsd(ref_pep_coords, new_pep_coords_aligned)
 
-        # If below threshold, we consider them "the same binding site"
         if current_rmsd <= rmsd_threshold:
             agreeing_count += 1
 

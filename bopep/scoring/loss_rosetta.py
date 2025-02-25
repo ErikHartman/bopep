@@ -1,18 +1,16 @@
 import pyrosetta
-
-from pyrosetta import Pose
 from pyrosetta.io import pose_from_pdb
 from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
 
 def rosetta_scores_from_pdb(pdb_file):
     try:
-        Pose()
+        scorefxn = pyrosetta.get_fa_scorefxn() 
     except:
         pyrosetta.init("-mute all")
+        scorefxn = pyrosetta.get_fa_scorefxn() 
 
     pose = pose_from_pdb(pdb_file)
 
-    scorefxn = pyrosetta.get_fa_scorefxn()  
     rosetta_score = scorefxn(pose)
 
     ia = InterfaceAnalyzerMover()

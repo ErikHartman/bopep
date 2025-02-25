@@ -1,6 +1,6 @@
-# BoPep: identifying peptide binders in large-scale data with Bayesian Optimization, ESM2, AF2m and Rosetta
+# ⛏️ BoPep: Mining for peptide binders in large-scale data with Bayesian Optimization ⛏️
 
-This repository contains the code for `BoPep`, a tool for identifying peptide binders to proteins from large scale peptidomic data.
+This repository contains the code for `BoPep`, a tool for identifying peptide binders to proteins from a large set of candidate peptides.
 
 ## Installation for running locally
 
@@ -8,7 +8,7 @@ To run `bopep` locally, you will need to clone this repository, install **LocalC
 
 ### Step 1: Clone the Repository
 
-First, clone the repository to your local machine:
+First, clone the repository to your local machine (not available on pip yet):
 
 ```bash
 git clone https://github.com/ErikHartman/bopep.git
@@ -21,7 +21,7 @@ It’s recommended to set up a virtual environment to keep dependencies isolated
 
 ```bash
 python -m venv bopep_env # Or python3
-source bopep_env/bin/activate  # On Windows, use `bopep_env\Scripts\activate`
+source bopep_env/bin/activate
 ```
 
 ### Step 3: Install Dependencies
@@ -58,10 +58,6 @@ This should work if you follow the instructions in the LocalColabFold git repo.
    ```bash
    pip install -r requirements.txt
    ```
-
-## Running BoPep
-
-After the setup is complete, you can run the Bayesian optimization process as described in `example.ipynb`. Make sure the virtual environment is activated.
 
 
 ## Credits

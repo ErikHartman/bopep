@@ -60,7 +60,6 @@ def dock_peptide(
         "--templates",
         "--custom-template-path", str(peptide_output_dir),
         "--rank", "iptm", 
-        "--zip"
     ]
 
     if amber:
@@ -79,8 +78,6 @@ def dock_peptide(
             universal_newlines=True,
             env=env,
         )
-        #for line in iter(process.stdout.readline, ""):
-        #    logging.info(line.rstrip())
         process.wait()
         if process.returncode != 0:
             raise subprocess.CalledProcessError(
@@ -95,7 +92,7 @@ def dock_peptide(
 
 
 
-def dock_peptides(
+def dock_peptides_parallel(
     peptides: list,
     target_structure: str,
     target_sequence: str,
@@ -131,7 +128,6 @@ def dock_peptides(
         num_models=num_models,
         num_recycles=num_recycles,
         recycle_early_stop_tolerance=recycle_early_stop_tolerance,
-
         amber=amber,
         num_relax=num_relax,
     )
@@ -148,3 +144,4 @@ def dock_peptides(
     with context.Pool(processes=num_processes) as pool:
         pool.starmap(dock_peptide_partial, peptide_gpu_pairs)
 
+    return True
