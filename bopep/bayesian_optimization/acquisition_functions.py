@@ -3,89 +3,110 @@ from scipy.stats import norm
 
 class AcquisitionFunction:
     def __init__(self):
-        self.best_so_far = 0.0
-        pass
+        self.best_so_far_ei = 0.0
+        self.best_so_far_pi = 0.0
 
-    def compute_acquisition(self, means, stds, acquisition_function):
+    def compute_acquisition(self, predictions, acquisition_function):
+        """
+        Args:
+            peptides (dict): {peptide: embedding} -- used for consistent ordering if needed
+            predictions (dict): {peptide: (mean, std)}
+            acquisition_function (str): which method to compute
+        Returns:
+            dict {peptide: acquisition_value}
+        """
+        peptides = list(predictions.keys())
+        means = np.array([predictions[p][0] for p in peptides])
+        stds = np.array([predictions[p][1] for p in peptides])
         if acquisition_function == "expected_improvement":
-            return self.expected_improvement(means, stds)
+            return self.expected_improvement(peptides, means, stds)
         elif acquisition_function == "upper_confidence_bound":
-            return self.upper_confidence_bound(means, stds)
-        elif acquisition_function == "probability_of_improvement": 
-            return self.probability_of_improvement(means, stds)
+            return self.upper_confidence_bound(peptides, means, stds)
+        elif acquisition_function == "probability_of_improvement":
+            return self.probability_of_improvement(peptides, means, stds)
         elif acquisition_function == "standard_deviation":
-            return stds
+            return self.standard_deviation(peptides, stds)
         elif acquisition_function == "mean":
-            return means
+            return self.mean(peptides, means)
         else:
-            raise ValueError(f"Acquisition function {acquisition_function} not recognized.")
+            raise ValueError(f"Acquisition function '{acquisition_function}' not recognized.")
 
-    def expected_improvement(self, means, stds):
+    def expected_improvement(self, peptides, means, stds):
         """
-        Compute the Expected Improvement (EI) acquisition function.
-
-        Parameters
-        means : array-like
-            Predicted mean values from the surrogate model.
-        stds : array-like
-            Predicted standard deviation/uncertainty values from the surrogate model.
-        best_so_far : float
-            The current best observed function value.
-
-        Returns
-        array-like
-            Expected improvement values at the input locations.
+        Compute the Expected Improvement (EI) for each peptide.
         """
-        improvement = means - self.best_so_far
-        with np.errstate(divide="warn"):
-            Z = np.divide(
-                improvement, stds, out=np.zeros_like(improvement), where=stds > 0
-            )
+        means = np.array(means, dtype=float)
+        stds = np.array(stds, dtype=float)
+
+        improvement = means - self.best_so_far_ei
+        with np.errstate(divide="ignore"):
+            Z = np.divide(improvement, stds, out=np.zeros_like(improvement), where=(stds > 1e-12))
+
         ei = improvement * norm.cdf(Z) + stds * norm.pdf(Z)
         ei[stds == 0.0] = 0.0
-        self.best_so_far = max(self.best_so_far, np.max(means))
-        return ei
 
-    def upper_confidence_bound(self, means, stds, kappa=1.96):
+        current_best_pred = np.max(means)
+        if current_best_pred > self.best_so_far_ei:
+            self.best_so_far_ei = current_best_pred
+
+        return {
+            peptide: float(value)
+            for peptide, value in zip(peptides.keys(), ei)
+        }
+
+    def upper_confidence_bound(self, peptides, means, stds, kappa=1.96):
         """
-        Compute the Upper Confidence Bound (UCB) acquisition function.
+        Compute the UCB for each peptide.
 
-        Parameters
-        means : array-like
-            Predicted mean values from the surrogate model.
-        stds : array-like
-            Predicted standard deviation/uncertainty values from the surrogate model.
-        kappa : float
-            The exploration-exploitation trade-off parameter.
-
-        Returns
-        array-like
-            UCB values at the input locations.
+        UCB(c) = mean + kappa * std
         """
-        return means + kappa * stds
-    
-    def probability_of_improvement(self, means, stds):
-        """
-        Compute the Probability of Improvement (PI) acquisition function.
+        means = np.array(means, dtype=float)
+        stds = np.array(stds, dtype=float)
+        ucb = means + kappa * stds
 
-        Parameters
-        means : array-like
-            Predicted mean values from the surrogate model.
-        stds : array-like
-            Predicted standard deviation/uncertainty values from the surrogate model.
-        best_so_far : float
-            The current best observed function value.
+        return {
+            peptide: float(value)
+            for peptide, value in zip(peptides.keys(), ucb)
+        }
 
-        Returns
-        array-like
-            PI values at the input locations.
+    def probability_of_improvement(self, peptides, means, stds):
         """
-        improvement = means - self.best_so_far
-        with np.errstate(divide="warn"):
-            Z = np.divide(
-                improvement, stds, out=np.zeros_like(improvement), where=stds > 0
-            )
+        Compute the Probability of Improvement (PI) for each peptide.
+
+        PI(c) = Phi((mean - best_so_far) / std)
+        """
+        means = np.array(means, dtype=float)
+        stds = np.array(stds, dtype=float)
+
+        improvement = means - self.best_so_far_pi
+        with np.errstate(divide="ignore"):
+            Z = np.divide(improvement, stds, out=np.zeros_like(improvement), where=(stds > 1e-12))
         pi = norm.cdf(Z)
         pi[stds == 0.0] = 0.0
-        return pi
-    
+
+        current_best_pred = np.max(means)
+        if current_best_pred > self.best_so_far_pi:
+            self.best_so_far_pi = current_best_pred
+
+        return {
+            peptide: float(value)
+            for peptide, value in zip(peptides.keys(), pi)
+        }
+
+    def standard_deviation(self, peptides, stds):
+        """
+        Standard deviation as an acquisition function. Pure exploration.
+        """
+        return {
+            peptide: float(std)
+            for peptide, std in zip(peptides.keys(), stds)
+        }
+
+    def mean(self, peptides, means):
+        """
+        Mean as an acquisition function (pure exploitation).
+        """
+        return {
+            peptide: float(mean)
+            for peptide, mean in zip(peptides.keys(), means)
+        }
