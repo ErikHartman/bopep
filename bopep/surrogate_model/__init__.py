@@ -1,0 +1,2 @@
+from bopep.surrogate_model.bnn import BayesianNeuralNetwork
+from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble

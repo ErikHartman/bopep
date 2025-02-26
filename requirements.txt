@@ -1,4 +1,3 @@
-numba
 numpy
 optuna
 pandas
@@ -10,4 +9,3 @@ joblib
 torch
 biopython
 fair-esm
-pyrosetta-installer 

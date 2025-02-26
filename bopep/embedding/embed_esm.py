@@ -3,7 +3,7 @@ from tqdm import tqdm
 import torch
 import esm
 
-def embed(peptide_sequences, model_path="esm2_t33_650M_UR50D.pt"):
+def embed_esm(peptide_sequences, model_path="esm2_t33_650M_UR50D.pt"):
     # Check if the model file exists locally
     if os.path.exists(model_path):
         model, alphabet = esm.pretrained.load_model_and_alphabet_local(model_path)
@@ -14,9 +14,9 @@ def embed(peptide_sequences, model_path="esm2_t33_650M_UR50D.pt"):
     # Move model to GPU if available
     if torch.cuda.is_available():
         model = model.to("cuda")
-        print("Model moved to GPU.")
+        print("ESM moved to GPU.")
     else:
-        print("GPU not available. Model remains on CPU.")
+        print("GPU not available. ESM remains on CPU.")
     
     batch_converter = alphabet.get_batch_converter()
     model.eval()  # Set the model to evaluation mode

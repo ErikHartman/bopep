@@ -6,7 +6,6 @@ from functools import partial
 from multiprocessing import get_context
 from typing import List, Dict, Optional
 
-
 def dock_peptide(
     peptide_sequence: str,
     gpu_id: str,
@@ -18,18 +17,14 @@ def dock_peptide(
     recycle_early_stop_tolerance: float,
     amber: bool,
     num_relax: int,
-) -> Dict:
+) -> str:
     """
     Dock a single peptide to the target structure using ColabFold.
-    This function returns a dictionary summarizing the result status for the peptide.
+    Returns the directory path where the peptide's results are stored.
     """
-
     logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
 
-    target_name = os.path.basename(target_structure).replace(
-        ".pdb", ""
-    )
-
+    target_name = os.path.basename(target_structure).replace(".pdb", "")
     # Create a sub-directory for this peptide’s results
     peptide_output_dir = os.path.join(output_dir, f"{target_name}_{peptide_sequence}")
     os.makedirs(peptide_output_dir, exist_ok=True)
@@ -49,8 +44,7 @@ def dock_peptide(
         str(combined_fasta_path),
         str(peptide_output_dir),
         "--model-type", "alphafold2_multimer_v3",
-        "--msa-mode",
-        "single_sequence",
+        "--msa-mode", "single_sequence",
         "--num-models", str(num_models),
         "--num-recycle", str(num_recycles),
         "--recycle-early-stop-tolerance", str(recycle_early_stop_tolerance),
@@ -60,7 +54,6 @@ def dock_peptide(
         "--templates",
         "--custom-template-path", str(peptide_output_dir),
         "--rank", "iptm", 
-        "--zip"
     ]
 
     if amber:
@@ -70,6 +63,7 @@ def dock_peptide(
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = gpu_id
     env.pop("MPLBACKEND", None)
+
     # Run docking
     try:        
         process = subprocess.Popen(
@@ -79,23 +73,20 @@ def dock_peptide(
             universal_newlines=True,
             env=env,
         )
-        #for line in iter(process.stdout.readline, ""):
-        #    logging.info(line.rstrip())
         process.wait()
         if process.returncode != 0:
             raise subprocess.CalledProcessError(
                 returncode=process.returncode, cmd=command
             )
-        logging.info(
-            f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}."
-        )
+        logging.info(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
     except subprocess.CalledProcessError as e:
         logging.error(f"An error occurred during docking of {peptide_sequence}: {e}")
 
+    # Return the directory containing the docked peptide results
+    return peptide_output_dir
 
 
-
-def dock_peptides(
+def dock_peptides_parallel(
     peptides: list,
     target_structure: str,
     target_sequence: str,
@@ -107,10 +98,10 @@ def dock_peptides(
     output_dir: str,
     gpu_ids: Optional[List[str]] = None,
     num_processes: Optional[int] = None,
-) -> Dict:
+) -> List[str]:
     """
     Dock multiple peptides to a target structure using ColabFold.
-    
+    Returns a list of directories for the docked peptides.
     """
     if gpu_ids is None:
         gpu_ids = ["0"]  # default to GPU 0 if none provided
@@ -131,7 +122,6 @@ def dock_peptides(
         num_models=num_models,
         num_recycles=num_recycles,
         recycle_early_stop_tolerance=recycle_early_stop_tolerance,
-
         amber=amber,
         num_relax=num_relax,
     )
@@ -143,8 +133,9 @@ def dock_peptides(
 
     logging.info(f"Starting docking on {num_processes} process(es)...")
 
-    # Run the docking in parallel
+    # Run the docking in parallel and collect the output directories
     context = get_context("spawn")
     with context.Pool(processes=num_processes) as pool:
-        pool.starmap(dock_peptide_partial, peptide_gpu_pairs)
+        docked_dirs = pool.starmap(dock_peptide_partial, peptide_gpu_pairs)
 
+    return docked_dirs
