@@ -1,4 +1,4 @@
-from bopep.embedding.embed_esm import embed
+from bopep.embedding.embed_esm import embed_esm
 from bopep.embedding.utils import filter_peptides
 from sklearn.decomposition import PCA
 import numpy as np
@@ -10,7 +10,7 @@ class Embedder:
 
     def embed_esm(self, peptides : list, model_path : str = None) -> dict:
         peptides = filter_peptides(peptides)
-        embeddings = embed(peptides, model_path)
+        embeddings = embed_esm(peptides, model_path)
         return embeddings
 
     def reduce_embeddings_pca(self, embeddings: dict, explained_variance_ratio : float=0.95):

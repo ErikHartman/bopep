@@ -2,34 +2,47 @@ import pyrosetta
 from pyrosetta.io import pose_from_pdb
 from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
 
-def rosetta_scores_from_pdb(pdb_file):
-    try:
-        scorefxn = pyrosetta.get_fa_scorefxn() 
-    except:
-        pyrosetta.init("-mute all")
-        scorefxn = pyrosetta.get_fa_scorefxn() 
+class RosettaScorer:
+    def __init__(self, pdb_file):
+        try:
+            self.scorefxn = pyrosetta.get_fa_scorefxn()
+        except Exception:
+            pyrosetta.init("-mute all")
+            self.scorefxn = pyrosetta.get_fa_scorefxn()
+        
+        self.pose = pose_from_pdb(pdb_file)
+        self.rosetta_score = self.scorefxn(self.pose)
+        
+        self.ia = InterfaceAnalyzerMover()
+        self.ia.set_compute_packstat(True)
+        self.ia.apply(self.pose)
+    
+    def get_rosetta_score(self):
+        return self.rosetta_score
 
-    pose = pose_from_pdb(pdb_file)
-
-    rosetta_score = scorefxn(pose)
-
-    ia = InterfaceAnalyzerMover()
-    ia.set_compute_packstat(True)
-    ia.apply(pose)
-    interface_sasa = ia.get_interface_delta_sasa()
-    interface_dG = ia.get_interface_dG()
-    interface_delta_hbond_unsat = ia.get_interface_delta_hbond_unsat()
-    packstat = ia.get_interface_packstat()
-
-    return {
-        'interface_sasa': interface_sasa,
-        'interface_dG': interface_dG,
-        'rosetta_score': rosetta_score,
-        'interface_delta_hbond_unsat': interface_delta_hbond_unsat,
-        'packstat': packstat
-    }
+    def get_interface_sasa(self):
+        return self.ia.get_interface_delta_sasa()
+    
+    def get_interface_dG(self):
+        return self.ia.get_interface_dG()
+    
+    def get_interface_delta_hbond_unsat(self):
+        return self.ia.get_interface_delta_hbond_unsat()
+    
+    def get_packstat(self):
+        return self.ia.get_interface_packstat()
+    
+    def get_all_metrics(self):
+        return {
+            'rosetta_score': self.get_rosetta_score(),
+            'interface_sasa': self.get_interface_sasa(),
+            'interface_dG': self.get_interface_dG(),
+            'interface_delta_hbond_unsat': self.get_interface_delta_hbond_unsat(),
+            'packstat': self.get_packstat()
+        }
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
-    score = rosetta_scores_from_pdb(pdb_file_path)
-    print(f"Rosetta scores {pdb_file_path}: {score}")
+    analyzer = RosettaScorer(pdb_file_path)
+    metrics = analyzer.get_all_metrics()
+    print(f"Rosetta metrics for {pdb_file_path}: {metrics}")

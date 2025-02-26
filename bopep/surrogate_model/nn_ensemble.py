@@ -3,9 +3,7 @@ import numpy as np
 from typing import List, Tuple, Dict
 import torch.nn as nn
 
-from sklearn.preprocessing import StandardScaler
-
-class NNEnsemble(nn.Module):
+class NeuralNetworkEnsemble(nn.Module):
     def __init__(
         self,
         input_dim: int,
@@ -34,11 +32,6 @@ class NNEnsemble(nn.Module):
             ]
         )
         
-        # Scalers for X and Y
-        self.x_scaler = StandardScaler()
-        self.y_scaler = StandardScaler()
-        self._scalers_fitted = False  # Will be set to True after the first fit
-
     def _create_network(
         self,
         input_dim: int,
@@ -145,23 +138,14 @@ class NNEnsemble(nn.Module):
         Returns:
             final_loss (float): The *average* MSE over the final training epoch.
         """
-        # Collect data from the dictionaries
+
         peptides = list(embedding_dict.keys())
         X = np.array([embedding_dict[p] for p in peptides], dtype=np.float32)
         Y = np.array([scores_dict[p] for p in peptides], dtype=np.float32).reshape(-1, 1)
 
-        # Fit or update scalers (if needed)
-        self.x_scaler.fit(X)
-        self.y_scaler.fit(Y)
-        self._scalers_fitted = True
-
-        # Scale X, Y
-        X_scaled = self.x_scaler.transform(X)
-        Y_scaled = self.y_scaler.transform(Y)
-
         # Convert to torch tensors
-        X_torch = torch.tensor(X_scaled, dtype=torch.float32)
-        Y_torch = torch.tensor(Y_scaled, dtype=torch.float32)
+        X_torch = torch.tensor(X, dtype=torch.float32)
+        Y_torch = torch.tensor(Y, dtype=torch.float32)
 
         # Train using the standard Tensor-based fit
         final_loss = self.fit(
@@ -193,30 +177,13 @@ class NNEnsemble(nn.Module):
         # Gather in consistent order
         peptides = list(embedding_dict.keys())
         X = np.array([embedding_dict[p] for p in peptides], dtype=np.float32)
-
-        # Scale inputs if scalers are fitted
-        if self._scalers_fitted:
-            X_scaled = self.x_scaler.transform(X)
-        else:
-            X_scaled = X
-
-        X_torch = torch.tensor(X_scaled, dtype=torch.float32)
+        X_torch = torch.tensor(X, dtype=torch.float32)
         
         with torch.no_grad():
             mean_pred, std_pred = self.forward(X_torch)
         
         mean_pred = mean_pred.cpu().numpy().reshape(-1)
         std_pred = std_pred.cpu().numpy().reshape(-1)
-
-        # Inverse scale predictions if scalers are fitted
-        if self._scalers_fitted:
-            y_scale = self.y_scaler.scale_[0]
-            y_mean = self.y_scaler.mean_[0]
-            
-            mean_pred = mean_pred * y_scale + y_mean
-            std_pred = std_pred * y_scale
-        
-        # Build output dictionary
         result = {}
         for i, p in enumerate(peptides):
             result[p] = (float(mean_pred[i]), float(std_pred[i]))

@@ -11,4 +11,7 @@ setup(
     author="Erik Hartman",
     author_email="erik.hartman@hotmail.com",
     description="Bayesian Optimization for peptide docking",
+    package_data={
+        "bopep.embedding": ["aaindex1.csv"],
+    },
 )

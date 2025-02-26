@@ -2,6 +2,10 @@ import math
 import numpy as np
 from bopep.scoring.util import parse_pdb
 
+"""
+Modified version of the EvoBind loss function.
+"""
+
 def evobind_loss_from_pdb(pdb_file_path,
                           receptor_chain='A',
                           peptide_chain='B'):
@@ -38,12 +42,6 @@ def compute_evobind_score(
         - sum_d_rec_pep is the sum of distances between each receptor
           atom and its closest peptide atom
         - pLDDT is taken as the average of B-factors (assuming pLDDT stored in B-factor)
-
-    :param receptor_coords: list of (x, y, z) for the receptor
-    :param receptor_bfactors: list of floats for the receptor
-    :param peptide_coords: list of (x, y, z) for the peptide
-    :param peptide_bfactors: list of floats for the peptide
-    :return: EvoBind score (float)
     """
     
     sum_d_pep_rec = 0.0

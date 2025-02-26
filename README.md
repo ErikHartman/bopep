@@ -1,6 +1,7 @@
-# ⛏️ BoPep: Mining for peptide binders in large-scale data with Bayesian Optimization ⛏️
+# ⛏️ BoPep ⛏️
+## *Mining for peptide binders in large-scale data with Bayesian Optimization*
 
-This repository contains the code for `BoPep`, a tool for identifying peptide binders to proteins from a large set of candidate peptides.
+This repository contains the code for `BoPep`, a package for identifying peptide binders to a protein from a large set of candidate peptides.
 
 ## Installation for running locally
 
