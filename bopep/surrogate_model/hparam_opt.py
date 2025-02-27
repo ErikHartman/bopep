@@ -1,156 +1,270 @@
-import optuna
-from sklearn.neural_network import MLPRegressor
+import torch
 import numpy as np
-from sklearn.model_selection import StratifiedKFold
+import optuna
+from typing import Dict, Tuple, Type
+from sklearn.model_selection import train_test_split
 
-# Ensure Optuna's verbosity is set appropriately
-optuna.logging.set_verbosity(optuna.logging.WARNING)
+from bopep.surrogate_model.base_models import BasePredictionModel, BiLSTMNetwork, DictHandler, MLPNetwork
 
+class OptunaOptimizer:
+    """Hyperparameter optimizer using Optuna for neural network models."""
 
-def get_stratified_folds(
-    X, y, n_splits, random_state, bin_edges=np.array([0, 0.1, 0.4, np.inf])
-):
-    y_binned = np.digitize(y, bins=bin_edges, right=False)
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-    return skf.split(X, y_binned)
-
-
-def optimize_hyperparameters(
-    X_scaled,
-    y_train,
-    previous_study=None,
-    n_layers_range=(1, 5),
-    n_units_l1_range=(64, 1024),
-    alpha_range=(1e-5, 1e-3),
-    learning_rate_init_range=(1e-4, 1e-2),
-    n_splits=5,
-    random_state=42,
-    n_trials=50,
-    n_jobs=1,
-    pruner_n_warmup_steps=5,
-    direction="maximize",
-    pruner_type="MedianPruner",
-    sampler_type="TPESampler",
-    max_iter=3000,
-    tol=1e-4,
-    early_stopping=True,
-    validation_fraction=0.1,
-    n_iter_no_change=10,
-    hidden_layer_decrease_factor=2,
-    min_hidden_layer_size=8,
-    bin_edges=None,
-):
-    """
-    Optimize hyperparameters for an MLPRegressor using Optuna.
-
-    Parameters:
-    - X_scaled: Scaled input features.
-    - y_train: Target values.
-    - previous_study: An existing Optuna study to continue optimization.
-    - n_layers_range: Tuple specifying the range of layers (min_layers, max_layers).
-    - n_units_l1_range: Tuple specifying the range for the first hidden layer units.
-    - alpha_range: Tuple specifying the range for the regularization parameter alpha.
-    - learning_rate_init_range: Tuple specifying the range for the initial learning rate.
-    - n_splits: Number of splits for cross-validation.
-    - random_state: Random state for reproducibility.
-    - n_trials: Number of trials for the optimization.
-    - n_jobs: Number of parallel jobs for Optuna.
-    - pruner_n_warmup_steps: Number of warm-up steps for the pruner.
-    - direction: Direction of optimization ('maximize' or 'minimize').
-    - pruner_type: Type of pruner to use ('MedianPruner', etc.).
-    - sampler_type: Type of sampler to use ('TPESampler', etc.).
-    - max_iter: Maximum number of iterations for the MLPRegressor.
-    - tol: Tolerance for the optimizer.
-    - early_stopping: Whether to use early stopping.
-    - validation_fraction: Fraction of data for validation if early stopping is used.
-    - n_iter_no_change: Number of iterations with no improvement to wait before stopping.
-    - hidden_layer_decrease_factor: Factor by which to decrease hidden layer sizes.
-    - min_hidden_layer_size: Minimum size of hidden layers.
-    - bin_edges: Custom bin edges for stratification.
-
-    Returns:
-    - best_params: Best hyperparameters found.
-    - study: The Optuna study object.
-    """
-
-    def objective(trial):
-        n_layers = trial.suggest_int("n_layers", *n_layers_range)
-        hidden_layer_sizes = []
-
-        first_layer_size = trial.suggest_int("n_units_l1", *n_units_l1_range, log=True)
-        hidden_layer_sizes.append(first_layer_size)
-
-        for _ in range(1, n_layers):
-            next_layer_size = max(
-                int(hidden_layer_sizes[-1] / hidden_layer_decrease_factor),
-                min_hidden_layer_size,
-            )
-            hidden_layer_sizes.append(next_layer_size)
-        hidden_layer_sizes = tuple(hidden_layer_sizes)
-
-        params = {
-            "hidden_layer_sizes": hidden_layer_sizes,
-            "activation": "relu",
-            "solver": "adam",
-            "alpha": trial.suggest_float("alpha", *alpha_range, log=True),
-            "learning_rate_init": trial.suggest_float(
-                "learning_rate_init", *learning_rate_init_range, log=True
-            ),
-            "learning_rate": "adaptive",
-            "random_state": random_state,
-            "max_iter": max_iter,
-            "tol": tol,
-            "early_stopping": early_stopping,
-            "validation_fraction": validation_fraction,
-            "n_iter_no_change": n_iter_no_change,
-            "verbose": False,
-        }
-
-        skf = get_stratified_folds(
-            X_scaled,
-            y_train,
-            n_splits=n_splits,
-            random_state=random_state,
-            bin_edges=bin_edges,
+    
+    def __init__(
+        self,
+        model_class: Type[BasePredictionModel],
+        embedding_dict: Dict[str, np.ndarray],
+        scores_dict: Dict[str, float],
+        n_trials: int = 20,
+        test_size: float = 0.2,
+        random_state: int = 42,
+        early_stopping_rounds: int = 5,
+        device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    ):
+        """
+        Initialize the optimizer.
+        
+        Args:
+            model_class: The model class to optimize (MLPNetwork-based or BiLSTMNetwork-based)
+            embedding_dict: Dictionary of embeddings {peptide_id: embedding_array}
+            scores_dict: Dictionary of scores {peptide_id: score}
+            n_trials: Number of Optuna trials to run
+            test_size: Fraction of data to use for validation
+            random_state: Random seed for reproducibility
+            early_stopping_rounds: Number of epochs with no improvement after which to stop
+            device: Device to run the model on ('cpu' or 'cuda')
+        """
+        self.model_class = model_class
+        self.embedding_dict = embedding_dict
+        self.scores_dict = scores_dict
+        self.n_trials = n_trials
+        self.test_size = test_size
+        self.random_state = random_state
+        self.early_stopping_rounds = early_stopping_rounds
+        self.device = device
+        self.dict_handler = DictHandler()
+        
+        # Prepare data and split into train/validation sets
+        peptides, _, _ = self.dict_handler.prepare_data_from_dict(embedding_dict, scores_dict)
+        
+        # Get indices for train/validation split
+        indices = np.arange(len(peptides))
+        train_indices, val_indices = train_test_split(
+            indices, test_size=test_size, random_state=random_state
         )
-        val_scores = []
-
-        for step, (train_index, val_index) in enumerate(skf):
-            X_train_fold, X_val_fold = X_scaled[train_index], X_scaled[val_index]
-            y_train_fold, y_val_fold = y_train[train_index], y_train[val_index]
-
-            model = MLPRegressor(**params)
-            model.fit(X_train_fold, y_train_fold)
-            val_score = model.score(X_val_fold, y_val_fold)  # R^2 score
-            val_scores.append(val_score)
-
-            # Prune unpromising trials
-            trial.report(np.mean(val_scores), step)
+        
+        # Create train/validation datasets
+        self.train_peptides = [peptides[i] for i in train_indices]
+        self.val_peptides = [peptides[i] for i in val_indices]
+        
+        self.train_embedding_dict = {p: embedding_dict[p] for p in self.train_peptides}
+        self.train_scores_dict = {p: scores_dict[p] for p in self.train_peptides}
+        
+        self.val_embedding_dict = {p: embedding_dict[p] for p in self.val_peptides}
+        self.val_scores_dict = {p: scores_dict[p] for p in self.val_peptides}
+        
+        self.input_dim = next(iter(embedding_dict.values())).shape[0]
+        self.best_params = None
+        self.best_val_loss = float('inf')
+        self.best_trial = None
+    
+    def _get_mlp_params(self, trial: optuna.Trial) -> dict:
+        """Define the hyperparameter search space for MLP networks."""
+        n_layers = trial.suggest_int("n_layers", 1, 3)
+        hidden_dims = []
+        
+        for i in range(n_layers):
+            hidden_dims.append(trial.suggest_int(f"hidden_dim_{i}", 16, 256, log=True))
+        
+        params = {
+            "input_dim": self.input_dim,
+            "hidden_dims": hidden_dims,
+            "learning_rate": trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True),
+            "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
+            "epochs": trial.suggest_int("epochs", 50, 200),
+        }
+        
+        return params
+    
+    def _get_bilstm_params(self, trial: optuna.Trial) -> dict:
+        """Define the hyperparameter search space for BiLSTM networks."""
+        params = {
+            "input_dim": self.input_dim,
+            "hidden_dim": trial.suggest_int("hidden_dim", 16, 256, log=True),
+            "num_layers": trial.suggest_int("num_layers", 1, 3),
+            "learning_rate": trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True),
+            "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
+            "epochs": trial.suggest_int("epochs", 50, 200),
+        }
+        
+        return params
+    
+    def _evaluate_model(self, model: BasePredictionModel) -> float:
+        """Evaluate the model on validation data and return the MSE."""
+        model.eval()
+        
+        # Prepare validation data
+        _, X_val, y_val = self.dict_handler.prepare_data_from_dict(
+            self.val_embedding_dict, self.val_scores_dict
+        )
+        
+        X_val = X_val.to(self.device)
+        y_val = y_val.to(self.device)
+        
+        with torch.no_grad():
+            mean_pred, _ = model.forward_predict(X_val)
+            mse = torch.nn.functional.mse_loss(mean_pred, y_val).item()
+        
+        return mse
+    
+    def _train_with_early_stopping(
+        self, 
+        model: BasePredictionModel, 
+        params: dict,
+        trial: optuna.Trial
+    ) -> float:
+        """Train the model with early stopping and return the best validation loss."""
+        # Setup the model for training
+        model.train()
+        model = model.to(self.device)
+        
+        # Extract training parameters
+        learning_rate = params.pop("learning_rate", 1e-3)
+        batch_size = params.pop("batch_size", 32)
+        epochs = params.pop("epochs", 100)
+        
+        # Prepare training data
+        _, X_train, y_train = self.dict_handler.prepare_data_from_dict(
+            self.train_embedding_dict, self.train_scores_dict
+        )
+        
+        X_train = X_train.to(self.device)
+        y_train = y_train.to(self.device)
+        
+        # Setup optimizer and loss function
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        criterion = torch.nn.MSELoss()
+        
+        # Create DataLoader
+        dataset = torch.utils.data.TensorDataset(X_train, y_train)
+        dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=batch_size, shuffle=True
+        )
+        
+        # Track best validation performance
+        best_val_loss = float('inf')
+        no_improve_count = 0
+        
+        for epoch in range(epochs):
+            # Training loop
+            model.train()
+            train_loss = 0.0
+            
+            for batch_x, batch_y in dataloader:
+                optimizer.zero_grad()
+                mean_pred, _ = model.forward_predict(batch_x)
+                loss = criterion(mean_pred, batch_y)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
+            
+            train_loss /= len(dataloader)
+            
+            # Evaluate on validation set
+            model.eval()
+            val_loss = self._evaluate_model(model)
+            
+            # Report to Optuna for pruning
+            trial.report(val_loss, epoch)
+            
+            # Check if trial should be pruned
             if trial.should_prune():
                 raise optuna.exceptions.TrialPruned()
+            
+            # Early stopping logic
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                no_improve_count = 0
+            else:
+                no_improve_count += 1
+            
+            if no_improve_count >= self.early_stopping_rounds:
+                break
+                
+        return best_val_loss
+    
+    def objective(self, trial: optuna.Trial) -> float:
+        """Optuna objective function that creates and evaluates a model."""
+        # Determine model type and get appropriate hyperparameters
+        if issubclass(self.model_class, MLPNetwork):
+            params = self._get_mlp_params(trial)
+            network = MLPNetwork(
+                input_dim=params["input_dim"],
+                hidden_dims=params["hidden_dims"],
+            )
+        elif issubclass(self.model_class, BiLSTMNetwork):
+            params = self._get_bilstm_params(trial)
+            network = BiLSTMNetwork(
+                input_dim=params["input_dim"],
+                hidden_dim=params["hidden_dim"],
+                num_layers=params["num_layers"],
+            )
+        else:
+            raise ValueError(f"Unsupported model class: {self.model_class}")
+        
+        # Create a custom prediction model using the network that returns fixed std
+        model = CustomPredictionModel(network)
+        
+        # Train the model with early stopping
+        val_loss = self._train_with_early_stopping(model, params, trial)
+        
+        # Update best params if this trial is better
+        if val_loss < self.best_val_loss:
+            self.best_val_loss = val_loss
+            self.best_trial = trial
+            
+            # Store hyperparameters
+            self.best_params = {
+                "val_loss": val_loss,
+                **{k: v for k, v in params.items() if k not in ["input_dim"]}
+            }
+            
+            # If using MLPNetwork, add hidden_dims
+            if issubclass(self.model_class, MLPNetwork):
+                self.best_params["hidden_dims"] = params["hidden_dims"]
+                
+            # If using BiLSTMNetwork, add specific params
+            if issubclass(self.model_class, BiLSTMNetwork):
+                self.best_params["hidden_dim"] = params["hidden_dim"]
+                self.best_params["num_layers"] = params["num_layers"]
+        
+        return val_loss
+    
+    def optimize(self) -> Dict:
+        """Run the hyperparameter optimization and return the best parameters."""
+        study = optuna.create_study(
+            direction="minimize",
+            pruner=optuna.pruners.MedianPruner(
+                n_startup_trials=5, n_warmup_steps=10, interval_steps=1
+            )
+        )
+        
+        print(f"Starting optimization with {self.n_trials} trials")
+        study.optimize(self.objective, n_trials=self.n_trials)
+        
+        print("Optimization completed")
 
-        return np.mean(val_scores)
+        print(f"Best hyperparameters: {study.best_params}")
+        
+        return self.best_params
 
-    # Initialize sampler
-    if sampler_type == "TPESampler":
-        sampler = optuna.samplers.TPESampler()
-    else:
-        # Add other sampler options as needed
-        sampler = optuna.samplers.TPESampler()
-
-    # Initialize pruner
-    if pruner_type == "MedianPruner":
-        pruner = optuna.pruners.MedianPruner(n_warmup_steps=pruner_n_warmup_steps)
-    else:
-        # Add other pruner options as needed
-        pruner = optuna.pruners.MedianPruner(n_warmup_steps=pruner_n_warmup_steps)
-
-    if previous_study is None:
-        study = optuna.create_study(direction=direction, sampler=sampler, pruner=pruner)
-    else:
-        study = previous_study
-
-    study.optimize(objective, n_trials=n_trials, n_jobs=n_jobs)
-
-    best_params = study.best_params
-    return best_params, study
+class CustomPredictionModel(BasePredictionModel):
+    def __init__(self, network):
+        super().__init__()
+        self.network = network
+        
+    def forward_predict(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # For simplicity, we're returning a fixed uncertainty (std)
+        mean = self.network(x)
+        std = torch.ones_like(mean) * 0.1  # Fixed uncertainty
+        return mean, std

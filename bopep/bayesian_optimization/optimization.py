@@ -1,7 +1,12 @@
 import subprocess
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
-from bopep.surrogate_model import NeuralNetworkEnsemble, BayesianNeuralNetwork
+from bopep.surrogate_model import (
+    NeuralNetworkEnsemble,
+    MonteCarloDropout,
+    DeepEvidentialRegression,
+    OptunaOptimizer,
+)
 from bopep.embedding.embedder import Embedder
 from bopep.logging.logger import Logger
 from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
@@ -9,18 +14,21 @@ from bopep.bayesian_optimization.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
 import pyrosetta
 
+from bopep.surrogate_model.base_models import BiLSTMNetwork, MLPNetwork
+
 
 class BoPep:
     def __init__(
         self,
         surrogate_model_kwargs: dict = {
-            "model_type": "nn_ensemble",
-            "hidden_dims": [64, 64],
+            "network_type": "mlp",
+            "model_type": "mc_dropout",
             "n_networks": 5,
         },
         objective_weights: dict = {"rosetta_score": 1},
-        embedding_function="esm",
+        embedding_kwargs: dict = dict(),
         docker_kwargs=dict(),
+        hpo_kwargs=dict(),
         log_dir: str = "logs",
     ):
         self._setup()
@@ -33,8 +41,9 @@ class BoPep:
         self.scores_to_objective = ScoresToObjective()
 
         self.objective_weights = objective_weights
-        self.embedding_function = embedding_function
+        self.embedding_kwargs = embedding_kwargs
         self.surrogate_model_kwargs = surrogate_model_kwargs
+        self.hpo_kwargs = hpo_kwargs
 
         # These are used by your code to verify or choose an acquisition
         self.available_acquistion_functions = [
@@ -44,6 +53,18 @@ class BoPep:
             "probability_of_improvement",
             "mean",
         ]
+        if surrogate_model_kwargs["network_type"] not in ["mlp", "bilstm"]:
+            raise ValueError(
+                f"Invalid network type: {surrogate_model_kwargs['network_type']}."
+            )
+        if surrogate_model_kwargs["model_type"] not in [
+            "nn_ensemble",
+            "mc_dropout",
+            "deep_evidential_regression",
+        ]:
+            raise ValueError(
+                f"Invalid model type: {surrogate_model_kwargs['model_type']}."
+            )
 
     def optimize(
         self,
@@ -60,6 +81,13 @@ class BoPep:
         Runs Bayesian optimization, separated into phases given by 'schedule'.
         Each phase specifies an acquisition function and how many iterations to run.
         """
+
+        for phase in schedule:
+            if phase["acquisition"] not in self.available_acquistion_functions:
+                raise ValueError(
+                    f"Invalid acquisition function: {acquisition['acquisition']}."
+                )
+
         self.docker.set_target_structure(target_structure_path)
 
         docked_peptides = set()
@@ -68,15 +96,13 @@ class BoPep:
         # Keep a dict of {peptide: score}, to update after each docking/score
         scores = dict()
 
-        # Create embeddings for all peptides
-        embeddings = self.embedder.embed_esm(peptides)  # {peptide: np.ndarray}
-        embeddings = self.embedder.reduce_embeddings_pca(
-            embeddings, explained_variance_ratio=0.95
-        )
+        # Generate embeddings for all peptides
+        embeddings = self._generate_embeddings(peptides)
 
         # Create surrogate model
-        self.surrogate_model_kwargs["input_dim"] = len(embeddings[list(embeddings.keys())][0])
-        self._create_model()
+        self.surrogate_model_kwargs["input_dim"] = len(
+            embeddings[list(embeddings.keys())][0]
+        )  # this might not work for bilstm
 
         # 1) Select initial peptides for docking
         initial_peptides = self.selector.select_initial_peptides(
@@ -94,7 +120,6 @@ class BoPep:
             docked_dirs=docked_dirs,
         )  # {peptide: scores} where scores itself is a dict of {score: value}
         scores.update(initial_scores)
-        # There should be a function that adds a score to scores called `MODEL_SCORE` or similar. This is the score that the model will use to optimize.
 
         # Log scores
         self.logger.log_scores(initial_scores, iteration=0)
@@ -112,6 +137,12 @@ class BoPep:
                 objectives = self.scores_to_objective.create_bopep_objective(
                     scores, self.objective_weights
                 )
+
+                # TODO: Here we sometimes want to perform hyperparameter optimization
+                if iteration == 0 or (
+                    iteration % self.hpo_kwargs.get("hpo_interval", 10) == 0
+                ):
+                    self._optimize_hyperparameters(objectives)  # This sets self.model
 
                 # 2.1) Train the model on *only the peptides we have scores for*
                 train_embeddings = {p: embeddings[p] for p in docked_peptides}
@@ -186,24 +217,104 @@ class BoPep:
 
         return new_scores
 
-    def _create_model(self):
+    def _generate_embeddings(self, peptides):
+        # Create embeddings for all peptides
+        if self.embedding_kwargs("embeddin_function") == "esm":
+            if self.surrogate_model_kwargs["network_type"] == "bilstm":
+                embeddings = self.embedder.embed_esm(
+                    peptides,
+                    average=False,
+                    model_path=self.embedding_kwargs.get("model_path", None),
+                )  # {peptide: np.ndarray}
+            elif self.surrogate_model_kwargs["network_type"] == "mlp":
+                embeddings = self.embedder.embed_esm(
+                    peptides,
+                    average=True,
+                    model_path=self.embedding_kwargs.get("model_path", None),
+                )
+        elif self.embedding_kwargs("embedding_function") == "aaindex":
+            if self.surrogate_model_kwargs["network_type"] == "bilstm":
+                embeddings = self.embedder.embed_aaindex(peptides, average=False)
+            elif self.surrogate_model_kwargs["network_type"] == "mlp":
+                embeddings = self.embedder.embed_aaindex(peptides, average=True)
+        else:
+            raise ValueError(
+                f"Invalid embedding function: {self.embedding_kwargs('embedding_function')}"
+            )
+
+        embeddings = self.embedder.scale_embeddings(embeddings)
+
+        if self.embedding_kwargs.get("reduce_embeddings", False):
+            if self.surrogate_model_kwargs["network_type"] == "bilstm":
+                embeddings = self.embedder.reduce_embeddings_autoencoder(
+                    embeddings,
+                    hidden_dim=self.embedding_kwargs("hidden_dim", 256),
+                    latent_dim=self.embedding_kwargs("latent_dim", 128),
+                )
+            elif self.surrogate_model_kwargs["network_type"] == "mlp":
+                embeddings = self.embedder.reduce_embeddings_pca(
+                    embeddings,
+                    explained_variance_ratio=self.embedding_kwargs.get(
+                        "explained_variance_ratio", 0.95
+                    ),
+                )
+        return embeddings
+
+    def _optimize_hyperparameters(self, embeddings: dict, scores: dict):
+        """
+        Optimize hyperparameters for the surrogate model using Optuna.
+
+        Sets self.model which is to be used for the next iterations.
+        """
+        # Decide which model_class to pass to OptunaOptimizer
+        if self.surrogate_model_kwargs["network_type"] == "mlp":
+            model_class = MLPNetwork
+        elif self.surrogate_model_kwargs["network_type"] == "bilstm":
+            model_class = BiLSTMNetwork
+        else:
+            print("HPO not implemented for this network type.")
+            return
+
+        optuna_optimizer = OptunaOptimizer(
+            model_class=model_class,
+            embedding_dict=embeddings,
+            scores_dict=scores,
+            n_trials=self.hpo_kwargs.get("n_trials", 10),
+            test_size=self.hpo_kwargs.get("test_size", 0.2),
+            random_state=42,
+            early_stopping_rounds=5,
+        )
+
+        best_params = optuna_optimizer.optimize()
 
         if self.surrogate_model_kwargs["model_type"] == "nn_ensemble":
             self.model = NeuralNetworkEnsemble(
-                input_dim=self.surrogate_model_kwargs.get("input_dim"),
-                hidden_dims=self.surrogate_model_kwargs.get("hidden_dims"),
-                output_dim=1,
+                input_dim=self.surrogate_model_kwargs["input_dim"],
+                hidden_dims=best_params.get("hidden_dims"),
                 n_networks=self.surrogate_model_kwargs.get("n_networks"),
+                network_type=self.surrogate_model_kwargs.get("network_type"),
+                lstm_layers=best_params.get("lstm_layers"),
+                lstm_hidden_dim=best_params.get("lstm_hidden_dim"),
             )
-        elif self.surrogate_model_kwargs["model_type"] == "bnn":
-            self.model = BayesianNeuralNetwork(
-                input_dim=self.surrogate_model_kwargs.get("input_dim"),
-                hidden_dims=self.surrogate_model_kwargs.get("hidden_dims"),
-                output_dim=1,
+        elif self.surrogate_model_kwargs["model_type"] == "mc_dropout":
+            self.model = MonteCarloDropout(
+                input_dim=self.surrogate_model_kwargs["input_dim"],
+                hidden_dims=best_params.get("hidden_dims"),
                 dropout_rate=self.surrogate_model_kwargs.get("dropout_rate"),
                 mc_samples=self.surrogate_model_kwargs.get("mc_samples"),
+                network_type=self.surrogate_model_kwargs.get("network_type"),
+                lstm_layers=best_params.get("lstm_layers"),
+                lstm_hidden_dim=best_params.get("lstm_hidden_dim"),
             )
-
+        elif self.surrogate_model_kwargs["model_type"] == "deep_evidential_regression":
+            self.model = DeepEvidentialRegression(
+                input_dim=self.surrogate_model_kwargs["input_dim"],
+                hidden_dims=best_params.get("hidden_dims"),
+                dropout_rate=self.surrogate_model_kwargs.get("dropout_rate"),
+                network_type=self.surrogate_model_kwargs.get("network_type"),
+                lstm_layers=best_params.get("lstm_layers"),
+                lstm_hidden_dim=best_params.get("lstm_hidden_dim"),
+            )
         else:
             raise ValueError(
                 f"Invalid model type: {self.surrogate_model_kwargs}. Only nn_ensemble is supported."
