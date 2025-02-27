@@ -8,6 +8,7 @@ from bopep.surrogate_model.base_models import BasePredictionModel, BiLSTMNetwork
 
 class OptunaOptimizer:
     """Hyperparameter optimizer using Optuna for neural network models."""
+
     
     def __init__(
         self,
@@ -18,7 +19,7 @@ class OptunaOptimizer:
         test_size: float = 0.2,
         random_state: int = 42,
         early_stopping_rounds: int = 5,
-        device: str = "cpu"
+        device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
         """
         Initialize the optimizer.
@@ -78,7 +79,6 @@ class OptunaOptimizer:
         params = {
             "input_dim": self.input_dim,
             "hidden_dims": hidden_dims,
-            "dropout_rate": trial.suggest_float("dropout", 0.0, 0.5),
             "learning_rate": trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True),
             "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
             "epochs": trial.suggest_int("epochs", 50, 200),
@@ -92,7 +92,6 @@ class OptunaOptimizer:
             "input_dim": self.input_dim,
             "hidden_dim": trial.suggest_int("hidden_dim", 16, 256, log=True),
             "num_layers": trial.suggest_int("num_layers", 1, 3),
-            "dropout_rate": trial.suggest_float("dropout", 0.0, 0.5),
             "learning_rate": trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True),
             "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
             "epochs": trial.suggest_int("epochs", 50, 200),
@@ -202,7 +201,6 @@ class OptunaOptimizer:
             network = MLPNetwork(
                 input_dim=params["input_dim"],
                 hidden_dims=params["hidden_dims"],
-                dropout_rate=params["dropout_rate"]
             )
         elif issubclass(self.model_class, BiLSTMNetwork):
             params = self._get_bilstm_params(trial)
@@ -210,7 +208,6 @@ class OptunaOptimizer:
                 input_dim=params["input_dim"],
                 hidden_dim=params["hidden_dim"],
                 num_layers=params["num_layers"],
-                dropout_rate=params["dropout_rate"]
             )
         else:
             raise ValueError(f"Unsupported model class: {self.model_class}")
@@ -256,8 +253,7 @@ class OptunaOptimizer:
         study.optimize(self.objective, n_trials=self.n_trials)
         
         print("Optimization completed")
-        print(f"Best trial: {study.best_trial.number}")
-        print(f"Best validation loss: {study.best_value:.4f}")
+
         print(f"Best hyperparameters: {study.best_params}")
         
         return self.best_params

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.utils.data import Dataset
 
 class PeptideDataset(Dataset):
@@ -14,49 +15,86 @@ class PeptideDataset(Dataset):
         return torch.tensor(self.embeddings[idx], dtype=torch.float32)
 
 def collate_fn(batch):
-    # Find the maximum length in the batch
-    max_length = max([item.shape[0] for item in batch])
+    """Improved collate function with sorted sequences for better packing"""
+    # Sort batch by descending sequence length
+    batch.sort(key=lambda x: x.shape[0], reverse=True)
+    lengths = [x.shape[0] for x in batch]
+    max_length = lengths[0]
     
-    # Pad all tensors to the maximum length
-    padded_batch = [torch.nn.functional.pad(item, (0, 0, 0, max_length - item.shape[0])) for item in batch]
-    lengths = [item.shape[0] for item in batch]
-    
-    return torch.stack(padded_batch), torch.tensor(lengths)
+    # Pad sequences
+    padded_batch = torch.nn.utils.rnn.pad_sequence(
+        batch, 
+        batch_first=True, 
+        padding_value=0.0
+    )
+    return padded_batch, torch.tensor(lengths)
 
 class PeptideAutoencoder(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim):
+    def __init__(self, input_dim, hidden_dim, latent_dim, dropout=0.1):
         super(PeptideAutoencoder, self).__init__()
         
         # Encoder
-        self.encoder_rnn1 = nn.LSTM(input_dim, hidden_dim, batch_first=True, bidirectional=True)
-        self.encoder_rnn2 = nn.LSTM(hidden_dim * 2, hidden_dim, batch_first=True, bidirectional=True)
-        self.encoder_fc1 = nn.Linear(hidden_dim * 2, hidden_dim)
-        self.encoder_fc2 = nn.Linear(hidden_dim, latent_dim)
-        self.encoder_relu = nn.ReLU()
-        
+        self.encoder_lstm = nn.LSTM(
+            input_dim, 
+            hidden_dim, 
+            bidirectional=True,
+            batch_first=True
+        )
+        self.encoder_ln = nn.LayerNorm(hidden_dim*2)
+        self.encoder_fc = nn.Sequential(
+            nn.Linear(hidden_dim*2, latent_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
         # Decoder
-        self.decoder_fc1 = nn.Linear(latent_dim, hidden_dim)
-        self.decoder_fc2 = nn.Linear(hidden_dim, hidden_dim * 2)
-        self.decoder_relu = nn.ReLU()
-        self.decoder_rnn1 = nn.LSTM(hidden_dim * 2, hidden_dim * 2, batch_first=True, bidirectional=True)
-        self.decoder_rnn2 = nn.LSTM(hidden_dim * 4, input_dim, batch_first=True, bidirectional=True)
-        self.final_fc = nn.Linear(input_dim * 2, input_dim)
+        self.decoder_fc = nn.Linear(latent_dim, hidden_dim)
+        self.decoder_lstm = nn.LSTM(
+            hidden_dim,
+            input_dim,
+            bidirectional=True,
+            batch_first=True
+        )
+        self.decoder_ln = nn.LayerNorm(input_dim*2)
+        self.output_fc = nn.Sequential(
+            nn.Linear(input_dim*2, input_dim),
+            nn.Dropout(dropout)
+        )
         
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self):
+        """Orthogonal initialization for LSTM parameters"""
+        for name, param in self.named_parameters():
+            if 'weight_hh' in name:
+                nn.init.orthogonal_(param)
+            elif 'weight_ih' in name:
+                nn.init.xavier_uniform_(param)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0)
+
     def forward(self, x, lengths):
-        # Encode
-        packed_x = nn.utils.rnn.pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
-        packed_h1, _ = self.encoder_rnn1(packed_x)
-        packed_h2, _ = self.encoder_rnn2(packed_h1)
-        h, _ = nn.utils.rnn.pad_packed_sequence(packed_h2, batch_first=True)
+        # Encoder
+        packed = pack_padded_sequence(
+            x, 
+            lengths.cpu(), 
+            batch_first=True, 
+            enforce_sorted=False
+        )
         
-        latent = self.encoder_relu(self.encoder_fc1(h))
-        latent = self.encoder_fc2(latent)
+        # Encoder processing
+        packed_out, (hidden, cell) = self.encoder_lstm(packed)
+        encoded, _ = pad_packed_sequence(packed_out, batch_first=True)
+        encoded = self.encoder_ln(encoded)
+        latent = self.encoder_fc(encoded)
         
-        # Decode
-        decoded_h = self.decoder_relu(self.decoder_fc1(latent))
-        decoded_h = self.decoder_fc2(decoded_h)
-        decoded_x1, _ = self.decoder_rnn1(decoded_h)
-        decoded_x2, _ = self.decoder_rnn2(decoded_x1)
-        decoded_x = self.final_fc(decoded_x2)
+        # Decoder processing
+        decoded = self.decoder_fc(latent)
+        decoded = nn.functional.relu(decoded)
         
-        return decoded_x, latent
+        # Process through decoder LSTM
+        decoded_out, _ = self.decoder_lstm(decoded)
+        decoded_out = self.decoder_ln(decoded_out)
+        reconstructed = self.output_fc(decoded_out)
+        
+        return reconstructed, latent

@@ -32,9 +32,6 @@ class Embedder:
         # Initialize scaler
         scaler = StandardScaler()
         
-        # Get the embedding dimension
-        sample_emb = next(iter(embeddings.values()))
-        
         # Prepare data for scaling - flatten all embeddings to 2D
         all_embeddings = []
         for emb in embeddings.values():
@@ -69,18 +66,25 @@ class Embedder:
         Works if average == False. Reduces the dimensionality of the embeddings using an autoencoder.
         """
         print(f"Using device: {device}")
-
+        
         dataset = PeptideDataset(embeddings)
-        dataloader = DataLoader(dataset, batch_size=32, collate_fn=collate_fn)
+        dataloader = DataLoader(dataset, batch_size=16, collate_fn=collate_fn)
 
         input_dim = embeddings[list(embeddings.keys())[0]].shape[1]
         print("Autoencoder input dimension: ", input_dim)
 
         autoencoder = PeptideAutoencoder(input_dim, hidden_dim, latent_dim).to(device)
 
-        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.01)
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(autoencoder.parameters(), 1.0)
+
+        # Use weight decay in optimizer
+        optimizer = torch.optim.AdamW(
+            autoencoder.parameters(), 
+            lr=1e-3, 
+            weight_decay=1e-5
+        )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min")
-        loss_fn = nn.L1Loss()
 
         patience = 5
         min_delta = 0.001
@@ -96,7 +100,10 @@ class Embedder:
                 batch = batch.to(device)
                 optimizer.zero_grad()
                 reconstructed, latent = autoencoder(batch, lengths)
-                loss = loss_fn(reconstructed, batch)
+                mask = torch.zeros_like(batch, dtype=torch.float32, device=device)
+                for i, length in enumerate(lengths):
+                    mask[i, :length, :] = 1.0
+                loss = (torch.abs(reconstructed - batch) * mask).sum() / mask.sum()
                 loss.backward()
                 optimizer.step()
 
@@ -132,7 +139,7 @@ class Embedder:
                 reduced_embeddings[peptide] = latent.squeeze(0).cpu().numpy()
 
         print(
-            "The reduced embeddings are of dim: ", reduced_embeddings[peptide].shape[1]
+            "The reduced embeddings are of dim: ", reduced_embeddings[peptide].shape
         )
 
         return reduced_embeddings
