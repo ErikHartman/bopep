@@ -1,7 +1,7 @@
 import subprocess
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
-from bopep.surrogate_model import NeuralNetworkEnsemble, BayesianNeuralNetwork
+from bopep.surrogate_model import NeuralNetworkEnsemble, MonteCarloDropout, DeepEvidentialRegression
 from bopep.embedding.embedder import Embedder
 from bopep.logging.logger import Logger
 from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
@@ -14,8 +14,8 @@ class BoPep:
     def __init__(
         self,
         surrogate_model_kwargs: dict = {
-            "model_type": "nn_ensemble",
-            "hidden_dims": [64, 64],
+            "network_type":"mlp",
+            "model_type": "mc_dropout",
             "n_networks": 5,
         },
         objective_weights: dict = {"rosetta_score": 1},
@@ -44,6 +44,14 @@ class BoPep:
             "probability_of_improvement",
             "mean",
         ]
+        if surrogate_model_kwargs["network_type"] not in ["mlp", "bilstm"]:
+            raise ValueError(
+                f"Invalid network type: {surrogate_model_kwargs['network_type']}."
+            )
+        if surrogate_model_kwargs["model_type"] not in ["nn_ensemble", "mc_dropout", "deep_evidential_regression"]:
+            raise ValueError(
+                f"Invalid model type: {surrogate_model_kwargs['model_type']}."
+            )
 
     def optimize(
         self,
@@ -60,6 +68,12 @@ class BoPep:
         Runs Bayesian optimization, separated into phases given by 'schedule'.
         Each phase specifies an acquisition function and how many iterations to run.
         """
+        for phase in schedule:
+            if phase["acquisition"] not in self.available_acquistion_functions:
+                raise ValueError(
+                    f"Invalid acquisition function: {acquisition['acquisition']}."
+                )
+            
         self.docker.set_target_structure(target_structure_path)
 
         docked_peptides = set()
@@ -69,13 +83,14 @@ class BoPep:
         scores = dict()
 
         # Create embeddings for all peptides
+    
         embeddings = self.embedder.embed_esm(peptides)  # {peptide: np.ndarray}
         embeddings = self.embedder.reduce_embeddings_pca(
             embeddings, explained_variance_ratio=0.95
         )
 
         # Create surrogate model
-        self.surrogate_model_kwargs["input_dim"] = len(embeddings[list(embeddings.keys())][0])
+        self.surrogate_model_kwargs["input_dim"] = len(embeddings[list(embeddings.keys())][0]) # this might not work for bilstm
         self._create_model()
 
         # 1) Select initial peptides for docking
@@ -191,23 +206,28 @@ class BoPep:
         if self.surrogate_model_kwargs["model_type"] == "nn_ensemble":
             self.model = NeuralNetworkEnsemble(
                 input_dim=self.surrogate_model_kwargs.get("input_dim"),
-                hidden_dims=self.surrogate_model_kwargs.get("hidden_dims"),
-                output_dim=1,
                 n_networks=self.surrogate_model_kwargs.get("n_networks"),
+                network_type=self.surrogate_model_kwargs.get("network_type"),
             )
         elif self.surrogate_model_kwargs["model_type"] == "bnn":
-            self.model = BayesianNeuralNetwork(
+            self.model = MonteCarloDropout(
                 input_dim=self.surrogate_model_kwargs.get("input_dim"),
-                hidden_dims=self.surrogate_model_kwargs.get("hidden_dims"),
-                output_dim=1,
                 dropout_rate=self.surrogate_model_kwargs.get("dropout_rate"),
                 mc_samples=self.surrogate_model_kwargs.get("mc_samples"),
+                network_type=self.surrogate_model_kwargs.get("network_type"),
             )
 
         else:
             raise ValueError(
                 f"Invalid model type: {self.surrogate_model_kwargs}. Only nn_ensemble is supported."
             )
+        
+    def _optimize_hyperparameters(self):
+        """
+        Optimize hyperparameters for the surrogate model
+        """
+        pass
+
 
     def _setup(self):
         """

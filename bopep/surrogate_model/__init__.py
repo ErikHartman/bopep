@@ -1,2 +1,3 @@
-from bopep.surrogate_model.bnn import BayesianNeuralNetwork
+from bopep.surrogate_model.mc_dropout import MonteCarloDropout
 from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble
+from bopep.surrogate_model.deep_evidential_regression import DeepEvidentialRegression
