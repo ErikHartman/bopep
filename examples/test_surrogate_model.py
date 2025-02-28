@@ -63,7 +63,7 @@ def main():
     logger.info("Fitting Monte Carlo Dropout BiLSTM model")
     model = MonteCarloDropout(
         input_dim=553,
-        lstm_hidden_dim=128,
+        lstm_hidden_dim=32,
         lstm_layers=1,
         dropout_rate=0.1,
         mc_samples=10,
@@ -76,7 +76,7 @@ def main():
     # Ensemble 3D
     logger.info("Fitting Neural Network Ensemble BiLSTM model")
     model = NeuralNetworkEnsemble(
-        input_dim=553, lstm_hidden_dim=128, lstm_layers=1, network_type="bilstm"
+        input_dim=553, lstm_hidden_dim=32, lstm_layers=1, network_type="bilstm"
     )
     loss = model.fit_dict(aaindex_embeddings["3D"], scores_dict=scores_dict)
     print("Loss:", loss)
@@ -84,7 +84,7 @@ def main():
     # Deep Evidential 3D
     logger.info("Fitting Deep Evidential Regression BiLSTM model")
     model = DeepEvidentialRegression(
-        input_dim=553, lstm_hidden_dim=128, lstm_layers=1, network_type="bilstm"
+        input_dim=553, lstm_hidden_dim=32, lstm_layers=1, network_type="bilstm"
     )
     model.fit_dict(aaindex_embeddings["3D"], scores_dict=scores_dict)
     print("Loss:", loss)

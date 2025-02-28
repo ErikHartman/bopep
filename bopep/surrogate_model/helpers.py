@@ -178,6 +178,8 @@ class BasePredictionModel(torch.nn.Module):
         dataloader: DataLoader,
         epochs: int = 100,
         learning_rate: float = 1e-3,
+        patience: int = 10,  # Early stopping patience
+        min_delta: float = 0.0001,  # Minimum improvement threshold
     ) -> float:
         """Internal method to train on a DataLoader. Returns the final epoch's average MSE."""
         self.train()
@@ -187,7 +189,11 @@ class BasePredictionModel(torch.nn.Module):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min")
         criterion = torch.nn.MSELoss()
 
-        final_loss = 0.0
+        # Early stopping variables
+        best_loss = float('inf')
+        best_model_state = None
+        counter = 0  # Count epochs without improvement
+
         for epoch in range(epochs):
             epoch_loss = 0.0
             for batch_x, batch_y, lengths in dataloader:
@@ -200,11 +206,29 @@ class BasePredictionModel(torch.nn.Module):
 
             epoch_loss /= len(dataloader)
             scheduler.step(epoch_loss)
-            final_loss = epoch_loss
 
             print(f"Epoch {epoch+1}/{epochs} | Loss: {epoch_loss:.4f}")
+            
+            # Check if this is the best loss so far
+            if epoch_loss < best_loss - min_delta:
+                best_loss = epoch_loss
+                best_model_state = self.state_dict().copy()
+                counter = 0
+            else:
+                counter += 1
+            
+            # Early stopping check
+            if counter >= patience:
+                print(f"Early stopping triggered after {epoch+1} epochs")
+                if best_model_state is not None:
+                    self.load_state_dict(best_model_state)
+                return best_loss
 
-        return final_loss
+        # Restore best model if training completed without early stopping
+        if best_model_state is not None:
+            self.load_state_dict(best_model_state)
+        
+        return best_loss
 
     def forward_predict(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
