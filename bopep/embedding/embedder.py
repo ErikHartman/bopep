@@ -29,6 +29,9 @@ class Embedder:
         return embeddings
     
     def scale_embeddings(self, embeddings: dict) -> dict:
+        """
+        TODO: Check this function.
+        """
         # Initialize scaler
         scaler = StandardScaler()
         

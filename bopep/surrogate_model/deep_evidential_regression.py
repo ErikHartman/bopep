@@ -3,11 +3,8 @@ import numpy as np
 from typing import Dict, List, Tuple, Literal, Optional
 from torch.nn import functional as F
 
-from bopep.surrogate_model.base_models import (
-    BasePredictionModel,
-    BiLSTMNetwork,
-    MLPNetwork,
-)
+from bopep.surrogate_model.base_models import BiLSTMNetwork, MLPNetwork, BiGRUNetwork
+from bopep.surrogate_model.helpers import BasePredictionModel
 
 
 class DeepEvidentialRegression(BasePredictionModel):
@@ -46,46 +43,42 @@ class DeepEvidentialRegression(BasePredictionModel):
         output_dim = 4
 
         if network_type == "mlp":
-            self.network = MLPNetwork(
-                input_dim, hidden_dims, output_dim, dropout_rate=0
-            )
+            self.network = MLPNetwork(input_dim, hidden_dims, output_dim=output_dim)
         elif network_type == "bilstm":
             lstm_hidden = lstm_hidden_dim or hidden_dims[0]
             self.network = BiLSTMNetwork(
-                input_dim, lstm_hidden, lstm_layers, output_dim, dropout_rate=0
+                input_dim, lstm_hidden, lstm_layers, output_dim=output_dim
             )
+        elif network_type == "bigru":
+            raise NotImplemented("BiGRUNetwork not implemented yet")
         else:
             raise ValueError(f"Unsupported network_type: {network_type}")
 
     def forward_once(
-        self, x: torch.Tensor
+        self, 
+        x: torch.Tensor, 
+        lengths: Optional[List[int]] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Forward pass returning the 4 evidential parameters."""
-        outputs = self.network(x)
+        # Now pass lengths into the network
+        outputs = self.network(x, lengths=lengths)
 
-        # Split the outputs into the 4 evidential parameters
+        # The rest stays the same
         mu = outputs[:, 0:1]
-
-        # Apply softplus to ensure v, alpha, beta are positive
-        # Adding small epsilon for numerical stability
-        v = F.softplus(outputs[:, 1:2]) + 1e-6
-        alpha = F.softplus(outputs[:, 2:3]) + 1.0  # alpha > 1 ensures finite variance
-        beta = F.softplus(outputs[:, 3:4]) + 1e-6
-
+        v = torch.nn.functional.softplus(outputs[:, 1:2]) + 1e-6
+        alpha = torch.nn.functional.softplus(outputs[:, 2:3]) + 1.0
+        beta = torch.nn.functional.softplus(outputs[:, 3:4]) + 1e-6
         return mu, v, alpha, beta
 
-    def forward_predict(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward_predict(
+        self, x: torch.Tensor, lengths: Optional[List[int]] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass returning predictive mean and standard deviation.
         For evidential regression, mean = mu and variance = beta/(alpha-1) * (1 + 1/v)
         """
-        mu, v, alpha, beta = self.forward_once(x)
-
-        # Compute the total predictive uncertainty (epistemic + aleatoric)
-        # Formula: variance = beta/(alpha-1) * (1 + 1/v)
+        mu, v, alpha, beta = self.forward_once(x, lengths=lengths)
         variance = (beta / (alpha - 1.0)) * (1.0 + 1.0 / v)
         std = torch.sqrt(variance)
-
         return mu, std
 
     def get_uncertainty_components(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
@@ -186,41 +179,3 @@ class DeepEvidentialRegression(BasePredictionModel):
         loss = nll + self.evidential_regularization * reg
 
         return loss.mean()
-
-    def fit(
-        self,
-        train_x: torch.Tensor,
-        train_y: torch.Tensor,
-        epochs: int = 100,
-        batch_size: int = 32,
-        learning_rate: float = 1e-3,
-    ) -> float:
-        """Train using evidential regression loss."""
-        self.train()
-        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
-
-        dataset = torch.utils.data.TensorDataset(train_x, train_y)
-        dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True
-        )
-
-        final_loss = 0.0
-        for epoch in range(epochs):
-            epoch_loss = 0.0
-            for batch_x, batch_y in dataloader:
-                optimizer.zero_grad()
-
-                # Get evidential parameters
-                mu, v, alpha, beta = self.forward_once(batch_x)
-
-                # Compute evidential loss
-                loss = self.evidential_loss(mu, v, alpha, beta, batch_y)
-
-                loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
-
-            epoch_loss /= len(dataloader)
-            final_loss = epoch_loss
-
-        return final_loss

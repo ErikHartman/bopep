@@ -1,15 +1,21 @@
 import torch
 import numpy as np
 import optuna
-from typing import Dict, Tuple, Type
+from typing import Dict, List, Optional, Tuple, Type
 from sklearn.model_selection import train_test_split
 
-from bopep.surrogate_model.base_models import BasePredictionModel, BiLSTMNetwork, DictHandler, MLPNetwork
+from bopep.surrogate_model.base_models import BiLSTMNetwork, MLPNetwork
+from bopep.surrogate_model.helpers import (
+    BasePredictionModel,
+    DictHandler,
+    VariableLengthDataset,
+    variable_length_collate_fn,
+)
+
 
 class OptunaOptimizer:
     """Hyperparameter optimizer using Optuna for neural network models."""
 
-    
     def __init__(
         self,
         model_class: Type[BasePredictionModel],
@@ -19,11 +25,11 @@ class OptunaOptimizer:
         test_size: float = 0.2,
         random_state: int = 42,
         early_stopping_rounds: int = 5,
-        device: str = "cuda" if torch.cuda.is_available() else "cpu"
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         """
         Initialize the optimizer.
-        
+
         Args:
             model_class: The model class to optimize (MLPNetwork-based or BiLSTMNetwork-based)
             embedding_dict: Dictionary of embeddings {peptide_id: embedding_array}
@@ -43,39 +49,41 @@ class OptunaOptimizer:
         self.early_stopping_rounds = early_stopping_rounds
         self.device = device
         self.dict_handler = DictHandler()
-        
+
         # Prepare data and split into train/validation sets
-        peptides, _, _ = self.dict_handler.prepare_data_from_dict(embedding_dict, scores_dict)
-        
+        peptides, _, _ = self.dict_handler.prepare_data_from_dict(
+            embedding_dict, scores_dict
+        )
+
         # Get indices for train/validation split
         indices = np.arange(len(peptides))
         train_indices, val_indices = train_test_split(
             indices, test_size=test_size, random_state=random_state
         )
-        
+
         # Create train/validation datasets
         self.train_peptides = [peptides[i] for i in train_indices]
         self.val_peptides = [peptides[i] for i in val_indices]
-        
+
         self.train_embedding_dict = {p: embedding_dict[p] for p in self.train_peptides}
         self.train_scores_dict = {p: scores_dict[p] for p in self.train_peptides}
-        
+
         self.val_embedding_dict = {p: embedding_dict[p] for p in self.val_peptides}
         self.val_scores_dict = {p: scores_dict[p] for p in self.val_peptides}
-        
+
         self.input_dim = next(iter(embedding_dict.values())).shape[0]
         self.best_params = None
-        self.best_val_loss = float('inf')
+        self.best_val_loss = float("inf")
         self.best_trial = None
-    
+
     def _get_mlp_params(self, trial: optuna.Trial) -> dict:
         """Define the hyperparameter search space for MLP networks."""
         n_layers = trial.suggest_int("n_layers", 1, 3)
         hidden_dims = []
-        
+
         for i in range(n_layers):
             hidden_dims.append(trial.suggest_int(f"hidden_dim_{i}", 16, 256, log=True))
-        
+
         params = {
             "input_dim": self.input_dim,
             "hidden_dims": hidden_dims,
@@ -83,9 +91,9 @@ class OptunaOptimizer:
             "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
             "epochs": trial.suggest_int("epochs", 50, 200),
         }
-        
+
         return params
-    
+
     def _get_bilstm_params(self, trial: optuna.Trial) -> dict:
         """Define the hyperparameter search space for BiLSTM networks."""
         params = {
@@ -96,103 +104,106 @@ class OptunaOptimizer:
             "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
             "epochs": trial.suggest_int("epochs", 50, 200),
         }
-        
+
         return params
-    
+
     def _evaluate_model(self, model: BasePredictionModel) -> float:
-        """Evaluate the model on validation data and return the MSE."""
         model.eval()
-        
-        # Prepare validation data
-        _, X_val, y_val = self.dict_handler.prepare_data_from_dict(
+        val_dataset = VariableLengthDataset(
             self.val_embedding_dict, self.val_scores_dict
         )
-        
-        X_val = X_val.to(self.device)
-        y_val = y_val.to(self.device)
-        
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=32,  # or any batch size you want
+            shuffle=False,
+            collate_fn=variable_length_collate_fn,
+        )
+
+        total_loss = 0.0
+        total_samples = 0
+
+        criterion = torch.nn.MSELoss(reduction="sum")
+
         with torch.no_grad():
-            mean_pred, _ = model.forward_predict(X_val)
-            mse = torch.nn.functional.mse_loss(mean_pred, y_val).item()
-        
-        return mse
-    
+            for batch_x, batch_y, lengths in val_loader:
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device)
+
+                mean_pred, _ = model.forward_predict(batch_x, lengths=lengths)
+                loss = criterion(mean_pred, batch_y)
+
+                total_loss += loss.item()
+                total_samples += batch_x.size(0)
+
+        return total_loss / total_samples
+
     def _train_with_early_stopping(
-        self, 
-        model: BasePredictionModel, 
-        params: dict,
-        trial: optuna.Trial
+        self, model: BasePredictionModel, params: dict, trial: optuna.Trial
     ) -> float:
-        """Train the model with early stopping and return the best validation loss."""
         # Setup the model for training
-        model.train()
         model = model.to(self.device)
-        
-        # Extract training parameters
+
+        # Extract training params
         learning_rate = params.pop("learning_rate", 1e-3)
         batch_size = params.pop("batch_size", 32)
         epochs = params.pop("epochs", 100)
-        
-        # Prepare training data
-        _, X_train, y_train = self.dict_handler.prepare_data_from_dict(
+
+        # Build a variable-length dataset
+        train_dataset = VariableLengthDataset(
             self.train_embedding_dict, self.train_scores_dict
         )
-        
-        X_train = X_train.to(self.device)
-        y_train = y_train.to(self.device)
-        
-        # Setup optimizer and loss function
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            collate_fn=variable_length_collate_fn,
+        )
+
+        # Setup optimizer/loss
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         criterion = torch.nn.MSELoss()
-        
-        # Create DataLoader
-        dataset = torch.utils.data.TensorDataset(X_train, y_train)
-        dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True
-        )
-        
-        # Track best validation performance
-        best_val_loss = float('inf')
+
+        best_val_loss = float("inf")
         no_improve_count = 0
-        
+
         for epoch in range(epochs):
-            # Training loop
             model.train()
             train_loss = 0.0
-            
-            for batch_x, batch_y in dataloader:
+
+            for batch_x, batch_y, lengths in train_loader:
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device)
+
                 optimizer.zero_grad()
-                mean_pred, _ = model.forward_predict(batch_x)
+                # Now pass lengths so BiLSTM can pack sequences
+                mean_pred, _ = model.forward_predict(batch_x, lengths=lengths)
                 loss = criterion(mean_pred, batch_y)
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-            
-            train_loss /= len(dataloader)
-            
-            # Evaluate on validation set
-            model.eval()
-            val_loss = self._evaluate_model(model)
-            
-            # Report to Optuna for pruning
+
+            train_loss /= len(train_loader)
+
+            # Evaluate on validation
+            val_loss = self._evaluate_model(model)  # We'll fix _evaluate_model next
+
+            # Report to Optuna
             trial.report(val_loss, epoch)
-            
-            # Check if trial should be pruned
             if trial.should_prune():
                 raise optuna.exceptions.TrialPruned()
-            
-            # Early stopping logic
+
+            # Early stopping
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 no_improve_count = 0
             else:
                 no_improve_count += 1
-            
+
             if no_improve_count >= self.early_stopping_rounds:
                 break
-                
+
         return best_val_loss
-    
+
     def objective(self, trial: optuna.Trial) -> float:
         """Optuna objective function that creates and evaluates a model."""
         # Determine model type and get appropriate hyperparameters
@@ -211,60 +222,67 @@ class OptunaOptimizer:
             )
         else:
             raise ValueError(f"Unsupported model class: {self.model_class}")
-        
+
         # Create a custom prediction model using the network that returns fixed std
         model = CustomPredictionModel(network)
-        
+
         # Train the model with early stopping
         val_loss = self._train_with_early_stopping(model, params, trial)
-        
+
         # Update best params if this trial is better
         if val_loss < self.best_val_loss:
             self.best_val_loss = val_loss
             self.best_trial = trial
-            
+
             # Store hyperparameters
             self.best_params = {
                 "val_loss": val_loss,
-                **{k: v for k, v in params.items() if k not in ["input_dim"]}
+                **{k: v for k, v in params.items() if k not in ["input_dim"]},
             }
-            
+
             # If using MLPNetwork, add hidden_dims
             if issubclass(self.model_class, MLPNetwork):
                 self.best_params["hidden_dims"] = params["hidden_dims"]
-                
+
             # If using BiLSTMNetwork, add specific params
             if issubclass(self.model_class, BiLSTMNetwork):
                 self.best_params["hidden_dim"] = params["hidden_dim"]
                 self.best_params["num_layers"] = params["num_layers"]
-        
+
         return val_loss
-    
+
     def optimize(self) -> Dict:
         """Run the hyperparameter optimization and return the best parameters."""
         study = optuna.create_study(
             direction="minimize",
             pruner=optuna.pruners.MedianPruner(
                 n_startup_trials=5, n_warmup_steps=10, interval_steps=1
-            )
+            ),
         )
-        
+
         print(f"Starting optimization with {self.n_trials} trials")
         study.optimize(self.objective, n_trials=self.n_trials)
-        
+
         print("Optimization completed")
 
         print(f"Best hyperparameters: {study.best_params}")
-        
+
         return self.best_params
+
 
 class CustomPredictionModel(BasePredictionModel):
     def __init__(self, network):
         super().__init__()
         self.network = network
-        
-    def forward_predict(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # For simplicity, we're returning a fixed uncertainty (std)
-        mean = self.network(x)
-        std = torch.ones_like(mean) * 0.1  # Fixed uncertainty
+
+    def forward_predict(
+        self, x: torch.Tensor, lengths: Optional[List[int]] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass with optional lengths for variable-length sequences.
+        """
+        # Pass lengths to the network's forward method
+        mean = self.network(x, lengths=lengths)
+        # Return a fixed std for demonstration
+        std = torch.ones_like(mean)
         return mean, std

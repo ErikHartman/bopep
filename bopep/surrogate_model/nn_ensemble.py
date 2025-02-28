@@ -2,7 +2,8 @@
 from typing import List, Literal, Optional, Tuple
 
 import torch
-from bopep.surrogate_model.base_models import BasePredictionModel, BiLSTMNetwork, MLPNetwork
+from bopep.surrogate_model.base_models import BiLSTMNetwork, MLPNetwork
+from bopep.surrogate_model.helpers import BasePredictionModel
 
 class NeuralNetworkEnsemble(BasePredictionModel):
     """Ensemble of neural networks for prediction with uncertainty estimation."""
@@ -29,12 +30,28 @@ class NeuralNetworkEnsemble(BasePredictionModel):
                 BiLSTMNetwork(input_dim, lstm_hidden, lstm_layers, dropout_rate=0)
                 for _ in range(n_networks)
             ])
+        elif network_type == "bigru":
+            raise NotImplemented("BiGRUNetwork not implemented yet")
         else:
             raise ValueError(f"Unsupported network_type: {network_type}")
     
-    def forward_predict(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Forward pass through each network in the ensemble
-        predictions = torch.stack([net(x) for net in self.networks], dim=0)
-        mean = torch.mean(predictions, dim=0)
-        std = torch.std(predictions, dim=0)
+    def forward_predict(
+        self, 
+        x: torch.Tensor, 
+        lengths: Optional[List[int]] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        x shape:
+        - (N, D) for MLP
+        - (N, L, D) for BiLSTM
+        lengths = None or List[int] for variable-length sequences
+        """
+        # Forward pass through each network in the ensemble, passing lengths
+        predictions = torch.stack(
+            [net(x, lengths=lengths) for net in self.networks], 
+            dim=0
+        )  # shape => (n_networks, N, 1)
+        
+        mean = torch.mean(predictions, dim=0)  # (N, 1)
+        std = torch.std(predictions, dim=0)    # (N, 1)
         return mean, std

@@ -60,7 +60,6 @@ def plot_embeddings(embeddings: np.ndarray, method_name: str, reduction_type: st
         plt.close()
 
 def main():
-    # Set random seeds for reproducibility
     np.random.seed(42)
     torch.manual_seed(42)
     
