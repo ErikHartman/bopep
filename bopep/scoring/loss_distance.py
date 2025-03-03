@@ -1,52 +1,47 @@
 import math
-import numpy as np
 from bopep.scoring.util import parse_pdb
+from bopep.scoring.util import get_plDDT_from_dir
 
 """
-Modified version of the EvoBind loss function.
+Distance-based loss function for protein-peptide interactions.
 """
 
-def evobind_loss_from_pdb(pdb_file_path,
-                          receptor_chain='A',
-                          peptide_chain='B'):
+
+def distance_loss_from_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
     """
-    Convenience function that does:
-      1) Parse the PDB to get coords/bfactors
-      2) Compute the EvoBind score
+    Convenience function that:
+      1) Parses the PDB to get coordinates/bfactors
+      2) Computes the distance-based score
+      3) Normalizes by plDDT
 
     :param pdb_file_path: Path to the PDB file
     :param receptor_chain: The chain ID(s) for the receptor
     :param peptide_chain: The chain ID(s) for the peptide
-    :return: EvoBind score (float)
+    :return: Distance-based score (float)
     """
-    (rec_coords, rec_bfactors,
-     pep_coords, pep_bfactors) = parse_pdb(
-                                    pdb_file_path,
-                                    receptor_chain=receptor_chain,
-                                    peptide_chain=peptide_chain
-                                 )
-    score = compute_evobind_score(rec_coords, rec_bfactors,
-                                  pep_coords, pep_bfactors)
+    (rec_coords, rec_bfactors, pep_coords, pep_bfactors) = parse_pdb(
+        pdb_file_path, receptor_chain=receptor_chain, peptide_chain=peptide_chain
+    )
+    distance_score = compute_distance_score(rec_coords, pep_coords)
+    plDDT = get_plDDT_from_dir(pdb_file_path)
+    score = distance_score * (1 / plDDT)
     return score
 
-def compute_evobind_score(
-    receptor_coords, receptor_bfactors,
-    peptide_coords, peptide_bfactors
-):
+
+def compute_distance_score(receptor_coords, peptide_coords):
     """
-    Computes the (modified) EvoBind loss:
-        score = (sum_d_pep_rec + sum_d_rec_pep) * pLDDT
+    Computes a distance-based score between receptor and peptide:
+        score = mean_d_pep_rec + mean_d_rec_pep
     where:
-        - sum_d_pep_rec is the sum of distances between each peptide
+        - mean_d_pep_rec is the average distance between each peptide
           atom and its closest receptor atom
-        - sum_d_rec_pep is the sum of distances between each receptor
+        - mean_d_rec_pep is the average distance between each receptor
           atom and its closest peptide atom
-        - pLDDT is taken as the average of B-factors (assuming pLDDT stored in B-factor)
     """
-    
+    # Calculate peptide-to-receptor distances
     sum_d_pep_rec = 0.0
     for p_atom in peptide_coords:
-        min_dist = float('inf')
+        min_dist = float("inf")
         for r_atom in receptor_coords:
             dist = math.dist(p_atom, r_atom)
             if dist < min_dist:
@@ -54,9 +49,10 @@ def compute_evobind_score(
         sum_d_pep_rec += min_dist
     mean_d_pep_rec = sum_d_pep_rec / len(peptide_coords) if peptide_coords else 0.0
 
+    # Calculate receptor-to-peptide distances
     sum_d_rec_pep = 0.0
     for r_atom in receptor_coords:
-        min_dist = float('inf')
+        min_dist = float("inf")
         for p_atom in peptide_coords:
             dist = math.dist(r_atom, p_atom)
             if dist < min_dist:
@@ -64,13 +60,12 @@ def compute_evobind_score(
         sum_d_rec_pep += min_dist
     mean_d_rec_pep = sum_d_rec_pep / len(receptor_coords) if receptor_coords else 0.0
 
-    all_bfactors = receptor_bfactors + peptide_bfactors
-    plddt = np.mean(all_bfactors) if len(all_bfactors) > 0 else 1
-    evobind_score = (mean_d_pep_rec + mean_d_rec_pep) * (1/plddt)
+    distance_score = mean_d_pep_rec + mean_d_rec_pep
 
-    return evobind_score
+    return distance_score
+
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
-    score = evobind_loss_from_pdb(pdb_file_path)
-    print(f"EvoBind score for {pdb_file_path}: {score}")
+    score = distance_loss_from_pdb(pdb_file_path)
+    print(f"Distance score for {pdb_file_path}: {score}")

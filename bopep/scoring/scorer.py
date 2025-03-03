@@ -1,4 +1,4 @@
-from bopep.scoring.loss_distance import evobind_loss_from_pdb
+from bopep.scoring.loss_distance import distance_loss_from_pdb
 from bopep.scoring.loss_rosetta import RosettaScorer
 from bopep.scoring.loss_iptm import get_ipTM_from_dir
 from bopep.scoring.loss_binding_site import (
@@ -6,6 +6,7 @@ from bopep.scoring.loss_binding_site import (
     n_peptides_in_binding_site_colab_dir,
 )
 import os
+import re
 
 
 class Scorer:
@@ -27,7 +28,7 @@ class Scorer:
             "interface_dG",
             "interface_delta_hbond_unsat",
             "packstat",
-            "evobind_loss",
+            "distance_loss",
             "iptm_score",
             "in_binding_site",
         ]
@@ -38,9 +39,11 @@ class Scorer:
         scores = {}
 
         if colab_dir and not pdb_file:
+            pdb_pattern = re.compile(r".*_rank_001_.*\.pdb") # Regex for the top scoring docking result
             pdb_file = os.path.join(
-                colab_dir, "top_scoring_complex.pdb"
-            )  # the top 1 docked pdb. It is not named like this in reality.
+                colab_dir,
+                [f for f in os.listdir(colab_dir) if pdb_pattern.search(f)][0],
+            )
 
         rosetta_scorer = RosettaScorer(pdb_file)
 
@@ -56,8 +59,8 @@ class Scorer:
             )
         if "packstat" in scores_to_include:
             scores["packstat"] = rosetta_scorer.get_packstat()
-        if "evobind_loss" in scores_to_include:
-            scores["evobind_loss"] = evobind_loss_from_pdb(pdb_file)
+        if "distance_loss" in scores_to_include:
+            scores["distance_loss"] = distance_loss_from_pdb(pdb_file)
         if "iptm_score" in scores_to_include:
             if not colab_dir:
                 print("WARNING: ipTM score needs a docking result directory.")

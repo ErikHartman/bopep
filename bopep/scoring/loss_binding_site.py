@@ -2,6 +2,7 @@ from Bio.PDB import PDBParser
 import numpy as np
 from scipy.spatial import cKDTree
 import os
+import re
 
 
 def is_peptide_in_binding_site(
@@ -56,15 +57,18 @@ def n_peptides_in_binding_site_colab_dir(
 ):
     """
     Evaluates if the docked peptide is within a given proximity to the receptor binding site
-    across multiple models.
+    across multiple models. Only considers files with pattern 'rank_00X' in their name.
     """
     matches_within_threshold = 0
 
     colab_files = os.listdir(colab_dir)
-    pdb_files = [f for f in colab_files if f.endswith(".pdb")] # is this enough?
+    
+    # Regex search for pdb files with rank_00X pattern in the directory
+    pdb_files = [os.path.join(colab_dir, file) for file in colab_files 
+                if re.search(r'rank_00\d+.*\.pdb$', file, re.IGNORECASE)]
 
     for pdb_file in pdb_files:
         if is_peptide_in_binding_site(pdb_file, binding_site_residue_indices, threshold):
             matches_within_threshold += 1
 
-    return matches_within_threshold 
+    return matches_within_threshold

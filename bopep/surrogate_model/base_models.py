@@ -87,8 +87,10 @@ class BiLSTMNetwork(BaseNetwork):
             # If no lengths provided, just run LSTM on the full padded sequence
             lstm_out, _ = self.lstm(x)
 
-        # Simplest approach: we rely on the last time step *in the padded sequence*. Might not be best option! TODO
-        final_hidden = lstm_out[:, -1, :]  # shape (N, 2*hidden_dim)
+        mean_hidden = torch.mean(lstm_out, dim=1)  # shape (N, 2*hidden_dim)
+        max_hidden, _ = torch.max(lstm_out, dim=1)  # shape (N, 2*hidden_dim)
+
+        final_hidden = torch.cat([mean_hidden, max_hidden], dim=-1)  # shape (N, 4*hidden_dim)
 
         final_hidden = self.dropout(final_hidden)
         output = self.fc(final_hidden)  # shape (N, output_dim)
@@ -122,11 +124,22 @@ class BiGRUNetwork(BaseNetwork):
         self.fc = torch.nn.Linear(2 * hidden_dim, output_dim)
         self.dropout = torch.nn.Dropout(dropout_rate)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, lengths: Optional[List[int]] = None) -> torch.Tensor:
         # x shape: [batch_size, seq_length, input_dim]
         gru_out, _ = self.gru(x)
         # Use the final hidden state from both directions
-        final_hidden = gru_out[:, -1, :]
+        batch_size = x.shape[0]
+        hidden_dim = gru_out.shape[-1] // 2  # Since BiGRU output is 2*hidden_dim
+
+        # Last timestep for forward GRU
+        final_forward = gru_out[torch.arange(batch_size), lengths - 1, :hidden_dim]
+
+        # First timestep for backward GRU (since it's run in reverse)
+        final_backward = gru_out[:, 0, hidden_dim:]
+
+        # Concatenate forward and backward final states
+        final_hidden = torch.cat([final_forward, final_backward], dim=-1)  # shape (N, 2*hidden_dim)
+
         final_hidden = self.dropout(final_hidden)
         output = self.fc(final_hidden)
         return output

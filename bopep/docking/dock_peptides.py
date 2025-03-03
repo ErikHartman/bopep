@@ -1,10 +1,10 @@
 import os
 import shutil
 import subprocess
-import logging
 from functools import partial
 from multiprocessing import get_context
-from typing import List, Dict, Optional
+from typing import List, Optional
+from bopep.docking.utils import clean_up_files
 
 def dock_peptide(
     peptide_sequence: str,
@@ -22,7 +22,7 @@ def dock_peptide(
     Dock a single peptide to the target structure using ColabFold.
     Returns the directory path where the peptide's results are stored.
     """
-    logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
+    print(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
 
     target_name = os.path.basename(target_structure).replace(".pdb", "")
     # Create a sub-directory for this peptide’s results
@@ -78,9 +78,12 @@ def dock_peptide(
             raise subprocess.CalledProcessError(
                 returncode=process.returncode, cmd=command
             )
-        logging.info(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
+        print(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
+        
+        # Clean up temporary files after successful docking
+        clean_up_files(peptide_output_dir, target_copy_path, peptide_sequence)
     except subprocess.CalledProcessError as e:
-        logging.error(f"An error occurred during docking of {peptide_sequence}: {e}")
+        print(f"An error occurred during docking of {peptide_sequence}: {e}")
 
     # Return the directory containing the docked peptide results
     return peptide_output_dir
@@ -131,7 +134,7 @@ def dock_peptides_parallel(
         (peptide, gpu_ids[i % len(gpu_ids)]) for i, peptide in enumerate(peptides)
     ]
 
-    logging.info(f"Starting docking on {num_processes} process(es)...")
+    print(f"Starting docking on {num_processes} process(es)...")
 
     # Run the docking in parallel and collect the output directories
     context = get_context("spawn")
