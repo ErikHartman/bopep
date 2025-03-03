@@ -3,8 +3,8 @@ import numpy as np
 from typing import Dict, List, Tuple, Literal, Optional
 from torch.nn import functional as F
 
-from bopep.surrogate_model.base_models import BiLSTMNetwork, MLPNetwork, BiGRUNetwork
 from bopep.surrogate_model.helpers import BasePredictionModel
+from bopep.surrogate_model.network_factory import NetworkFactory
 
 
 class DeepEvidentialRegression(BasePredictionModel):
@@ -31,10 +31,11 @@ class DeepEvidentialRegression(BasePredictionModel):
         self,
         input_dim: int,
         hidden_dims: List[int] = [128, 64],
-        network_type: Literal["mlp", "bilstm"] = "mlp",
-        lstm_layers: int = 1,
-        lstm_hidden_dim: Optional[int] = None,
+        network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
+        num_layers: int = 1,
+        hidden_dim: Optional[int] = None,
         evidential_regularization: float = 0.1,
+        **kwargs
     ):
         super().__init__()
         self.evidential_regularization = evidential_regularization
@@ -42,17 +43,16 @@ class DeepEvidentialRegression(BasePredictionModel):
         # We need 4 outputs for evidential regression (mu, v, alpha, beta)
         output_dim = 4
 
-        if network_type == "mlp":
-            self.network = MLPNetwork(input_dim, hidden_dims, output_dim=output_dim)
-        elif network_type == "bilstm":
-            lstm_hidden = lstm_hidden_dim or hidden_dims[0]
-            self.network = BiLSTMNetwork(
-                input_dim, lstm_hidden, lstm_layers, output_dim=output_dim
-            )
-        elif network_type == "bigru":
-            raise NotImplemented("BiGRUNetwork not implemented yet")
-        else:
-            raise ValueError(f"Unsupported network_type: {network_type}")
+        # Use NetworkFactory to create the appropriate network
+        self.network = NetworkFactory.get_network(
+            network_type=network_type,
+            input_dim=input_dim,
+            output_dim=output_dim,
+            hidden_dims=hidden_dims,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            **kwargs
+        )
 
     def forward_once(
         self, 

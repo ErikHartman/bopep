@@ -124,8 +124,13 @@ class BasePredictionModel(torch.nn.Module):
         epochs: int = 100,
         batch_size: int = 32,
         learning_rate: float = 1e-3,
+        device: Optional[torch.device] = None
     ) -> float:
         """Train using dictionaries of embeddings and scores."""
+        # Use the model's device if none specified
+        if device is None:
+            device = next(self.parameters()).device
+            
         dataset = VariableLengthDataset(embedding_dict, scores_dict)
         dataloader = DataLoader(
             dataset,
@@ -133,12 +138,19 @@ class BasePredictionModel(torch.nn.Module):
             shuffle=True,
             collate_fn=variable_length_collate_fn,
         )
-        return self._fit_from_dataloader(dataloader, epochs, learning_rate)
+        return self._fit_from_dataloader(dataloader, epochs, learning_rate, device)
 
     def predict_dict(
-        self, embedding_dict: Dict[str, np.ndarray], batch_size: int = 32
+        self, 
+        embedding_dict: Dict[str, np.ndarray], 
+        batch_size: int = 32,
+        device: Optional[torch.device] = None
     ) -> Dict[str, Tuple[float, float]]:
         """Predict for a dictionary of embeddings, returning {pep: (mean, std), ...}."""
+        # Use the model's device if none specified
+        if device is None:
+            device = next(self.parameters()).device
+            
         # We'll gather peptides in the same order as the dataset
         peptides = list(embedding_dict.keys())
 
@@ -157,10 +169,13 @@ class BasePredictionModel(torch.nn.Module):
 
         with torch.no_grad():
             for batch_x, _, lengths in dataloader:
+                # Move batch to the correct device
+                batch_x = batch_x.to(device)
+                
                 # forward_predict should handle (N, L, D) or (N, D)
                 mean_pred, std_pred = self.forward_predict(batch_x, lengths)
-                mean_list.append(mean_pred.cpu())
-                std_list.append(std_pred.cpu())
+                mean_list.append(mean_pred.cpu())  # Move back to CPU for numpy
+                std_list.append(std_pred.cpu())    # Move back to CPU for numpy
 
         # Concatenate all predictions
         mean_array = torch.cat(mean_list).view(-1).numpy()
@@ -178,10 +193,15 @@ class BasePredictionModel(torch.nn.Module):
         dataloader: DataLoader,
         epochs: int = 100,
         learning_rate: float = 1e-3,
+        device: Optional[torch.device] = None,
         patience: int = 10,  # Early stopping patience
         min_delta: float = 0.0001,  # Minimum improvement threshold
     ) -> float:
         """Internal method to train on a DataLoader. Returns the final epoch's average MSE."""
+        # Use the model's device if none specified
+        if device is None:
+            device = next(self.parameters()).device
+            
         self.train()
         optimizer = torch.optim.AdamW(
             self.parameters(), lr=learning_rate, weight_decay=1e-5
@@ -197,7 +217,12 @@ class BasePredictionModel(torch.nn.Module):
         for epoch in range(epochs):
             epoch_loss = 0.0
             for batch_x, batch_y, lengths in dataloader:
+                # Move batch data to the correct device
+                batch_x = batch_x.to(device)
+                batch_y = batch_y.to(device)
+                
                 optimizer.zero_grad()
+                # Pass lengths to forward_predict for sequence handling
                 mean_pred, _ = self.forward_predict(batch_x, lengths)
                 loss = criterion(mean_pred, batch_y)
                 loss.backward()
