@@ -51,7 +51,7 @@ def extract_sequence_from_pdb(pdb_file: str, chain_id: str = "A"):
 
 
 def clean_up_files(
-    peptide_output_dir: str, target_structure_copy: str, peptide_name: str
+    docking_dir: str, target_structure_copy: str, peptide_name: str
 ):
     """
     Cleans up temporary files created during docking.
@@ -67,13 +67,23 @@ def clean_up_files(
             os.remove(target_structure_copy)
 
         # Remove unnecessary files generated during docking
-        for file in os.listdir(peptide_output_dir):
+        for file in os.listdir(docking_dir):
             if (
                 file.startswith("pdb70")
                 or file.endswith(".cif")
                 or file == "cite.bibtex"
                 or file.startswith("combined_input")
             ):
-                os.remove(os.path.join(peptide_output_dir, file))
+                os.remove(os.path.join(docking_dir, file))
     except OSError as e:
         print(f"Error deleting temporary files for {peptide_name}: {e}")
+
+def docking_folder_exists(base_docking_dir : str, peptide : str, target_structure : str) -> bool:
+    """
+    Checks if a docking result exists for a given target+peptide.
+    """
+    peptide_dir = os.path.join(base_docking_dir,  f"{target_structure}_{peptide}")
+    exists = os.path.exists(peptide_dir) and os.path.isdir(peptide_dir)
+    if exists:
+        print(f"Docking result for {peptide} already exists in {peptide_dir}. Skipping...")
+    return exists

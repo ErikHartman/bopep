@@ -83,4 +83,4 @@ if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
     scorer = Scorer()
     scores = scorer.score(scores_to_include=["rosetta_score"], pdb_file=pdb_file_path)
-    print(f"Composite bopep loss for {pdb_file_path}: {scores}")
+    print(f"Rosetta score for {pdb_file_path}: {scores}")

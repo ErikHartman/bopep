@@ -34,6 +34,11 @@ class Docker:
     def dock_peptides(self, peptide_sequences):
         """
         Dock multiple peptides to a target structure using ColabFold.
+
+        Will not dock peptide if there is a folder called target_peptide
+        in the output directory.
+
+        Will remove unnecessary files generated during docking.
         
         Parameters:
         - peptide_records: List of peptide records (with id and seq properties).

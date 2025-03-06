@@ -3,15 +3,10 @@ from bopep.embedding.embed_aaindex import embed_aaindex
 from bopep.embedding.utils import filter_peptides
 from sklearn.decomposition import PCA
 import numpy as np
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 from sklearn.preprocessing import StandardScaler
-from bopep.embedding.dim_red_autoencoder import (
-    PeptideAutoencoder,
-    PeptideDataset,
-    collate_fn,
-)
+from bopep.embedding.dim_red_ae import reduce_dimension_ae
+from bopep.embedding.dim_red_vae import reduce_dimension_vae
+
 
 
 class Embedder:
@@ -58,112 +53,141 @@ class Embedder:
             
         return scaled_embeddings
 
-    def reduce_embeddings_autoencoder(
-        self,
-        embeddings: dict,
-        hidden_dim: int,
-        latent_dim: int,
-        device: str = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    ):
-        """
-        Works if average == False. Reduces the dimensionality of the embeddings using an autoencoder.
-        """
-        print(f"Using device: {device}")
-        
-        dataset = PeptideDataset(embeddings)
-        dataloader = DataLoader(dataset, batch_size=16, collate_fn=collate_fn)
-
-        input_dim = embeddings[list(embeddings.keys())[0]].shape[1]
-        print("Autoencoder input dimension: ", input_dim)
-
-        autoencoder = PeptideAutoencoder(input_dim, hidden_dim, latent_dim).to(device)
-
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(autoencoder.parameters(), 1.0)
-
-        # Use weight decay in optimizer
-        optimizer = torch.optim.AdamW(
-            autoencoder.parameters(), 
-            lr=1e-3, 
-            weight_decay=1e-5
-        )
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min")
-
-        patience = 5
-        min_delta = 0.001
-        patience_counter = 0
-        best_loss = float("inf")
-
-        print("Training autoencoder...")
-        for epoch in range(1000):
-            epoch_loss = 0
-            batch_count = 0
-
-            for batch, lengths in dataloader:
-                batch = batch.to(device)
-                optimizer.zero_grad()
-                reconstructed, latent = autoencoder(batch, lengths)
-                mask = torch.zeros_like(batch, dtype=torch.float32, device=device)
-                for i, length in enumerate(lengths):
-                    mask[i, :length, :] = 1.0
-                loss = (torch.abs(reconstructed - batch) * mask).sum() / mask.sum()
-                loss.backward()
-                optimizer.step()
-
-                epoch_loss += loss.item()
-                batch_count += 1
-
-            avg_loss = epoch_loss / batch_count
-            scheduler.step(avg_loss)
-
-            print(f"Epoch {epoch}, loss: {avg_loss:.3f}", end="\r")
-
-            if avg_loss < best_loss - min_delta:
-                best_loss = avg_loss
-                patience_counter = 0
-            else:
-                patience_counter += 1
-                if patience_counter >= patience:
-                    print(f"Early stopping triggered at epoch {epoch}")
-                    print(f"Final loss: {avg_loss:.2f}")
-                    break
-
-        reduced_embeddings = {}
-        autoencoder.eval()
-        
-        with torch.no_grad():
-            for peptide, emb in embeddings.items():
-                emb_tensor = torch.tensor(emb, dtype=torch.float32)
-                if len(emb_tensor.shape) == 2:
-                    emb_tensor = emb_tensor.unsqueeze(0)  # Add batch dimension
-                emb_tensor = emb_tensor.to(device)
-                length = torch.tensor([emb_tensor.shape[1]])  # Sequence length
-                _, latent = autoencoder(emb_tensor, length)
-                reduced_embeddings[peptide] = latent.squeeze(0).cpu().numpy()
-
-        print(
-            "The reduced embeddings are of dim: ", reduced_embeddings[peptide].shape
-        )
-
-        return reduced_embeddings
 
     def reduce_embeddings_pca(
         self, embeddings: dict, explained_variance_ratio: float = 0.95
     ):
         """
-        Only works if average == True. Reduces the dimensionality of the embeddings using PCA.
+        Reduces the dimensionality of the embeddings using PCA.
+        Works with both averaged embeddings (1D per peptide) and 
+        sequence embeddings (2D per peptide, with varying lengths).
+        
+        Args:
+            embeddings: Dictionary mapping peptide sequences to their embeddings
+            explained_variance_ratio: Target explained variance ratio for PCA
+            
+        Returns:
+            Dictionary with reduced embeddings maintaining the original structure
         """
-        embedding_array = np.array(list(embeddings.values()))
-        peptide_sequences = list(embeddings.keys())
+        # Check if we have sequence embeddings (2D) or averaged embeddings (1D)
+        first_emb = next(iter(embeddings.values()))
+        is_sequence_embedding = len(first_emb.shape) > 1
+        
+        if is_sequence_embedding:
+            # For sequence embeddings (average=False case)
+            # Collect all position embeddings across all sequences
+            all_position_embeddings = []
+            for emb in embeddings.values():
+                all_position_embeddings.extend(emb)  # Add each position's embedding
+            
+            all_position_embeddings = np.array(all_position_embeddings)
+            
+            # Apply PCA to all position embeddings
+            pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
+            pca.fit(all_position_embeddings)
+            
+            # Transform each peptide's sequence of embeddings
+            reduced_embeddings = {}
+            for peptide, emb in embeddings.items():
+                reduced_embeddings[peptide] = pca.transform(emb)
+                
+            print(f"Original embedding dimension: {first_emb.shape[1]}")
+            print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[1]}")
+            
+        else:
+            # For averaged embeddings (average=True case) - original implementation
+            embedding_array = np.array(list(embeddings.values()))
+            peptide_sequences = list(embeddings.keys())
 
-        pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
-        reduced_embeddings_array = pca.fit_transform(embedding_array)
+            pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
+            reduced_embeddings_array = pca.fit_transform(embedding_array)
 
-        print("The reduced embeddings are of shape: ", reduced_embeddings_array.shape)
+            print("The reduced embeddings are of shape: ", reduced_embeddings_array.shape)
 
-        reduced_embeddings = {
-            peptide_sequences[i]: reduced_embeddings_array[i]
-            for i in range(len(peptide_sequences))
-        }
+            reduced_embeddings = {
+                peptide_sequences[i]: reduced_embeddings_array[i]
+                for i in range(len(peptide_sequences))
+            }
 
         return reduced_embeddings
+
+    def reduce_embeddings_autoencoder(
+        self, embeddings: dict, latent_dim: int, 
+        hidden_layers=None, batch_size=64, max_epochs=100, 
+        learning_rate=1e-3, patience=10, verbose=True,
+        autoencoder_type="standard"
+    ):
+        """
+        Reduces the dimensionality of the embeddings using an autoencoder
+        or variational autoencoder.
+        
+        Args:
+            embeddings: Dictionary mapping peptide sequences to their embeddings
+            latent_dim: Target dimension for the reduced representation
+            hidden_layers: List of dimensions for hidden layers (default: [2*latent_dim])
+            batch_size: Batch size for training
+            max_epochs: Maximum number of training epochs
+            learning_rate: Initial learning rate
+            patience: Patience for early stopping
+            verbose: Whether to print training progress
+            autoencoder_type: Type of autoencoder to use ("standard" or "variational")
+            
+        Returns:
+            Dictionary with reduced embeddings maintaining the original structure
+        """
+        # Check if we have sequence embeddings (2D) or averaged embeddings (1D)
+        first_emb = next(iter(embeddings.values()))
+        is_sequence_embedding = len(first_emb.shape) > 1
+        
+        # Set default hidden layers if not provided
+        if hidden_layers is None:
+            input_dim = first_emb.shape[-1] if is_sequence_embedding else first_emb.shape[0]
+            hidden_layers = [min(input_dim, latent_dim * 2)]
+        
+        # Select the appropriate autoencoder implementation
+        if autoencoder_type.lower() == "variational":
+            # Additional VAE parameters
+            beta = 1.0  # Weight for KL divergence term
+            
+            # Use the VAE to reduce dimensions
+            reduced_embeddings = reduce_dimension_vae(
+                data=embeddings,
+                latent_dim=latent_dim,
+                is_sequence_data=is_sequence_embedding,
+                hidden_layers=hidden_layers,
+                batch_size=batch_size,
+                max_epochs=max_epochs,
+                learning_rate=learning_rate,
+                patience=patience,
+                beta=beta,
+                verbose=verbose
+            )
+            model_type = "Variational Autoencoder"
+        else:  # Standard autoencoder
+            # Use the standard autoencoder to reduce dimensions
+            reduced_embeddings = reduce_dimension_ae(
+                data=embeddings,
+                latent_dim=latent_dim,
+                is_sequence_data=is_sequence_embedding,
+                hidden_layers=hidden_layers,
+                batch_size=batch_size,
+                max_epochs=max_epochs,
+                learning_rate=learning_rate,
+                patience=patience,
+                verbose=verbose
+            )
+            model_type = "Standard Autoencoder"
+        
+        # Print information about the reduction
+        if is_sequence_embedding:
+            print(f"{model_type} reduction:")
+            print(f"Original embedding dimension: {first_emb.shape[1]}")
+            print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[1]}")
+        else:
+            print(f"{model_type} reduction:")
+            print(f"Original embedding dimension: {first_emb.shape[0]}")
+            print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[0]}")
+            
+        return reduced_embeddings
+    
+    

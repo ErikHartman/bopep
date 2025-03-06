@@ -21,8 +21,9 @@ class DictHandler:
         X_list = []
         Y_list = []
         for p in peptides:
-            X_list.append(embedding_dict[p])
-            Y_list.append(scores_dict[p])
+            if p in scores_dict:
+                X_list.append(embedding_dict[p])
+                Y_list.append(scores_dict[p])
         # Convert to numpy and then to torch
         # If all embeddings have shape (D,) -> final shape (N, D)
         # If all embeddings have shape (L, D) -> final shape (N, L, D)

@@ -4,7 +4,8 @@ import subprocess
 from functools import partial
 from multiprocessing import get_context
 from typing import List, Optional
-from bopep.docking.utils import clean_up_files
+from bopep.docking.utils import clean_up_files, docking_folder_exists
+
 
 def dock_peptide(
     peptide_sequence: str,
@@ -26,16 +27,24 @@ def dock_peptide(
 
     target_name = os.path.basename(target_structure).replace(".pdb", "")
     # Create a sub-directory for this peptide’s results
-    peptide_output_dir = os.path.join(output_dir, f"{target_name}_{peptide_sequence}")
+    peptide_output_dir = os.path.join(
+        output_dir, f"{target_name}_{peptide_sequence}"
+    )  # peptide output dir is called structure name + peptide sequence
     os.makedirs(peptide_output_dir, exist_ok=True)
 
     # Create FASTA file containing the target and peptide sequences
-    combined_fasta_path = os.path.join(peptide_output_dir, f"input_{peptide_sequence}.fasta")
+    combined_fasta_path = os.path.join(
+        peptide_output_dir, f"input_{peptide_sequence}.fasta"
+    )
     with open(combined_fasta_path, "w") as f:
-        f.write(f">{target_name}_{peptide_sequence}\n{target_sequence}:{peptide_sequence}\n")
+        f.write(
+            f">{target_name}_{peptide_sequence}\n{target_sequence}:{peptide_sequence}\n"
+        )
 
     # Copy the target structure to the peptide output directory
-    target_copy_path = os.path.join(peptide_output_dir, os.path.basename(target_structure))
+    target_copy_path = os.path.join(
+        peptide_output_dir, os.path.basename(target_structure)
+    )
     shutil.copy2(target_structure, target_copy_path)
 
     # Prepare the ColabFold command
@@ -43,17 +52,27 @@ def dock_peptide(
         "colabfold_batch",
         str(combined_fasta_path),
         str(peptide_output_dir),
-        "--model-type", "alphafold2_multimer_v3",
-        "--msa-mode", "single_sequence",
-        "--num-models", str(num_models),
-        "--num-recycle", str(num_recycles),
-        "--recycle-early-stop-tolerance", str(recycle_early_stop_tolerance),
-        "--num-relax", str(num_relax),
-        "--pair-mode", "unpaired",
-        "--pair-strategy", "greedy",
+        "--model-type",
+        "alphafold2_multimer_v3",
+        "--msa-mode",
+        "single_sequence",
+        "--num-models",
+        str(num_models),
+        "--num-recycle",
+        str(num_recycles),
+        "--recycle-early-stop-tolerance",
+        str(recycle_early_stop_tolerance),
+        "--num-relax",
+        str(num_relax),
+        "--pair-mode",
+        "unpaired",
+        "--pair-strategy",
+        "greedy",
         "--templates",
-        "--custom-template-path", str(peptide_output_dir),
-        "--rank", "iptm", 
+        "--custom-template-path",
+        str(peptide_output_dir),
+        "--rank",
+        "iptm",
     ]
 
     if amber:
@@ -65,7 +84,7 @@ def dock_peptide(
     env.pop("MPLBACKEND", None)
 
     # Run docking
-    try:        
+    try:
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -79,7 +98,7 @@ def dock_peptide(
                 returncode=process.returncode, cmd=command
             )
         print(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
-        
+
         # Clean up temporary files after successful docking
         clean_up_files(peptide_output_dir, target_copy_path, peptide_sequence)
     except subprocess.CalledProcessError as e:
@@ -105,7 +124,15 @@ def dock_peptides_parallel(
     """
     Dock multiple peptides to a target structure using ColabFold.
     Returns a list of directories for the docked peptides.
+
+    Filters out peptides that already have a docking result in the output directory.
     """
+    peptides = [
+        peptide
+        for peptide in peptides
+        if not docking_folder_exists(output_dir, peptide, target_structure)
+    ]
+
     if gpu_ids is None:
         gpu_ids = ["0"]  # default to GPU 0 if none provided
 

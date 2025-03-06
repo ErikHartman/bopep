@@ -1,5 +1,7 @@
 /data/output/*
 *.egg-info
+env_config.py
+*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
