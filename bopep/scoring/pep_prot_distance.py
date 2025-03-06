@@ -4,10 +4,12 @@ from bopep.scoring.util import get_plDDT_from_dir
 
 """
 Distance-based loss function for protein-peptide interactions.
+
+Inspired by EvoBind.
 """
 
 
-def distance_loss_from_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
+def distance_score_from_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
     """
     Convenience function that:
       1) Parses the PDB to get coordinates/bfactors
@@ -67,5 +69,5 @@ def compute_distance_score(receptor_coords, peptide_coords):
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
-    score = distance_loss_from_pdb(pdb_file_path)
+    score = distance_score_from_pdb(pdb_file_path)
     print(f"Distance score for {pdb_file_path}: {score}")
