@@ -2,7 +2,7 @@ import os
 from tqdm import tqdm
 import torch
 import esm
-
+from pathlib import Path
 
 def embed_esm(
     peptide_sequences, model_path="esm2_t33_650M_UR50D.pt", average: bool = True
@@ -11,7 +11,10 @@ def embed_esm(
     if model_path:
         model_path = os.path.abspath(model_path)
         if os.path.exists(model_path):
-            model, alphabet = esm.pretrained.load_model_and_alphabet_local(model_path)
+            model_location = Path(model_path)
+            model_name = model_location.stem
+            model_data = torch.load(model_path, map_location="cpu", weights_only=False)
+            model, alphabet = esm.pretrained.load_model_and_alphabet_core(model_name, model_data)
     else:
         # Download the model if it does not exist locally
         model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()

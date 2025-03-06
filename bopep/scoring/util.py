@@ -1,12 +1,12 @@
-from io import StringIO
 from Bio.PDB import PDBParser
 from Bio.PDB.Polypeptide import is_aa
-import numpy as np
 from scipy.spatial import cKDTree
+import os
+import json
+import re
 
-def parse_pdb(pdb_file_path,
-                             receptor_chain='A',
-                             peptide_chain='B'):
+
+def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
     """
     Parses a PDB file using BioPython and returns coordinates & B-factors
     for receptor and peptide atoms separately.
@@ -23,7 +23,7 @@ def parse_pdb(pdb_file_path,
     )
     """
     parser = PDBParser(QUIET=True)
-    structure = parser.get_structure(id='complex', file=pdb_file_path)
+    structure = parser.get_structure(id="complex", file=pdb_file_path)
 
     receptor_coords = []
     receptor_bfactors = []
@@ -50,49 +50,29 @@ def parse_pdb(pdb_file_path,
     return receptor_coords, receptor_bfactors, peptide_coords, peptide_bfactors
 
 
-def is_peptide_in_binding_site(
-    pdb_file, binding_site_residue_indices, threshold=5.0
-):
+def get_plDDT_from_dir(colab_dir, rank_num : int = 1):
     """
-    TODO: Update this to make it more general.
+    Extracts the plDDT score from an unzipped docking result directory.
     """
-    parser = PDBParser(QUIET=True)
-    
-    try:
-        structure = parser.get_structure("temp_struc", pdb_file)
-    except Exception as e:
-        print(f"Error parsing PDB content: {e}")
-        return False
+    if not os.path.isdir(colab_dir):
+        print(f"Directory {colab_dir} does not exist.")
+        return None
+
+    json_pattern = re.compile(fr".*_scores_rank_00{rank_num}_.*\.json")
+    json_files = []
+
+    for root, _, files in os.walk(colab_dir):
+        json_files.extend(
+            [os.path.join(root, f) for f in files if json_pattern.search(f)]
+        )
+
+    if not json_files:
+        print(f"No matching JSON file found in {colab_dir}")
+        return None
 
     try:
-        model = structure[0]
-        receptor_chain = model["A"]
-        peptide_chain = model["B"]
-
-        receptor_binding_site_atoms = [
-            atom
-            for residue in receptor_chain
-            if residue.id[1] in binding_site_residue_indices
-            for atom in residue.get_atoms()
-        ]
-
-        if not receptor_binding_site_atoms:
-            print(f"No atoms found in specified receptor binding site residues.")
-            return False
-
-        peptide_atoms = list(peptide_chain.get_atoms())
-        if not peptide_atoms:
-            print(f"No atoms found in peptide chain.")
-            return False
-
-        # Find atoms within distance threshold
-        receptor_coords = np.array([atom.coord for atom in receptor_binding_site_atoms])
-        peptide_coords = np.array([atom.coord for atom in peptide_atoms])
-
-        tree = cKDTree(peptide_coords)
-        distances, _ = tree.query(receptor_coords, distance_upper_bound=threshold)
-        return np.any(distances != float("inf")) # any or all?
-
-    except KeyError:
-        print(f"Chains A or B not found in structure.")
-        return False
+        with open(json_files[0], "r") as f:
+            return json.load(f).get("plDDT")
+    except (IOError, json.JSONDecodeError) as e:
+        print(f"Error reading JSON file: {e}")
+        return None

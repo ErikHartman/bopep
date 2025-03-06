@@ -1,4 +1,5 @@
 import subprocess
+from typing import List, Optional
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
 from bopep.surrogate_model import (
@@ -12,6 +13,8 @@ from bopep.logging.logger import Logger
 from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
 from bopep.bayesian_optimization.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
+from bopep.bayesian_optimization.utils import check_starting_index_in_pdb
+from bopep.docking.utils import extract_sequence_from_pdb
 import pyrosetta
 
 from bopep.surrogate_model.base_models import BiLSTMNetwork, MLPNetwork
@@ -68,14 +71,16 @@ class BoPep:
 
     def optimize(
         self,
-        peptides: list,
+        peptides: List[str],
         target_structure_path: str,
         num_initial: int = 10,
         batch_size: int = 4,
+        binding_site_residue_indices: Optional[List[int]] = None,
         schedule: list[dict] = [
             dict(acquisition="standard_deviation", iterations=10),
             dict(acquisition="expected_improvement", iterations=10),
         ],
+        embeddings: Optional[dict] = None,
     ):
         """
         Runs Bayesian optimization, separated into phases given by 'schedule'.
@@ -90,6 +95,10 @@ class BoPep:
 
         self.docker.set_target_structure(target_structure_path)
 
+        self.binding_site_residue_indices = self._check_binding_site_residue_indices(
+            binding_site_residue_indices, target_structure_path
+        )  # Checks if pdb starting index is 0, adjusts if needed.
+
         docked_peptides = set()
         not_docked_peptides = set(peptides)
 
@@ -97,7 +106,8 @@ class BoPep:
         scores = dict()
 
         # Generate embeddings for all peptides
-        embeddings = self._generate_embeddings(peptides)
+        if embeddings is None:
+            embeddings = self._generate_embeddings(peptides)
 
         # Create surrogate model
         self.surrogate_model_kwargs["input_dim"] = len(
@@ -137,12 +147,13 @@ class BoPep:
                 objectives = self.scores_to_objective.create_bopep_objective(
                     scores, self.objective_weights
                 )
-
-                # TODO: Here we sometimes want to perform hyperparameter optimization
+                
                 if iteration == 0 or (
                     iteration % self.hpo_kwargs.get("hpo_interval", 10) == 0
                 ):
-                    self._optimize_hyperparameters(objectives)  # This sets self.model
+                    self._optimize_hyperparameters(
+                        embeddings, objectives
+                    )  # This sets self.model
 
                 # 2.1) Train the model on *only the peptides we have scores for*
                 train_embeddings = {p: embeddings[p] for p in docked_peptides}
@@ -212,6 +223,7 @@ class BoPep:
             colab_dir_scores = self.scorer.score(
                 scores_to_include=list(self.objective_weights.keys()),
                 colab_dir=colab_dir,
+                binding_site_residue_indices=self.binding_site_residue_indices,
             )
             new_scores.update(colab_dir_scores)
 
@@ -219,7 +231,7 @@ class BoPep:
 
     def _generate_embeddings(self, peptides):
         # Create embeddings for all peptides
-        if self.embedding_kwargs("embeddin_function") == "esm":
+        if self.embedding_kwargs["embedding_function"] == "esm":
             if self.surrogate_model_kwargs["network_type"] == "bilstm":
                 embeddings = self.embedder.embed_esm(
                     peptides,
@@ -232,7 +244,7 @@ class BoPep:
                     average=True,
                     model_path=self.embedding_kwargs.get("model_path", None),
                 )
-        elif self.embedding_kwargs("embedding_function") == "aaindex":
+        elif self.embedding_kwargs["embedding_function"] == "aaindex":
             if self.surrogate_model_kwargs["network_type"] == "bilstm":
                 embeddings = self.embedder.embed_aaindex(peptides, average=False)
             elif self.surrogate_model_kwargs["network_type"] == "mlp":
@@ -317,8 +329,75 @@ class BoPep:
             )
         else:
             raise ValueError(
-                f"Invalid model type: {self.surrogate_model_kwargs}. Only nn_ensemble is supported."
+                f"Invalid model type: {self.surrogate_model_kwargs}."
             )
+
+    def _check_binding_site_residue_indices(
+        self, binding_site_residue_indices, target_structure_path
+    ):
+        """
+        Checks if starting index is 0.
+
+        If not, asks the user if the binding site residues are expected to be 0 indexed.
+        Corrects for the starting index if wanted.
+
+        Return a visualization of the residues that are selected as binding site residues.
+        """
+        starting_index = check_starting_index_in_pdb(target_structure_path)
+        protein_sequence = extract_sequence_from_pdb(target_structure_path)
+        if starting_index != 0:
+            print(
+                f"Starting index is {starting_index}. Are the provided binding site residues 0-indexed?"
+            )
+            answer = input("y/n")
+            if answer == "y":
+                binding_site_residue_indices = [
+                    residue - starting_index for residue in binding_site_residue_indices
+                ]
+
+        # Visualize the binding site residues
+        print("\nBinding Site Residues Visualization:")
+        print("=" * 60)
+        print(f"Full sequence length: {len(protein_sequence)}")
+        print(f"Selected binding site residues: {binding_site_residue_indices}")
+        print("-" * 60)
+
+        # Sort binding site residues for sequential display
+        binding_site_residue_indices = sorted(binding_site_residue_indices)
+
+        # Show each binding site residue with context
+        context_size = 5  # Show 5 residues before and after
+        for residue_idx in binding_site_residue_indices:
+            # Ensure residue_idx is valid
+            if residue_idx < 0 or residue_idx >= len(protein_sequence):
+                print(f"Warning: Residue index {residue_idx} out of range")
+                continue
+
+            # Calculate start and end positions for context
+            start = max(0, residue_idx - context_size)
+            end = min(len(protein_sequence), residue_idx + context_size + 1)
+
+            # Generate residue numbers for display
+            positions = list(range(start + starting_index, end + starting_index))
+
+            # Create the visualization row
+            vis_seq = list(protein_sequence[start:end])
+
+            # Mark the selected residue
+            rel_pos = residue_idx - start
+            if 0 <= rel_pos < len(vis_seq):
+                vis_seq[rel_pos] = f"[{vis_seq[rel_pos]}]"
+
+            # Print the visualization
+            print(
+                f"Residue {residue_idx + starting_index} ({protein_sequence[residue_idx]}):"
+            )
+            print("Position: " + " ".join(f"{pos:3d}" for pos in positions))
+            print("Sequence: " + " ".join(f"{aa:3s}" for aa in vis_seq))
+            print("-" * 60)
+
+        print("=" * 60)
+        return binding_site_residue_indices
 
     def _setup(self):
         """

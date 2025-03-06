@@ -4,6 +4,9 @@ import os
 
 
 class Docker:
+    """
+    Docker class for docking peptides to a target structure.
+    """
     def __init__(self, docker_kwargs: dict):
         self.num_models = docker_kwargs["num_models"]
         self.num_recycles = docker_kwargs["num_recycles"]
@@ -14,6 +17,9 @@ class Docker:
         self.num_relax = docker_kwargs["num_relax"]
         self.output_dir = docker_kwargs["pdb_dir"]
         self.gpu_ids = docker_kwargs["gpu_ids"]
+        self.overwrite_results = docker_kwargs.get("overwrite_results", False)
+        self.target_structure_path = None
+        self.target_sequence = None
 
     def set_target_structure(self, target_structure_path):
         if not os.path.exists(target_structure_path):
@@ -25,17 +31,29 @@ class Docker:
         self.target_sequence = extract_sequence_from_pdb(self.target_structure_path)
         print("Target is set to: ", self.target_structure_path)
 
-    def dock_peptides(self, peptides):
+    def dock_peptides(self, peptide_sequences):
         """
         Dock multiple peptides to a target structure using ColabFold.
+
+        Will not dock peptide if there is a folder called target_peptide
+        in the output directory.
+
+        Will remove unnecessary files generated during docking.
+        
+        Parameters:
+        - peptide_records: List of peptide records (with id and seq properties).
+        
+        Returns:
+        - List of directories containing the docked peptide results.
         """
         if not self.target_structure_path:
             raise ValueError(
                 "Target structure not set. Please set the target structure using set_target_structure."
             )
-
+        
+        # Dock the peptides and return results
         return dock_peptides_parallel(
-            peptides=peptides,
+            peptides=peptide_sequences,
             target_structure=self.target_structure_path,
             target_sequence=self.target_sequence,
             num_models=self.num_models,
