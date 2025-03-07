@@ -6,16 +6,16 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from bopep.embedding.dim_red_ae import reduce_dimension_ae
 from bopep.embedding.dim_red_vae import reduce_dimension_vae
-
+import os
 
 
 class Embedder:
     def __init__(self):
         pass
 
-    def embed_esm(self, peptides: list, average: bool, model_path: str = None) -> dict:
+    def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128) -> dict:
         peptides = filter_peptides(peptides)
-        embeddings = embed_esm(peptides, model_path, average)
+        embeddings = embed_esm(peptides, model_path, average, batch_size)
         return embeddings
 
     def embed_aaindex(self, peptides: list, average: bool) -> dict:
@@ -190,4 +190,19 @@ class Embedder:
             
         return reduced_embeddings
     
+    def save_embeddings(self, embeddings: dict, save_path: str):
+        """
+        Saves the embeddings to a file.
+        """
+        if not save_path.endswith(".npy"):
+            raise ValueError("File path must end with '.npy' extension.")
+        if os.path.exists(save_path):
+            print("File already exists. Will not overwrite.")
+            return None
+        np.save(save_path, embeddings)
     
+    def load_embeddings(self, file_path: str) -> dict:
+        """
+        Loads embeddings from a file.
+        """
+        return np.load(file_path, allow_pickle=True).item()

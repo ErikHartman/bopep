@@ -5,7 +5,7 @@ import esm
 from pathlib import Path
 
 def embed_esm(
-    peptide_sequences, model_path="esm2_t33_650M_UR50D.pt", average: bool = True
+    peptide_sequences, model_path="esm2_t33_650M_UR50D.pt", average: bool = True, batch_size:int = 128
 ):
     # Check if the model file exists locally
     if model_path:
@@ -32,7 +32,6 @@ def embed_esm(
     embeddings = {}
     sequence_data = [(f"seq_{i}", seq) for i, seq in enumerate(peptide_sequences)]
 
-    batch_size = 64
     for i in tqdm(
         range(0, len(sequence_data), batch_size), desc="Generating embeddings"
     ):

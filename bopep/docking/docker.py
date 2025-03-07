@@ -6,22 +6,29 @@ import os
 class Docker:
     """
     Docker class for docking peptides to a target structure.
+    Necessary parameters are passed in as a dictionary with keys:
+    - num_models: Number of models to generate.
+    - num_recycles: Number of recycling steps.
+    - recycle_early_stop_tolerance: Early stopping tolerance for recycling.
+    - amber: Whether to use AMBER relaxation.
+    - num_relax: Number of relaxation steps.
+    - pdb_dir: Output directory for PDB files.
+    - gpu_ids: List of GPU IDs to use.
+    - overwrite_results: Whether to overwrite existing results.
     """
     def __init__(self, docker_kwargs: dict):
-        self.num_models = docker_kwargs["num_models"]
-        self.num_recycles = docker_kwargs["num_recycles"]
-        self.recycle_early_stop_tolerance = docker_kwargs[
-            "recycle_early_stop_tolerance"
-        ]
-        self.amber = docker_kwargs["amber"]
-        self.num_relax = docker_kwargs["num_relax"]
+        self.num_models = docker_kwargs.get("num_models", 5)
+        self.num_recycles = docker_kwargs.get("num_recycles", 10)
+        self.recycle_early_stop_tolerance = docker_kwargs.get("recycle_early_stop_tolerance", 0.01)
+        self.amber = docker_kwargs.get("amber", True)
+        self.num_relax = docker_kwargs.get("num_relax", 1)
         self.output_dir = docker_kwargs["pdb_dir"]
-        self.gpu_ids = docker_kwargs["gpu_ids"]
+        self.gpu_ids = docker_kwargs.get("gpu_ids", [])
         self.overwrite_results = docker_kwargs.get("overwrite_results", False)
         self.target_structure_path = None
         self.target_sequence = None
 
-    def set_target_structure(self, target_structure_path):
+    def set_target_structure(self, target_structure_path : str):
         if not os.path.exists(target_structure_path):
             raise FileNotFoundError(
                 f"Target structure {target_structure_path} not found."
@@ -31,7 +38,7 @@ class Docker:
         self.target_sequence = extract_sequence_from_pdb(self.target_structure_path)
         print("Target is set to: ", self.target_structure_path)
 
-    def dock_peptides(self, peptide_sequences):
+    def dock_peptides(self, peptide_sequences : list):
         """
         Dock multiple peptides to a target structure using ColabFold.
 

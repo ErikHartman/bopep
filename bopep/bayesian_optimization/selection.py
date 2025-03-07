@@ -1,12 +1,18 @@
 import numpy as np
 from sklearn.cluster import MiniBatchKMeans
 
+
 class PeptideSelector:
+    """
+    Class to select the initial and subsequent peptides for Bayesian optimization.
+    Will reduce the dimensionality of the embeddings if they are 2D.
+    """
+
     def __init__(self):
         pass
 
     def select_initial_peptides(
-        embeddings: dict, num_initial: int, random_state: int = None
+        self, embeddings: dict, num_initial: int, random_state: int = 42
     ):
         """
         Select the initial peptides using K-Means clustering.
@@ -20,12 +26,17 @@ class PeptideSelector:
         - initial_peptides: List of selected peptide sequences.
         """
         peptides = list(embeddings.keys())
-        embedding_values = np.array(list(embeddings.values()))
+        # Check if embedding values are 1 dimensional or 2 dimensional
+        if len(list(embeddings.values())[0].shape) == 1:
+            embedding_values = np.array(list(embeddings.values()))
+        else:
+            print("Embedding values are 2D, averaging over the second dimension...")
+            embedding_values = np.array(
+                [emb.mean(axis=0) for emb in embeddings.values()]
+            )
 
         kmeans = MiniBatchKMeans(
-            n_clusters=num_initial, 
-            random_state=random_state, 
-            max_iter=1000
+            n_clusters=num_initial, random_state=random_state, max_iter=1000
         )
         cluster_labels = kmeans.fit_predict(embedding_values)
 
@@ -43,17 +54,11 @@ class PeptideSelector:
 
         return initial_peptides
 
-    def select_next_peptides(
-        self,
-        peptides,
-        acquisition_values,
-        n_select,
-        embeddings
-    ):
+    def select_next_peptides(self, peptides, acquisition_values, n_select, embeddings):
         """
         Select the next batch of peptides using a "k-center greedy" approach
         weighted by each peptide's acquisition value.
-        
+
         Algorithm:
         1) Pick the peptide with the highest acquisition value.
         2) For each subsequent selection, compute:
@@ -71,6 +76,12 @@ class PeptideSelector:
         - selected_peptides: a list of length 'n_select' or fewer if fewer remain.
         """
 
+        if len(list(embeddings.values())[0].shape) > 1:
+            print("Embedding values are 2D, averaging over the second dimension...")
+            embeddings = {
+                emb: embeddings[emb].mean(axis=0) for emb in embeddings.keys()
+            }
+
         candidate_list = list(peptides)
         candidate_list.sort(key=lambda p: acquisition_values[p], reverse=True)
 
@@ -83,8 +94,7 @@ class PeptideSelector:
 
             for c in remaining:
                 distances = [
-                    np.linalg.norm(embeddings[c] - embeddings[s]) 
-                    for s in selected
+                    np.linalg.norm(embeddings[c] - embeddings[s]) for s in selected
                 ]
                 min_dist = min(distances)
 

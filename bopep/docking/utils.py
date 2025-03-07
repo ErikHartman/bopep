@@ -82,6 +82,7 @@ def docking_folder_exists(base_docking_dir : str, peptide : str, target_structur
     """
     Checks if a docking result exists for a given target+peptide.
     """
+    target_structure = os.path.basename(target_structure).replace(".pdb", "")
     peptide_dir = os.path.join(base_docking_dir,  f"{target_structure}_{peptide}")
     exists = os.path.exists(peptide_dir) and os.path.isdir(peptide_dir)
     if exists:
