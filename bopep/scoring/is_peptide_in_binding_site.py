@@ -52,9 +52,10 @@ def is_peptide_in_binding_site(
         print(f"Chains A or B not found in structure.")
         return False
 
+
 def n_peptides_in_binding_site_colab_dir(
-    colab_dir : str, binding_site_residue_indices : list, threshold=5.0
-):
+    colab_dir: str, binding_site_residue_indices: list, threshold=5.0
+) -> tuple:
     """
     Evaluates if the docked peptide is within a given proximity to the receptor binding site
     across multiple models. Only considers files with pattern 'rank_00X' in their name.
@@ -62,13 +63,22 @@ def n_peptides_in_binding_site_colab_dir(
     matches_within_threshold = 0
 
     colab_files = os.listdir(colab_dir)
-    
+
+    top_pdb_is_in_binding_site = False
+
     # Regex search for pdb files with rank_00X pattern in the directory
-    pdb_files = [os.path.join(colab_dir, file) for file in colab_files 
-                if re.search(r'rank_00\d+.*\.pdb$', file, re.IGNORECASE)]
+    pdb_files = [
+        os.path.join(colab_dir, file)
+        for file in colab_files
+        if re.search(r"unrelaxed_rank_00\d+.*\.pdb$", file, re.IGNORECASE)
+    ]
 
     for pdb_file in pdb_files:
-        if is_peptide_in_binding_site(pdb_file, binding_site_residue_indices, threshold):
+        if is_peptide_in_binding_site(
+            pdb_file, binding_site_residue_indices, threshold
+        ):
             matches_within_threshold += 1
+            if "rank_001" in pdb_file:
+                top_pdb_is_in_binding_site = True
 
-    return matches_within_threshold
+    return top_pdb_is_in_binding_site, matches_within_threshold / len(pdb_files)

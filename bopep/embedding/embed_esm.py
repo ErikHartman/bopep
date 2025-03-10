@@ -4,8 +4,12 @@ import torch
 import esm
 from pathlib import Path
 
+
 def embed_esm(
-    peptide_sequences, model_path="esm2_t33_650M_UR50D.pt", average: bool = True, batch_size:int = 128
+    peptide_sequences,
+    model_path="esm2_t33_650M_UR50D.pt",
+    average: bool = True,
+    batch_size: int = 128,
 ):
     # Check if the model file exists locally
     if model_path:
@@ -14,7 +18,9 @@ def embed_esm(
             model_location = Path(model_path)
             model_name = model_location.stem
             model_data = torch.load(model_path, map_location="cpu", weights_only=False)
-            model, alphabet = esm.pretrained.load_model_and_alphabet_core(model_name, model_data)
+            model, alphabet = esm.pretrained.load_model_and_alphabet_core(
+                model_name, model_data
+            )
     else:
         # Download the model if it does not exist locally
         model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
@@ -59,5 +65,6 @@ def embed_esm(
             else:
                 embedding = token_embeddings[j, 1 : seq_len + 1].cpu().numpy()
             embeddings[seq] = embedding
-    print("ESM embedding dim: ", embeddings[peptide_sequences[0]].shape)
+            
+    print("ESM embedding dim: ", embedding.shape)
     return embeddings

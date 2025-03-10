@@ -6,6 +6,7 @@ from bopep.scoring.is_peptide_in_binding_site import (
     n_peptides_in_binding_site_colab_dir,
 )
 from bopep.scoring.peptide_properties import PeptideProperties
+from bopep.docking.utils import extract_sequence_from_pdb
 import os
 import re
 
@@ -31,7 +32,7 @@ class Scorer:
             "interface_delta_hbond_unsat",
             "packstat",
             "distance_score",
-            "iptm_score",
+            "iptm",
             "in_binding_site",
             "peptide_properties",
             "molecular_weight",
@@ -51,18 +52,20 @@ class Scorer:
         ]
         for score in scores_to_include:
             if score not in available_scores:
-                print(f"WARNING: {score} is not a valid score")
+                raise ValueError(f"WARNING: {score} is not a valid score")
 
         scores = {}
 
         if colab_dir and not pdb_file:
             pdb_pattern = re.compile(
-                r".*_rank_001_.*\.pdb"
-            )  # Regex for the top scoring docking result
+                r".*_relaxed_rank_001_.*\.pdb"
+            )  # Regex for the top scoring docking result (relaxed)
             pdb_file = os.path.join(
                 colab_dir,
                 [f for f in os.listdir(colab_dir) if pdb_pattern.search(f)][0],
             )
+
+        peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id="B")
 
         rosetta_scorer = RosettaScorer(pdb_file)
         peptide_properties = PeptideProperties(pdb_file)
@@ -90,11 +93,17 @@ class Scorer:
             else:
                 scores["iptm_score"] = get_ipTM_from_dir(colab_dir)
         if "in_binding_site" in scores_to_include:
+            if not binding_site_residue_indices:
+                raise ValueError(
+                    "WARNING: binding_site_residue_indices is required for in_binding_site score"
+                )
             if colab_dir:
+                # If colab_dir, we will get the fraction that are in the binding site ([0 to 1]) 
                 scores["in_binding_site"] = n_peptides_in_binding_site_colab_dir(
                     colab_dir, binding_site_residue_indices=binding_site_residue_indices
                 )
             else:
+                # if a single pdb, we will have a true/false if it is in binding site
                 scores["in_binding_site"] = is_peptide_in_binding_site(
                     pdb_file, binding_site_residue_indices=binding_site_residue_indices
                 )
@@ -138,7 +147,7 @@ class Scorer:
         if "uHrel" in scores_to_include:
             scores["uHrel"] = peptide_properties.get_uHrel()
 
-        return scores
+        return {peptide_sequence: scores}
 
 
 if __name__ == "__main__":

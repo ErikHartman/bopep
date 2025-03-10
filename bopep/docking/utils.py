@@ -73,6 +73,8 @@ def clean_up_files(
                 or file.endswith(".cif")
                 or file == "cite.bibtex"
                 or file.startswith("combined_input")
+                or file.endswith(".png")
+                or file.endswith(".jpg")
             ):
                 os.remove(os.path.join(docking_dir, file))
     except OSError as e:
@@ -87,4 +89,4 @@ def docking_folder_exists(base_docking_dir : str, peptide : str, target_structur
     exists = os.path.exists(peptide_dir) and os.path.isdir(peptide_dir)
     if exists:
         print(f"Docking result for {peptide} already exists in {peptide_dir}. Skipping...")
-    return exists
+    return exists, peptide_dir
