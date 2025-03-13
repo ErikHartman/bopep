@@ -120,6 +120,7 @@ def dock_peptides_parallel(
     output_dir: str,
     gpu_ids: Optional[List[str]] = None,
     num_processes: Optional[int] = None,
+    overwrite_results: bool = False,
 ) -> List[str]:
     """
     Dock multiple peptides to a target structure using ColabFold.
@@ -136,7 +137,7 @@ def dock_peptides_parallel(
     peptides_to_dock = []
     for peptide in peptides:
         exists, peptide_dir = docking_folder_exists(output_dir, peptide, target_structure)
-        if exists:
+        if exists and not overwrite_results:
             previously_docked_dirs.append(peptide_dir)
         else:
             peptides_to_dock.append(peptide)

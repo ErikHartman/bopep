@@ -21,7 +21,6 @@ class NeuralNetworkEnsemble(BasePredictionModel):
         super().__init__()
         self.n_networks = n_networks
 
-        # Create network ensemble using NetworkFactory
         self.networks = torch.nn.ModuleList(
             [
                 NetworkFactory.get_network(

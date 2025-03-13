@@ -3,10 +3,10 @@ from Bio.SVDSuperimposer import SVDSuperimposer
 
 from util import parse_pdb
 
-def count_agreeing_pdbs(pdb_files,
-                        receptor_chain='A',
-                        peptide_chain='B',
-                        rmsd_threshold=3.0):
+
+def count_agreeing_pdbs(
+    pdb_files, receptor_chain="A", peptide_chain="B", rmsd_threshold: float = 3.0
+):
     """
     Given multiple PDBs, align each structure's receptor (chain A by default)
     to the receptor of the *first* PDB, then check if their peptide (chain B by default)
@@ -21,31 +21,28 @@ def count_agreeing_pdbs(pdb_files,
     if not pdb_files:
         print("No PDB files provided.")
         return 0
-    
+
     ref_pdb = pdb_files[0]
-    (ref_rec_coords, _,
-     ref_pep_coords, _) = parse_pdb(ref_pdb,
-                                                   receptor_chain,
-                                                   peptide_chain)
+    (ref_rec_coords, _, ref_pep_coords, _) = parse_pdb(
+        ref_pdb, receptor_chain, peptide_chain
+    )
     ref_rec_coords = np.array(ref_rec_coords)  # shape (N, 3)
     ref_pep_coords = np.array(ref_pep_coords)  # shape (M, 3)
 
     def rmsd(coords1, coords2):
-        return np.sqrt(np.mean(np.sum((coords1 - coords2)**2, axis=1)))
-
+        return np.sqrt(np.mean(np.sum((coords1 - coords2) ** 2, axis=1)))
 
     agreeing_count = 0
     sup = SVDSuperimposer()
 
     for pdb_file in pdb_files:
         # Parse
-        (new_rec_coords, _,
-         new_pep_coords, _) = parse_pdb(pdb_file,
-                                                       receptor_chain,
-                                                       peptide_chain)
+        (new_rec_coords, _, new_pep_coords, _) = parse_pdb(
+            pdb_file, receptor_chain, peptide_chain
+        )
         new_rec_coords = np.array(new_rec_coords)
         new_pep_coords = np.array(new_pep_coords)
-        
+
         sup.set(ref_rec_coords, new_rec_coords)
         sup.run()
         rot, tran = sup.get_rotran()
@@ -60,6 +57,7 @@ def count_agreeing_pdbs(pdb_files,
             agreeing_count += 1
 
     return agreeing_count
+
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"

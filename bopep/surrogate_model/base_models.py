@@ -35,6 +35,9 @@ class MLPNetwork(BaseNetwork):
             prev_dim = dim
         layers.append(torch.nn.Linear(prev_dim, output_dim))
         self.network = torch.nn.Sequential(*layers)
+        
+        print("MLPNetwork initialized")
+        print(self.network)
 
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
@@ -165,6 +168,9 @@ class BiLSTMNetwork(BaseNetwork):
         self.activation = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(hidden_dim, output_dim)
 
+        print("BiLSTMNetwork initialized")
+        print(self)
+
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
     ) -> torch.Tensor:
@@ -258,6 +264,9 @@ class BiGRUNetwork(BaseNetwork):
         self.activation = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(hidden_dim, output_dim)
         self.dropout2 = torch.nn.Dropout(dropout_rate)
+
+        print("BiGRUNetwork initialized")
+        print(self)
     
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None

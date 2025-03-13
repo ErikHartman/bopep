@@ -10,7 +10,9 @@ class ScoresToObjective:
     def __init__(self):
         pass
 
-    def create_bopep_objective(self, scores: dict, objective_weights: dict = None):
+    def create_bopep_objective(
+        self, scores: dict, objective_weights: dict = None, invert_keys: set = None
+    ) -> dict:
         """
         Given a dictionary of raw scores for each peptide, scales and scalarizes the objectives.
 
@@ -40,7 +42,8 @@ class ScoresToObjective:
         in_binding_site = []
 
         # Define which objective keys need to be inverted. These are scores in which smaller is better.
-        invert_keys = {"rosetta_score", "interface_dG"}
+        if not invert_keys:
+            invert_keys = {"rosetta_score", "interface_dG"}
 
         # Build a list of objective dicts for each peptide
         for peptide in peptides:
@@ -48,11 +51,9 @@ class ScoresToObjective:
             in_binding_site.append(peptide_scores.get("in_binding_site", True))
             obj_dict = {}
             for key in sample_keys:
-                # Fetch the score with default 0
                 value = peptide_scores.get(key, 0)
-                # Invert if necessary
                 if key in invert_keys:
-                    value = -value
+                    value = -value # invert if necessary
                 obj_dict[key] = value
             objectives_dict_list.append(obj_dict)
 

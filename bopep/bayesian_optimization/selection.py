@@ -30,7 +30,7 @@ class PeptideSelector:
         if len(list(embeddings.values())[0].shape) == 1:
             embedding_values = np.array(list(embeddings.values()))
         else:
-            print("Embedding values are 2D, averaging over the second dimension...")
+            print("Select initial peptides: embedding values are 2D, averaging over the second dimension...")
             embedding_values = np.array(
                 [emb.mean(axis=0) for emb in embeddings.values()]
             )
@@ -77,7 +77,7 @@ class PeptideSelector:
         """
 
         if len(list(embeddings.values())[0].shape) > 1:
-            print("Embedding values are 2D, averaging over the second dimension...")
+            print("Select next peptides: embedding values are 2D, averaging over the second dimension...")
             embeddings = {
                 emb: embeddings[emb].mean(axis=0) for emb in embeddings.keys()
             }

@@ -5,7 +5,7 @@ import os
 import re
 
 
-def is_peptide_in_binding_site(
+def is_peptide_in_binding_site_pdb_file(
     pdb_file: str, binding_site_residue_indices: list, threshold: float = 5.0
 ) -> bool:
     """
@@ -74,7 +74,7 @@ def n_peptides_in_binding_site_colab_dir(
     ]
 
     for pdb_file in pdb_files:
-        if is_peptide_in_binding_site(
+        if is_peptide_in_binding_site_pdb_file(
             pdb_file, binding_site_residue_indices, threshold
         ):
             matches_within_threshold += 1

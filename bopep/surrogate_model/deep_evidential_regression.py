@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 from typing import Dict, List, Tuple, Literal, Optional
-from torch.nn import functional as F
 
 from bopep.surrogate_model.helpers import BasePredictionModel
 from bopep.surrogate_model.network_factory import NetworkFactory
@@ -40,7 +39,7 @@ class DeepEvidentialRegression(BasePredictionModel):
         super().__init__()
         self.evidential_regularization = evidential_regularization
 
-        # We need 4 outputs for evidential regression (mu, v, alpha, beta)
+        # We need 4 outputs (mu, v, alpha, beta)
         output_dim = 4
 
         # Use NetworkFactory to create the appropriate network

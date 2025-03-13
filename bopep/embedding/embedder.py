@@ -10,6 +10,12 @@ import os
 
 
 class Embedder:
+    """
+    TODO: 
+
+    Maybe we should always reduce embeddings?
+
+    """
     def __init__(self):
         pass
 
@@ -25,7 +31,8 @@ class Embedder:
     
     def scale_embeddings(self, embeddings: dict) -> dict:
         """
-        TODO: Check this function.
+        Scales the embeddings using StandardScaler.
+        Handles both 1D (vector form) and 2D (matrix form) embeddings.
         """
         # Initialize scaler
         scaler = StandardScaler()
