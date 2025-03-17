@@ -74,7 +74,7 @@ class SelfAttention(torch.nn.Module):
         # Calculate attention scores
         energy = self.query(projection).squeeze(-1)  # [batch_size, seq_length]
         
-        # Apply mask if provided
+        # Apply mask
         if mask is not None:
             # Ensure mask is on the same device as energy
             mask = mask.to(energy.device)
@@ -153,7 +153,6 @@ class BiLSTMNetwork(BaseNetwork):
             num_layers=num_layers,
             batch_first=True,
             bidirectional=True,
-            dropout=dropout_rate if num_layers > 1 else 0,
         )
         
         # Layer normalization for better training stability
@@ -249,7 +248,6 @@ class BiGRUNetwork(BaseNetwork):
             num_layers=num_layers,
             batch_first=True,
             bidirectional=True,
-            dropout=dropout_rate if num_layers > 1 else 0,
         )
         
         # Layer normalization

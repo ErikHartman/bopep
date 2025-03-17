@@ -270,6 +270,10 @@ class Scorer:
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
+    colab_dir_path = "/srv/data1/general/immunopeptides_data/databases/benchmark_data/pdbs_erik/docked_peptides/1ydi_VGWEQLLTTIARTINEVENQILTR"
     scorer = Scorer()
     scores = scorer.score(scores_to_include=["rosetta_score"], pdb_file=pdb_file_path)
     print(f"Rosetta score for {pdb_file_path}: {scores}")
+
+    scores = scorer.score(scores_to_include=["iptm", "rosetta_score", "uHrel"], colab_dir=colab_dir_path)
+    print(f"Scores for {colab_dir_path}: {scores}")

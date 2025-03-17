@@ -4,7 +4,6 @@ from bopep.embedding.utils import filter_peptides
 from sklearn.decomposition import PCA
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from bopep.embedding.dim_red_ae import reduce_dimension_ae
 from bopep.embedding.dim_red_vae import reduce_dimension_vae
 import os
 
@@ -62,7 +61,7 @@ class Embedder:
 
 
     def reduce_embeddings_pca(
-        self, embeddings: dict, explained_variance_ratio: float = 0.95
+        self, embeddings: dict, explained_variance_ratio: float = 0.95, n_components : int = None
     ):
         """
         Reduces the dimensionality of the embeddings using PCA.
@@ -90,7 +89,10 @@ class Embedder:
             all_position_embeddings = np.array(all_position_embeddings)
             
             # Apply PCA to all position embeddings
-            pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
+            if n_components is not None:
+                pca = PCA(n_components=n_components)
+            else:
+                pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
             pca.fit(all_position_embeddings)
             
             # Transform each peptide's sequence of embeddings
@@ -121,8 +123,7 @@ class Embedder:
     def reduce_embeddings_autoencoder(
         self, embeddings: dict, latent_dim: int, 
         hidden_layers=None, batch_size=64, max_epochs=100, 
-        learning_rate=1e-3, patience=10, verbose=True,
-        autoencoder_type="standard"
+        learning_rate=1e-3, patience=10, verbose=True, beta=1.0
     ):
         """
         Reduces the dimensionality of the embeddings using an autoencoder
@@ -151,47 +152,27 @@ class Embedder:
             input_dim = first_emb.shape[-1] if is_sequence_embedding else first_emb.shape[0]
             hidden_layers = [min(input_dim, latent_dim * 2)]
         
-        # Select the appropriate autoencoder implementation
-        if autoencoder_type.lower() == "variational":
-            # Additional VAE parameters
-            beta = 1.0  # Weight for KL divergence term
-            
-            # Use the VAE to reduce dimensions
-            reduced_embeddings = reduce_dimension_vae(
-                data=embeddings,
-                latent_dim=latent_dim,
-                is_sequence_data=is_sequence_embedding,
-                hidden_layers=hidden_layers,
-                batch_size=batch_size,
-                max_epochs=max_epochs,
-                learning_rate=learning_rate,
-                patience=patience,
-                beta=beta,
-                verbose=verbose
-            )
-            model_type = "Variational Autoencoder"
-        else:  # Standard autoencoder
-            # Use the standard autoencoder to reduce dimensions
-            reduced_embeddings = reduce_dimension_ae(
-                data=embeddings,
-                latent_dim=latent_dim,
-                is_sequence_data=is_sequence_embedding,
-                hidden_layers=hidden_layers,
-                batch_size=batch_size,
-                max_epochs=max_epochs,
-                learning_rate=learning_rate,
-                patience=patience,
-                verbose=verbose
-            )
-            model_type = "Standard Autoencoder"
+        # Use the VAE to reduce dimensions
+        reduced_embeddings = reduce_dimension_vae(
+            data=embeddings,
+            latent_dim=latent_dim,
+            is_sequence_data=is_sequence_embedding,
+            hidden_layers=hidden_layers,
+            batch_size=batch_size,
+            max_epochs=max_epochs,
+            learning_rate=learning_rate,
+            patience=patience,
+            beta=beta,
+            verbose=verbose
+        )
         
         # Print information about the reduction
         if is_sequence_embedding:
-            print(f"{model_type} reduction:")
+            print(f"VAE reduction:")
             print(f"Original embedding dimension: {first_emb.shape[1]}")
             print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[1]}")
         else:
-            print(f"{model_type} reduction:")
+            print(f"VAE reduction:")
             print(f"Original embedding dimension: {first_emb.shape[0]}")
             print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[0]}")
             

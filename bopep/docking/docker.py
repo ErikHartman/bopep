@@ -70,5 +70,5 @@ class Docker:
             num_relax=self.num_relax,
             output_dir=self.output_dir,
             gpu_ids=self.gpu_ids,
-            overwrite = self.overwrite_results
+            overwrite_results = self.overwrite_results
         )
