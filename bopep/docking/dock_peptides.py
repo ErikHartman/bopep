@@ -140,6 +140,9 @@ def dock_peptides_parallel(
         else:
             peptides_to_dock.append(peptide)
 
+    if len(peptides_to_dock) == 0:
+        return previously_docked_dirs
+    
     if gpu_ids is None:
         gpu_ids = ["0"]  # default to GPU 0 if none provided
 

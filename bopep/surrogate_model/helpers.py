@@ -125,7 +125,8 @@ class BasePredictionModel(torch.nn.Module):
         epochs: int = 100,
         batch_size: int = 32,
         learning_rate: float = 1e-3,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        verbose : bool = True,
     ) -> float:
         """Train using dictionaries of embeddings and scores."""
         # Use the model's device if none specified
@@ -139,7 +140,7 @@ class BasePredictionModel(torch.nn.Module):
             shuffle=True,
             collate_fn=variable_length_collate_fn,
         )
-        return self._fit_from_dataloader(dataloader, epochs, learning_rate, device)
+        return self._fit_from_dataloader(dataloader, epochs, learning_rate, device, verbose)
 
     def predict_dict(
         self, 
@@ -195,6 +196,7 @@ class BasePredictionModel(torch.nn.Module):
         epochs: int = 100,
         learning_rate: float = 1e-3,
         device: Optional[torch.device] = None,
+        verbose : bool = True,
         patience: int = 10,  # Early stopping patience
         min_delta: float = 0.0001,  # Minimum improvement threshold
     ) -> float:
@@ -232,8 +234,8 @@ class BasePredictionModel(torch.nn.Module):
 
             epoch_loss /= len(dataloader)
             scheduler.step(epoch_loss)
-
-            print(f"Epoch {epoch+1}/{epochs} | Loss: {epoch_loss:.4f}")
+            if verbose:
+                print(f"Epoch {epoch+1}/{epochs} | Loss: {epoch_loss:.4f}")
             
             # Check if this is the best loss so far
             if epoch_loss < best_loss - min_delta:
@@ -245,7 +247,8 @@ class BasePredictionModel(torch.nn.Module):
             
             # Early stopping check
             if counter >= patience:
-                print(f"Early stopping triggered after {epoch+1} epochs")
+                if verbose:
+                    print(f"Early stopping triggered after {epoch+1} epochs")
                 if best_model_state is not None:
                     self.load_state_dict(best_model_state)
                 return best_loss
