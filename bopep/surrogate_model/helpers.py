@@ -115,8 +115,6 @@ class BasePredictionModel(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        # If you still have a DictHandler for other tasks, you could keep it.
-        # self.dict_handler = DictHandler()
 
     def fit_dict(
         self,
