@@ -1,5 +1,6 @@
 from Bio.PDB import PDBParser
 import os
+import glob
 
 
 def extract_sequence_from_pdb(pdb_file: str, chain_id: str = "A"):
@@ -82,11 +83,17 @@ def clean_up_files(
 
 def docking_folder_exists(base_docking_dir : str, peptide : str, target_structure : str) -> bool:
     """
-    Checks if a docking result exists for a given target+peptide.
+    Checks if a docking result exists for a given target+peptide,
+    and also checks if the folder contains a relaxed PDB result.
+
+    TODO: Add check if results exist
     """
     target_structure = os.path.basename(target_structure).replace(".pdb", "")
-    peptide_dir = os.path.join(base_docking_dir,  f"{target_structure}_{peptide}")
+    peptide_dir = os.path.join(base_docking_dir, f"{target_structure}_{peptide}")
     exists = os.path.exists(peptide_dir) and os.path.isdir(peptide_dir)
-    if exists:
+    contains_done_txt = os.path.exists(os.path.join(peptide_dir, f"{target_structure}_{peptide}.done.txt"))
+    if exists and contains_done_txt:
         print(f"Docking result for {peptide} already exists in {peptide_dir}. Skipping...")
-    return exists, peptide_dir
+        return True, peptide_dir
+    else:
+        return False, peptide_dir

@@ -101,6 +101,9 @@ def dock_peptide(
 
         # Clean up temporary files after successful docking
         clean_up_files(peptide_output_dir, target_copy_path, peptide_sequence)
+        # Add file called "finished.txt" to indicate that docking is complete
+        with open(os.path.join(peptide_output_dir, "finished.txt"), "w") as f:
+            f.write("Docking finished successfully.")
     except subprocess.CalledProcessError as e:
         print(f"An error occurred during docking of {peptide_sequence}: {e}")
 
@@ -142,7 +145,9 @@ def dock_peptides_parallel(
 
     if len(peptides_to_dock) == 0:
         return previously_docked_dirs
-    
+    else:
+        print(f"Will dock {len(peptides_to_dock)} peptides...")
+
     if gpu_ids is None:
         gpu_ids = ["0"]  # default to GPU 0 if none provided
 
