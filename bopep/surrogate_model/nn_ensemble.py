@@ -53,3 +53,20 @@ class NeuralNetworkEnsemble(BasePredictionModel):
         mean = torch.mean(predictions, dim=0)  # (N, 1)
         std = torch.std(predictions, dim=0)  # (N, 1)
         return mean, std
+
+    def _get_default_criterion(self):
+        """
+        Neural Network Ensemble uses standard MSE loss during training.
+        Each model in the ensemble is trained to minimize MSE.
+        """
+        return torch.nn.MSELoss()
+    
+    def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
+        """
+        For NN Ensemble, we calculate the loss as the average loss across all networks.
+        """
+        total_loss = 0.0
+        for network in self.networks:
+            pred = network(batch_x, lengths=lengths)
+            total_loss += criterion(pred, batch_y)
+        return total_loss / len(self.networks)

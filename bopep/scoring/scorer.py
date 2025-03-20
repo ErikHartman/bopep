@@ -187,8 +187,8 @@ class Scorer:
                 )
             if "packstat" in scores_to_include:
                 scores["packstat"] = rosetta_scorer.get_packstat()
-            if "distance_loss" in scores_to_include:
-                scores["distance_loss"] = distance_score_from_pdb(pdb_file)
+            if "distance_score" in scores_to_include:
+                scores["distance_score"] = distance_score_from_pdb(pdb_file)
 
         # ipTM score needs colab_dir
         if "iptm" in scores_to_include:
@@ -211,14 +211,14 @@ class Scorer:
                         binding_site_residue_indices=binding_site_residue_indices,
                     )
                 )
-                scores["in_binding_site"] = top_1_in_binding_site  # boolean
+                scores["in_binding_site"] = bool(top_1_in_binding_site)  # boolean
                 scores["fraction_in_binding_site"] = fraction_in_binding_site  # float
 
             elif pdb_file:
                 # if a single pdb, we will have a true/false if it is in binding site
-                scores["in_binding_site"] = is_peptide_in_binding_site_pdb_file(
+                scores["in_binding_site"] = bool(is_peptide_in_binding_site_pdb_file(
                     pdb_file, binding_site_residue_indices=binding_site_residue_indices
-                )  # boolean
+                ))  # boolean
                 
         # Peptide property scores can be calculated with either peptide_sequence or pdb_file
         if "peptide_properties" in scores_to_include:

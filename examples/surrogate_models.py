@@ -132,6 +132,7 @@ def train_and_evaluate_model(
         model = DeepEvidentialRegression(
             network_type=network_type, evidential_regularization=0.1, **common_params
         )
+
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
@@ -199,7 +200,6 @@ def train_and_evaluate_model(
 
     logger.info(f"Test MSE: {mse:.4f}, RMSE: {rmse:.4f}, MAE: {mae:.4f}")
     logger.info(f"Calibration (% within 2σ): {well_calibrated * 100:.1f}%")
-
 
 
 def main():

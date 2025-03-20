@@ -1,9 +1,11 @@
 import torch
 import numpy as np
 from typing import Dict, List, Tuple, Literal, Optional
+from torch.utils.data import DataLoader
 
 from bopep.surrogate_model.helpers import BasePredictionModel
 from bopep.surrogate_model.network_factory import NetworkFactory
+from bopep.surrogate_model.helpers import VariableLengthDataset, variable_length_collate_fn
 
 
 class DeepEvidentialRegression(BasePredictionModel):
@@ -80,9 +82,15 @@ class DeepEvidentialRegression(BasePredictionModel):
         std = torch.sqrt(variance)
         return mu, std
 
-    def get_uncertainty_components(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def get_uncertainty_components(
+        self, x: torch.Tensor, lengths: Optional[List[int]] = None
+    ) -> Dict[str, torch.Tensor]:
         """
         Decompose uncertainty into aleatoric and epistemic components.
+
+        Args:
+            x: Input tensor of shape (N, D) for MLP or (N, L, D) for RNN
+            lengths: Optional sequence lengths for variable-length inputs
 
         Returns:
             Dict with keys:
@@ -91,7 +99,7 @@ class DeepEvidentialRegression(BasePredictionModel):
                 - 'epistemic': epistemic uncertainty (model uncertainty)
                 - 'total': total uncertainty
         """
-        mu, v, alpha, beta = self.forward_once(x)
+        mu, v, alpha, beta = self.forward_once(x, lengths=lengths)
 
         # Compute uncertainty components
         # Only valid for alpha > 1, which we enforce in forward_once
@@ -110,28 +118,64 @@ class DeepEvidentialRegression(BasePredictionModel):
         }
 
     def predict_dict_with_components(
-        self, embedding_dict: Dict[str, np.ndarray]
+        self, 
+        embedding_dict: Dict[str, np.ndarray],
+        batch_size: int = 32,
+        device: Optional[torch.device] = None
     ) -> Dict[str, Dict[str, float]]:
         """
         Predict with uncertainty decomposition for a dictionary of embeddings.
         Returns {peptide: {'mean': val, 'aleatoric': val, 'epistemic': val, 'total': val}}
+        
+        Args:
+            embedding_dict: Dictionary of embeddings
+            batch_size: Batch size for prediction
+            device: Device to use for computation (defaults to model's device)
         """
+        if device is None:
+            device = next(self.parameters()).device
+            
+        # Process in batches to handle large dictionaries
         peptides = list(embedding_dict.keys())
-        X = np.array([embedding_dict[p] for p in peptides], dtype=np.float32)
-        X_torch = torch.tensor(X, dtype=torch.float32)
-
+        
+        # Build a dataset without scores
+        dummy_scores = {p: 0.0 for p in peptides}
+        dataset = VariableLengthDataset(embedding_dict, dummy_scores)
+        dataloader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=variable_length_collate_fn,
+        )
+        
         self.eval()
+        components_list = []
+        
         with torch.no_grad():
-            components = self.get_uncertainty_components(X_torch)
-
-        # Convert tensors to numpy arrays
-        components_np = {k: v.cpu().numpy().reshape(-1) for k, v in components.items()}
-
+            for batch_x, _, lengths in dataloader:
+                # Move batch to device
+                batch_x = batch_x.to(device)
+                
+                # Get components
+                batch_components = self.get_uncertainty_components(batch_x, lengths)
+                
+                # Move back to CPU
+                batch_components = {k: v.cpu() for k, v in batch_components.items()}
+                components_list.append(batch_components)
+        
+        # Combine results from all batches
+        components_combined = {}
+        for key in components_list[0].keys():
+            components_combined[key] = torch.cat([batch[key] for batch in components_list])
+        
+        # Convert to numpy and reshape
+        components_np = {k: v.numpy().reshape(-1) for k, v in components_combined.items()}
+        
         # Format results
         result = {}
         for i, p in enumerate(peptides):
             result[p] = {k: float(v[i]) for k, v in components_np.items()}
-
+            
         return result
 
     def evidential_loss(
@@ -178,3 +222,17 @@ class DeepEvidentialRegression(BasePredictionModel):
         loss = nll + self.evidential_regularization * reg
 
         return loss.mean()
+
+    def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
+        """
+        Override the default loss calculation to use evidential loss.
+        """
+        mu, v, alpha, beta = self.forward_once(batch_x, lengths)
+        return self.evidential_loss(mu, v, alpha, beta, batch_y)
+    
+    def _get_default_criterion(self):
+        """
+        The DeepEvidentialRegression model uses its own loss function, 
+        so we return None here to indicate no external criterion is needed.
+        """
+        return None

@@ -73,3 +73,19 @@ class MonteCarloDropout(BasePredictionModel):
         mean = all_preds.mean(dim=0)  # (N, 1)
         std = all_preds.std(dim=0)  # (N, 1)
         return mean, std
+
+    def _get_default_criterion(self):
+        """
+        Monte Carlo Dropout uses standard MSE loss during training.
+        """
+        return torch.nn.MSELoss()
+
+    def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
+        """
+        Standard loss calculation for MC Dropout.
+        During training, we make a single forward pass rather than multiple MC samples.
+        """
+        # During training, we just do a single forward pass with dropout active
+        self.train()  # Ensure dropout is active
+        mean_pred = self.forward_once(batch_x, lengths)
+        return criterion(mean_pred, batch_y)

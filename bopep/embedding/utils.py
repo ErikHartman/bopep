@@ -49,4 +49,7 @@ def filter_peptides(
 
         filtered_peptides.append(peptide)
 
+    print(f"Number of peptides before filtering: {len(peptides)}")
+    print(f"Number of peptides after filtering: {len(filtered_peptides)}")
+
     return filtered_peptides

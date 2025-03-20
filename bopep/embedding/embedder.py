@@ -18,13 +18,15 @@ class Embedder:
     def __init__(self):
         pass
 
-    def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128) -> dict:
-        peptides = filter_peptides(peptides)
+    def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True) -> dict:
+        if filter:
+            peptides = filter_peptides(peptides)
         embeddings = embed_esm(peptides, model_path, average, batch_size)
         return embeddings
 
-    def embed_aaindex(self, peptides: list, average: bool) -> dict:
-        peptides = filter_peptides(peptides)
+    def embed_aaindex(self, peptides: list, average: bool, filter:bool = True) -> dict:
+        if filter:
+            peptides = filter_peptides(peptides)
         embeddings = embed_aaindex(peptides, average)
         return embeddings
     
@@ -80,6 +82,7 @@ class Embedder:
         is_sequence_embedding = len(first_emb.shape) > 1
         
         if is_sequence_embedding:
+            print("Performing PCA on sequence (2d) embeddings...")
             # For sequence embeddings (average=False case)
             # Collect all position embeddings across all sequences
             all_position_embeddings = []
@@ -104,6 +107,7 @@ class Embedder:
             print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[1]}")
             
         else:
+            print("Performing PCA on averaged (1d) embeddings...")
             # For averaged embeddings (average=True case) - original implementation
             embedding_array = np.array(list(embeddings.values()))
             peptide_sequences = list(embeddings.keys())
