@@ -30,7 +30,6 @@ class MVE(BasePredictionModel):
         # We only need 2 outputs: mu and log_var
         output_dim = 2
 
-        # Create the core network
         self.network = NetworkFactory.get_network(
             network_type=network_type,
             input_dim=input_dim,

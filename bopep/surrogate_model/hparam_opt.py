@@ -50,10 +50,8 @@ class OptunaOptimizer:
         self.device = device
         self.dict_handler = DictHandler()
 
-        # Prepare data and split into train/validation sets
-        peptides, _, _ = self.dict_handler.prepare_data_from_dict(
-            embedding_dict, scores_dict
-        )
+        # Get peptide IDs directly from the embedding dict
+        peptides = list(embedding_dict.keys())
 
         # Get indices for train/validation split
         indices = np.arange(len(peptides))
@@ -71,7 +69,15 @@ class OptunaOptimizer:
         self.val_embedding_dict = {p: embedding_dict[p] for p in self.val_peptides}
         self.val_scores_dict = {p: scores_dict[p] for p in self.val_peptides}
 
-        self.input_dim = next(iter(embedding_dict.values())).shape[0]
+        # Determine input dimension from the feature dimension (second dimension)
+        # For variable-length sequences, shape is (seq_len, feature_dim)
+        # For fixed-length vectors, shape is (feature_dim,)
+        sample_embedding = next(iter(embedding_dict.values()))
+        if sample_embedding.ndim == 2:
+            self.input_dim = sample_embedding.shape[1]  # (seq_len, feature_dim)
+        else:
+            self.input_dim = sample_embedding.shape[0]  # (feature_dim,)
+            
         self.best_params = None
         self.best_val_loss = float("inf")
         self.best_trial = None
@@ -128,6 +134,8 @@ class OptunaOptimizer:
             for batch_x, batch_y, lengths in val_loader:
                 batch_x = batch_x.to(self.device)
                 batch_y = batch_y.to(self.device)
+                # Ensure batch_y has correct shape [batch_size, 1]
+                batch_y = batch_y.view(-1, 1)
 
                 mean_pred, _ = model.forward_predict(batch_x, lengths=lengths)
                 loss = criterion(mean_pred, batch_y)
@@ -175,6 +183,9 @@ class OptunaOptimizer:
                 batch_y = batch_y.to(self.device)
 
                 optimizer.zero_grad()
+                # Ensure batch_y has correct shape [batch_size, 1]
+                batch_y = batch_y.view(-1, 1)
+                
                 # Now pass lengths so BiLSTM can pack sequences
                 mean_pred, _ = model.forward_predict(batch_x, lengths=lengths)
                 loss = criterion(mean_pred, batch_y)
@@ -280,9 +291,26 @@ class CustomPredictionModel(BasePredictionModel):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass with optional lengths for variable-length sequences.
+        Ensures correct output shape for loss calculation.
         """
         # Pass lengths to the network's forward method
-        mean = self.network(x, lengths=lengths)
+        output = self.network(x, lengths=lengths)
+        
+        # Ensure output is 2D [batch_size, 1]
+        if output.dim() > 1 and output.size(1) != 1:
+            # If the output is not already [batch_size, 1], reshape it
+            mean = output.mean(dim=1, keepdim=True)
+        else:
+            # If it's already [batch_size, 1] or [batch_size], ensure it's [batch_size, 1]
+            mean = output.view(-1, 1)
+            
         # Return a fixed std for demonstration
         std = torch.ones_like(mean)
         return mean, std
+
+    def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
+        """
+        Override of _calculate_loss to ensure tensor shape compatibility.
+        """
+        mean_pred, _ = self.forward_predict(batch_x, lengths=lengths)
+        return criterion(mean_pred, batch_y)
