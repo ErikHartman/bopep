@@ -109,10 +109,12 @@ class BoPep:
         if embeddings is None:
             embeddings = self._generate_embeddings(peptides)
 
-        # Create surrogate model
         self.surrogate_model_kwargs["input_dim"] = len(
-            embeddings[list(embeddings.keys())][0]
-        )  # this might not work for bilstm
+            embeddings[list(embeddings.keys())[0]]
+        ) if self.surrogate_model_kwargs["network_type"] == "mlp" else embeddings[list(embeddings.keys())[0]].shape[-1]
+
+        # Store best hyperparameters
+        self.best_hyperparams = None
 
         # 1) Select initial peptides for docking
         initial_peptides = self.selector.select_initial_peptides(
@@ -153,7 +155,10 @@ class BoPep:
                 ):
                     self._optimize_hyperparameters(
                         embeddings, objectives
-                    )  # This sets self.model
+                    )  # This sets self.best_hyperparams and self.model
+                else:
+                    # Reinitialize model with current best hyperparameters
+                    self._initialize_model(self.best_hyperparams)
 
                 # 2.1) Train the model on *only the peptides we have scores for*
                 train_embeddings = {p: embeddings[p] for p in docked_peptides}
@@ -276,7 +281,7 @@ class BoPep:
         """
         Optimize hyperparameters for the surrogate model using Optuna.
 
-        Sets self.model which is to be used for the next iterations.
+        Sets self.model and self.best_hyperparams which are to be used for the next iterations.
         """
         # Decide which model_class to pass to OptunaOptimizer
         if self.surrogate_model_kwargs["network_type"] == "mlp":
@@ -298,38 +303,48 @@ class BoPep:
         )
 
         best_params = optuna_optimizer.optimize()
+        
+        # Store the best hyperparameters
+        self.best_hyperparams = best_params
+        
+        # Initialize the model with these hyperparameters
+        self._initialize_model(best_params)
 
+    def _initialize_model(self, hyperparams):
+        """
+        Initialize a fresh model instance with the given hyperparameters.
+        """
         if self.surrogate_model_kwargs["model_type"] == "nn_ensemble":
             self.model = NeuralNetworkEnsemble(
                 input_dim=self.surrogate_model_kwargs["input_dim"],
-                hidden_dims=best_params.get("hidden_dims"),
-                n_networks=self.surrogate_model_kwargs.get("n_networks"),
+                hidden_dims=hyperparams.get("hidden_dims"),
+                n_networks=self.surrogate_model_kwargs.get("n_networks", 5),
                 network_type=self.surrogate_model_kwargs.get("network_type"),
-                lstm_layers=best_params.get("lstm_layers"),
-                lstm_hidden_dim=best_params.get("lstm_hidden_dim"),
+                lstm_layers=hyperparams.get("lstm_layers"),
+                lstm_hidden_dim=hyperparams.get("lstm_hidden_dim"),
             )
         elif self.surrogate_model_kwargs["model_type"] == "mc_dropout":
             self.model = MonteCarloDropout(
                 input_dim=self.surrogate_model_kwargs["input_dim"],
-                hidden_dims=best_params.get("hidden_dims"),
-                dropout_rate=self.surrogate_model_kwargs.get("dropout_rate"),
-                mc_samples=self.surrogate_model_kwargs.get("mc_samples"),
+                hidden_dims=hyperparams.get("hidden_dims"),
+                dropout_rate=self.surrogate_model_kwargs.get("dropout_rate", 0.1),
+                mc_samples=self.surrogate_model_kwargs.get("mc_samples", 20),
                 network_type=self.surrogate_model_kwargs.get("network_type"),
-                lstm_layers=best_params.get("lstm_layers"),
-                lstm_hidden_dim=best_params.get("lstm_hidden_dim"),
+                lstm_layers=hyperparams.get("lstm_layers"),
+                lstm_hidden_dim=hyperparams.get("lstm_hidden_dim"),
             )
         elif self.surrogate_model_kwargs["model_type"] == "deep_evidential_regression":
             self.model = DeepEvidentialRegression(
                 input_dim=self.surrogate_model_kwargs["input_dim"],
-                hidden_dims=best_params.get("hidden_dims"),
-                dropout_rate=self.surrogate_model_kwargs.get("dropout_rate"),
+                hidden_dims=hyperparams.get("hidden_dims"),
+                dropout_rate=self.surrogate_model_kwargs.get("dropout_rate", 0.1),
                 network_type=self.surrogate_model_kwargs.get("network_type"),
-                lstm_layers=best_params.get("lstm_layers"),
-                lstm_hidden_dim=best_params.get("lstm_hidden_dim"),
+                lstm_layers=hyperparams.get("lstm_layers"),
+                lstm_hidden_dim=hyperparams.get("lstm_hidden_dim"),
             )
         else:
             raise ValueError(
-                f"Invalid model type: {self.surrogate_model_kwargs}."
+                f"Invalid model type: {self.surrogate_model_kwargs['model_type']}."
             )
 
     def _check_binding_site_residue_indices(

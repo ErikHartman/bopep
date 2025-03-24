@@ -91,12 +91,12 @@ def variable_length_collate_fn(batch):
         x_padded = torch.stack(embeddings, dim=0)  # shape (N, D)
         lengths = None
     else:
-        # LSTM shape => (L, D)
+        # 2D shape => (L, D)
         # We must pad them => shape (N, L_max, D)
         lengths = [
             emb.size(0) for emb in embeddings
         ]  # keep track of each sequence length
-        x_padded = pad_sequence(embeddings, batch_first=True)
+        x_padded = pad_sequence(embeddings, batch_first=True) # pads with 0s
 
     # Stack scores => shape (N, 1) for regression
     y_stacked = torch.stack(scores).unsqueeze(-1)  # shape (N, 1)
@@ -115,8 +115,6 @@ class BasePredictionModel(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        # If you still have a DictHandler for other tasks, you could keep it.
-        # self.dict_handler = DictHandler()
 
     def fit_dict(
         self,
@@ -125,12 +123,18 @@ class BasePredictionModel(torch.nn.Module):
         epochs: int = 100,
         batch_size: int = 32,
         learning_rate: float = 1e-3,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        verbose: bool = True,
+        criterion=None,  # <-- this parameter will be auto-determined if None
     ) -> float:
         """Train using dictionaries of embeddings and scores."""
         # Use the model's device if none specified
         if device is None:
             device = next(self.parameters()).device
+            
+        # Auto-determine the appropriate loss function if criterion is None
+        if criterion is None:
+            criterion = self._get_default_criterion()
             
         dataset = VariableLengthDataset(embedding_dict, scores_dict)
         dataloader = DataLoader(
@@ -139,7 +143,15 @@ class BasePredictionModel(torch.nn.Module):
             shuffle=True,
             collate_fn=variable_length_collate_fn,
         )
-        return self._fit_from_dataloader(dataloader, epochs, learning_rate, device)
+        return self._fit_from_dataloader(dataloader, epochs, learning_rate, device, verbose, criterion=criterion)
+        
+    def _get_default_criterion(self):
+        """
+        Returns the appropriate loss function for the model type.
+        Can be overridden by subclasses to provide specialized loss functions.
+        """
+        # Default to MSE for the base class
+        return torch.nn.MSELoss()
 
     def predict_dict(
         self, 
@@ -148,14 +160,14 @@ class BasePredictionModel(torch.nn.Module):
         device: Optional[torch.device] = None
     ) -> Dict[str, Tuple[float, float]]:
         """Predict for a dictionary of embeddings, returning {pep: (mean, std), ...}."""
-        # Use the model's device if none specified
+
         if device is None:
             device = next(self.parameters()).device
             
         # We'll gather peptides in the same order as the dataset
         peptides = list(embedding_dict.keys())
 
-        # Build a dataset without scores (we can just pass a dummy or 0.0)
+        # Build a dataset without scores
         dummy_scores = {p: 0.0 for p in peptides}
         dataset = VariableLengthDataset(embedding_dict, dummy_scores)
         dataloader = DataLoader(
@@ -195,10 +207,12 @@ class BasePredictionModel(torch.nn.Module):
         epochs: int = 100,
         learning_rate: float = 1e-3,
         device: Optional[torch.device] = None,
+        verbose: bool = True,
         patience: int = 10,  # Early stopping patience
         min_delta: float = 0.0001,  # Minimum improvement threshold
+        criterion=None,
     ) -> float:
-        """Internal method to train on a DataLoader. Returns the final epoch's average MSE."""
+        """Internal method to train on a DataLoader. Returns the final epoch's average loss."""
         # Use the model's device if none specified
         if device is None:
             device = next(self.parameters()).device
@@ -208,7 +222,8 @@ class BasePredictionModel(torch.nn.Module):
             self.parameters(), lr=learning_rate, weight_decay=1e-5
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min")
-        criterion = torch.nn.MSELoss()
+        if criterion is None:
+            criterion = self._get_default_criterion()
 
         # Early stopping variables
         best_loss = float('inf')
@@ -223,17 +238,16 @@ class BasePredictionModel(torch.nn.Module):
                 batch_y = batch_y.to(device)
                 
                 optimizer.zero_grad()
-                # Pass lengths to forward_predict for sequence handling
-                mean_pred, _ = self.forward_predict(batch_x, lengths)
-                loss = criterion(mean_pred, batch_y)
+                # Call model-specific loss calculation
+                loss = self._calculate_loss(batch_x, batch_y, lengths, criterion)
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
 
             epoch_loss /= len(dataloader)
             scheduler.step(epoch_loss)
-
-            print(f"Epoch {epoch+1}/{epochs} | Loss: {epoch_loss:.4f}")
+            if verbose:
+                print(f"Epoch {epoch+1}/{epochs} | Loss: {epoch_loss:.4f}")
             
             # Check if this is the best loss so far
             if epoch_loss < best_loss - min_delta:
@@ -245,7 +259,8 @@ class BasePredictionModel(torch.nn.Module):
             
             # Early stopping check
             if counter >= patience:
-                print(f"Early stopping triggered after {epoch+1} epochs")
+                if verbose:
+                    print(f"Early stopping triggered after {epoch+1} epochs")
                 if best_model_state is not None:
                     self.load_state_dict(best_model_state)
                 return best_loss
@@ -255,6 +270,14 @@ class BasePredictionModel(torch.nn.Module):
             self.load_state_dict(best_model_state)
         
         return best_loss
+    
+    def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
+        """
+        Default loss calculation method. Can be overridden by subclasses.
+        """
+        # Default implementation for standard regression models
+        mean_pred, _ = self.forward_predict(batch_x, lengths)
+        return criterion(mean_pred, batch_y)
 
     def forward_predict(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None

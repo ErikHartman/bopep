@@ -5,8 +5,14 @@ import numpy as np
 
 class PeptideProperties:
 
-    def __init__(self, pdb_file: str):
-        self.peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id="B")
+    def __init__(self, pdb_file: str = None, peptide_sequence :str= None, chain_id: str = "B"):
+        if pdb_file:
+            self.peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id=chain_id)
+        elif peptide_sequence:
+            self.peptide_sequence = peptide_sequence
+        else:
+            raise ValueError("Either a PDB file or a peptide sequence must be provided.")
+        
         self.pa = ProteinAnalysis(self.peptide_sequence)
 
     def get_molecular_weight(self):

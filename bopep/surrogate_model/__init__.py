@@ -2,3 +2,4 @@ from bopep.surrogate_model.mc_dropout import MonteCarloDropout
 from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble
 from bopep.surrogate_model.deep_evidential_regression import DeepEvidentialRegression
 from bopep.surrogate_model.hparam_opt import OptunaOptimizer
+from bopep.surrogate_model.mve import MVE

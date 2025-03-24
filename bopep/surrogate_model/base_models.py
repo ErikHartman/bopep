@@ -35,6 +35,9 @@ class MLPNetwork(BaseNetwork):
             prev_dim = dim
         layers.append(torch.nn.Linear(prev_dim, output_dim))
         self.network = torch.nn.Sequential(*layers)
+        
+        print("MLPNetwork initialized")
+        print(self.network)
 
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
@@ -71,7 +74,7 @@ class SelfAttention(torch.nn.Module):
         # Calculate attention scores
         energy = self.query(projection).squeeze(-1)  # [batch_size, seq_length]
         
-        # Apply mask if provided
+        # Apply mask
         if mask is not None:
             # Ensure mask is on the same device as energy
             mask = mask.to(energy.device)
@@ -150,7 +153,6 @@ class BiLSTMNetwork(BaseNetwork):
             num_layers=num_layers,
             batch_first=True,
             bidirectional=True,
-            dropout=dropout_rate if num_layers > 1 else 0,
         )
         
         # Layer normalization for better training stability
@@ -164,6 +166,9 @@ class BiLSTMNetwork(BaseNetwork):
         self.dropout = torch.nn.Dropout(dropout_rate)
         self.activation = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(hidden_dim, output_dim)
+
+        print("BiLSTMNetwork initialized")
+        print(self)
 
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
@@ -243,7 +248,6 @@ class BiGRUNetwork(BaseNetwork):
             num_layers=num_layers,
             batch_first=True,
             bidirectional=True,
-            dropout=dropout_rate if num_layers > 1 else 0,
         )
         
         # Layer normalization
@@ -258,6 +262,9 @@ class BiGRUNetwork(BaseNetwork):
         self.activation = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(hidden_dim, output_dim)
         self.dropout2 = torch.nn.Dropout(dropout_rate)
+
+        print("BiGRUNetwork initialized")
+        print(self)
     
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None

@@ -1,4 +1,4 @@
-from typing import Dict, Literal, Any
+from typing import Dict, Literal, Any, Optional
 
 from bopep.surrogate_model.base_models import (
     BaseNetwork,
@@ -6,6 +6,7 @@ from bopep.surrogate_model.base_models import (
     BiLSTMNetwork,
     BiGRUNetwork,
 )
+import torch
 
 
 class NetworkFactory:
@@ -40,11 +41,13 @@ class NetworkFactory:
             "output_dim": output_dim,
         }
 
+        device = kwargs.get("device", torch.device("cpu"))
+
         if network_type == "mlp":
             # Handle MLP specific parameters
             hidden_dims = kwargs.get("hidden_dims", [128, 64])
             network_params["hidden_dims"] = hidden_dims
-            return MLPNetwork(**network_params)
+            model = MLPNetwork(**network_params)
 
         elif network_type in ["bilstm"]:
             # Handle BiLSTM specific parameters
@@ -58,24 +61,27 @@ class NetworkFactory:
 
             network_params["hidden_dim"] = hidden_dim
             network_params["num_layers"] = num_layers
-            return BiLSTMNetwork(**network_params)
+            model = BiLSTMNetwork(**network_params)
 
         elif network_type in ["bigru"]:
             # Handle BiGRU specific parameters
             hidden_dim = kwargs.get("hidden_dim", kwargs.get("gru_hidden_dim", 128))
             num_layers = kwargs.get("num_layers", kwargs.get("gru_layers", 1))
-            
+
             # Ensure hidden_dim is an int
             if hidden_dim is None:
                 hidden_dim = 128
                 print(f"Warning: hidden_dim was None, defaulting to {hidden_dim}")
-                
+
             network_params["hidden_dim"] = hidden_dim
             network_params["num_layers"] = num_layers
-            return BiGRUNetwork(**network_params)
+            model = BiGRUNetwork(**network_params)
 
         else:
             raise ValueError(f"Unsupported network_type: {network_type}")
+
+        model.to(device)
+        return model
 
     @staticmethod
     def validate_params(network_type: str, params: Dict[str, Any]) -> None:
@@ -89,7 +95,7 @@ class NetworkFactory:
         Raises:
             ValueError: If required parameters are missing
         """
-            
+
         required_params = {
             "mlp": ["input_dim", "hidden_dims"],
             "bilstm": ["input_dim", "hidden_dim", "num_layers"],

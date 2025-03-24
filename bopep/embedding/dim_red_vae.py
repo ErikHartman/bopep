@@ -128,6 +128,7 @@ def train_vae(data, latent_dim, hidden_layers=[], batch_size=64,
     
     # Determine device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Training VAE on {device}")
     
     # Create DataLoader
     dataset = TensorDataset(data)

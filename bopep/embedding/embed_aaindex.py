@@ -53,10 +53,11 @@ def embed_aaindex(peptide_sequences, average: bool = True):
             embeddings[peptide] = embedding_matrix.mean(
                 axis=0
             )  # Shape: (num_properties,)
+            
         else:
             embeddings[peptide] = (
                 embedding_matrix  # Shape: (sequence_length, num_properties)
             )
 
-    print("AAIndex embedding dim:", embeddings[peptide_sequences[0]].shape)
+    print("AAIndex embedding dim: ", embedding_matrix.shape)
     return embeddings

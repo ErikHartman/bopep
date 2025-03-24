@@ -51,7 +51,7 @@ class AcquisitionFunction:
 
         return {
             peptide: float(value)
-            for peptide, value in zip(peptides.keys(), ei)
+            for peptide, value in zip(peptides, ei)
         }
 
     def upper_confidence_bound(self, peptides, means, stds, kappa=1.96):
@@ -66,7 +66,7 @@ class AcquisitionFunction:
 
         return {
             peptide: float(value)
-            for peptide, value in zip(peptides.keys(), ucb)
+            for peptide, value in zip(peptides, ucb)
         }
 
     def probability_of_improvement(self, peptides, means, stds):
@@ -90,7 +90,7 @@ class AcquisitionFunction:
 
         return {
             peptide: float(value)
-            for peptide, value in zip(peptides.keys(), pi)
+            for peptide, value in zip(peptides, pi)
         }
 
     def standard_deviation(self, peptides, stds):
@@ -99,7 +99,7 @@ class AcquisitionFunction:
         """
         return {
             peptide: float(std)
-            for peptide, std in zip(peptides.keys(), stds)
+            for peptide, std in zip(peptides, stds)
         }
 
     def mean(self, peptides, means):
@@ -108,5 +108,5 @@ class AcquisitionFunction:
         """
         return {
             peptide: float(mean)
-            for peptide, mean in zip(peptides.keys(), means)
+            for peptide, mean in zip(peptides, means)
         }
