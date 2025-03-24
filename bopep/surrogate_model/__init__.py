@@ -3,3 +3,4 @@ from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble
 from bopep.surrogate_model.deep_evidential_regression import DeepEvidentialRegression
 from bopep.surrogate_model.hparam_opt import OptunaOptimizer
 from bopep.surrogate_model.mve import MVE
+from bopep.surrogate_model.uncertainty_tuning import UncertaintyTuner, tune_uncertainty_parameter

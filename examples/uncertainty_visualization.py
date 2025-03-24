@@ -67,7 +67,7 @@ def compare_all_hyperparameters(embedding_dict, scores_dict, test_x):
     mc_dropout_rates = [0.1, 0.3, 0.5, 0.7]
     ensemble_sizes = [1, 5, 10, 20]
     evidential_reg_values = [0, 0.1, 0.5, 1.0]
-    mve_reg_values = [0.01, 0.1, 0.3, 0.4]
+    mve_reg_values = [0.0001, 0.1, 0.3, 0.4]
     
     fig, axes = plt.subplots(4, 4, figsize=(20, 16), sharex=True)
     x_true = np.linspace(min(test_x), max(test_x), 1000)
@@ -286,7 +286,8 @@ def train_and_plot_model(model, model_name, embedding_dict_scaled, scores_dict_s
 
 def main():
     print("Generating synthetic data...")
-    embedding_dict, scores_dict, x_values, y_values = generate_cubic_data(n_samples=150, noise_std=3.0, x_range=(-4,4))
+    train_range = (-4, 4)
+    embedding_dict, scores_dict, x_values, y_values = generate_cubic_data(n_samples=150, noise_std=3.0, x_range=train_range)
     test_x = np.linspace(-7,7, 200)
     print("Comparing all models with different hyperparameters...")
     compare_all_hyperparameters(embedding_dict, scores_dict, test_x)
