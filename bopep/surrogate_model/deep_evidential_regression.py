@@ -10,10 +10,9 @@ from bopep.surrogate_model.helpers import VariableLengthDataset, variable_length
 
 class DeepEvidentialRegression(BasePredictionModel):
     """
-    Implementation of Deep Evidential Regression for aleatoric and epistemic uncertainty estimation.
+    Implementation of Deep Evidential Regression.
 
-    Based on the paper:
-    "Deep Evidential Regression" by Amini et al. (NeurIPS 2020)
+    Based on the paper: "Deep Evidential Regression" by Amini et al.
     https://arxiv.org/abs/1910.02600
 
     The model outputs 4 parameters of a Normal-Inverse-Gamma distribution:
@@ -23,9 +22,9 @@ class DeepEvidentialRegression(BasePredictionModel):
     - beta: scale parameter for the Inverse-Gamma prior
 
     The uncertainty is decomposed into:
-    - Aleatoric uncertainty: beta / (alpha - 1) for alpha > 1
-    - Epistemic uncertainty: beta / (v * (alpha - 1)) for alpha > 1
-    - Total uncertainty: beta / (v * (alpha - 1)) + beta / (alpha - 1) for alpha > 1
+    - Aleatoric uncertainty: beta / (alpha - 1)
+    - Epistemic uncertainty: beta / (v * (alpha - 1))
+    - Total uncertainty: beta / (v * (alpha - 1)) + beta / (alpha - 1)
     """
 
     def __init__(
@@ -59,10 +58,7 @@ class DeepEvidentialRegression(BasePredictionModel):
         x: torch.Tensor, 
         lengths: Optional[List[int]] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Now pass lengths into the network
         outputs = self.network(x, lengths=lengths)
-
-        # Modified parameter constraints to match paper better
         mu = outputs[:, 0:1]
         v = torch.nn.functional.softplus(outputs[:, 1:2]) + 1e-3  
         alpha = torch.nn.functional.softplus(outputs[:, 2:3]) + 1.0 
@@ -74,7 +70,6 @@ class DeepEvidentialRegression(BasePredictionModel):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass returning predictive mean and standard deviation.
-        For evidential regression, mean = mu and variance = beta/(alpha-1) * (1 + 1/v)
         """
         mu, v, alpha, beta = self.forward_once(x, lengths=lengths)
         variance = (beta / (alpha - 1.0)) * (1.0 + 1.0 / v)
@@ -86,22 +81,13 @@ class DeepEvidentialRegression(BasePredictionModel):
     ) -> Dict[str, torch.Tensor]:
         """
         Decompose uncertainty into aleatoric and epistemic components.
-
-        Args:
-            x: Input tensor of shape (N, D) for MLP or (N, L, D) for RNN
-            lengths: Optional sequence lengths for variable-length inputs
-
-        Returns:
-            Dict with keys:
-                - 'mean': predicted mean
-                - 'aleatoric': aleatoric uncertainty (data uncertainty)
-                - 'epistemic': epistemic uncertainty (model uncertainty)
-                - 'total': total uncertainty
+        Returns dict with keys:
+            - 'mean': predicted mean
+            - 'aleatoric': aleatoric uncertainty (data uncertainty)
+            - 'epistemic': epistemic uncertainty (model uncertainty)
+            - 'total': total uncertainty
         """
         mu, v, alpha, beta = self.forward_once(x, lengths=lengths)
-
-        # Compute uncertainty components
-        # Only valid for alpha > 1, which we enforce in forward_once
         aleatoric_uncertainty = beta / (alpha - 1.0)
         epistemic_uncertainty = beta / (v * (alpha - 1.0))
         total_uncertainty = aleatoric_uncertainty + epistemic_uncertainty
@@ -125,11 +111,6 @@ class DeepEvidentialRegression(BasePredictionModel):
         """
         Predict with uncertainty decomposition for a dictionary of embeddings.
         Returns {peptide: {'mean': val, 'aleatoric': val, 'epistemic': val, 'total': val}}
-        
-        Args:
-            embedding_dict: Dictionary of embeddings
-            batch_size: Batch size for prediction
-            device: Device to use for computation (defaults to model's device)
         """
         if device is None:
             device = next(self.parameters()).device
@@ -192,17 +173,12 @@ class DeepEvidentialRegression(BasePredictionModel):
         1. NLL term: Negative log likelihood of the data under the predictive distribution
         2. Regularization term: KL divergence between the predicted and prior distribution
         
-        Args:
-            mu: Predicted mean
-            v: Predicted precision parameter
-            alpha: Predicted shape parameter
-            beta: Predicted scale parameter
-            targets: Ground truth targets
-            
-        Returns:
-            Total loss combining NLL and regularization
+        mu: Predicted mean
+        v: Predicted precision parameter
+        alpha: Predicted shape parameter
+        beta: Predicted scale parameter
+        targets: Ground truth targets
         """
-        # NLL loss term
         twoBlambda = 2.0 * beta * (1.0 + v)
 
         nll = (
@@ -216,21 +192,13 @@ class DeepEvidentialRegression(BasePredictionModel):
         error = (targets - mu)
         reg = torch.abs(error) * (2.0 * v + alpha)
 
-        # Combine losses with regularization weight
         loss = nll + self.evidential_regularization * reg
 
         return loss.mean()
 
     def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
-        """
-        Override the default loss calculation to use evidential loss.
-        """
         mu, v, alpha, beta = self.forward_once(batch_x, lengths)
         return self.evidential_loss(mu, v, alpha, beta, batch_y)
     
     def _get_default_criterion(self):
-        """
-        The DeepEvidentialRegression model uses its own loss function, 
-        so we return None here to indicate no external criterion is needed.
-        """
         return None
