@@ -35,9 +35,6 @@ class MLPNetwork(BaseNetwork):
             prev_dim = dim
         layers.append(torch.nn.Linear(prev_dim, output_dim))
         self.network = torch.nn.Sequential(*layers)
-        
-        print("MLPNetwork initialized")
-        print(self.network)
 
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
@@ -167,9 +164,6 @@ class BiLSTMNetwork(BaseNetwork):
         self.activation = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(hidden_dim, output_dim)
 
-        print("BiLSTMNetwork initialized")
-        print(self)
-
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
     ) -> torch.Tensor:
@@ -187,7 +181,8 @@ class BiLSTMNetwork(BaseNetwork):
         if lengths is not None:
             # Create sequence mask for attention - make sure it's on the same device as x
             max_len = x.size(1)
-            mask = torch.arange(max_len, device=device).expand(batch_size, max_len) < torch.tensor(lengths, device=device).unsqueeze(1)
+            lengths_tensor = torch.tensor(lengths).to(device)
+            mask = torch.arange(max_len, device=device).expand(batch_size, max_len) < lengths_tensor.unsqueeze(1)
             
             # Use pack_padded_sequence to ignore padded timesteps
             x_packed = rnn_utils.pack_padded_sequence(
@@ -262,9 +257,6 @@ class BiGRUNetwork(BaseNetwork):
         self.activation = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(hidden_dim, output_dim)
         self.dropout2 = torch.nn.Dropout(dropout_rate)
-
-        print("BiGRUNetwork initialized")
-        print(self)
     
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
@@ -283,7 +275,8 @@ class BiGRUNetwork(BaseNetwork):
         if lengths is not None:
             # Create mask for attention - on the same device as x
             max_len = x.size(1)
-            mask = torch.arange(max_len, device=device).expand(batch_size, max_len) < torch.tensor(lengths, device=device).unsqueeze(1)
+            lengths_tensor = torch.tensor(lengths).to(device)
+            mask = torch.arange(max_len, device=device).expand(batch_size, max_len) < lengths_tensor.unsqueeze(1)
             
             # Pack sequences
             x_packed = rnn_utils.pack_padded_sequence(

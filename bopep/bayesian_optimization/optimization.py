@@ -6,7 +6,6 @@ from bopep.surrogate_model import (
     NeuralNetworkEnsemble,
     MonteCarloDropout,
     DeepEvidentialRegression,
-    OptunaOptimizer,
 )
 from bopep.embedding.embedder import Embedder
 from bopep.logging.logger import Logger

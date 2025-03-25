@@ -1,0 +1,420 @@
+import numpy as np
+import torch
+from typing import Dict, List, Literal, Optional, Tuple, Union
+from torch.utils.data import DataLoader
+from sklearn.model_selection import KFold
+import optuna
+from scipy.stats import norm
+
+from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble
+from bopep.surrogate_model.mc_dropout import MonteCarloDropout
+from bopep.surrogate_model.mve import MVE
+from bopep.surrogate_model.deep_evidential_regression import DeepEvidentialRegression
+from bopep.surrogate_model.helpers import (
+    BasePredictionModel,
+    VariableLengthDataset,
+    variable_length_collate_fn,
+)
+
+class HyperparameterTuner:
+    """
+    Unified tuner that searches:
+      1) Network architecture hyperparams (MLP vs BiLSTM vs BiGRU)
+      2) Uncertainty hyperparam (MVE/DER reg, dropout rate, or ensemble size)
+    Uses a combined metric: RMSE + NLL + MSCE + Coverage Error.
+    """
+
+    def __init__(
+        self,
+        model_type: Literal["mve", "der", "nn_ensemble", "mc_dropout"],
+        input_dim: int,
+        network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
+        coverage_levels: List[float] = [0.5, 0.9],
+        rmse_weight: float = 1.0,
+        msce_weight: float = 5.0,
+        coverage_weight: float = 5.0,
+        device: Optional[torch.device] = None,
+        n_splits: int = 3,
+        n_trials: int = 20,
+        random_state: int = 42,
+        hidden_dim_min: int = 16,
+        hidden_dim_max: int = 256,
+    ):
+        """
+        Args:
+            model_type: "mve", "der", "nn_ensemble", or "mc_dropout"
+            input_dim: feature dimension
+            network_type: "mlp", "bilstm", or "bigru"
+            coverage_levels: coverage alphas for calibration
+            rmse_weight, msce_weight, coverage_weight: weighting in combined score
+            device: Torch device
+            n_splits: K-fold CV splits
+            n_trials: Number of Optuna trials
+            random_state: for cross-validation reproducibility
+            hidden_dim_min, hidden_dim_max: Range for hidden dims in MLP or RNN
+        """
+        self.model_type = model_type
+        self.input_dim = input_dim
+        self.network_type = network_type
+        self.coverage_levels = coverage_levels
+        self.rmse_weight = rmse_weight
+        self.msce_weight = msce_weight
+        self.coverage_weight = coverage_weight
+        self.n_splits = n_splits
+        self.n_trials = n_trials
+        self.random_state = random_state
+
+        self.hidden_dim_min = hidden_dim_min
+        self.hidden_dim_max = hidden_dim_max
+
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = device
+
+        self.best_params: Optional[Dict[str, Union[float, List[int]]]] = None
+        self.best_score = float("inf")
+
+    def _create_model(
+        self,
+        param_value: float,
+        # For MLP:
+        hidden_dims: Optional[List[int]] = None,
+        # For RNN:
+        hidden_dim: Optional[int] = None,
+        num_layers: int = 1,
+    ) -> "BasePredictionModel":
+        """
+        Build the actual model (MVE, DER, nn_ensemble, or mc_dropout)
+        for either MLP or RNN style (BiLSTM/BiGRU).
+        """
+        if self.model_type == "mve":
+            return MVE(
+                input_dim=self.input_dim,
+                hidden_dims=hidden_dims,
+                hidden_dim=hidden_dim,
+                num_layers=num_layers,
+                network_type=self.network_type,
+                mve_regularization=param_value,
+            )
+        elif self.model_type == "der":
+            return DeepEvidentialRegression(
+                input_dim=self.input_dim,
+                hidden_dims=hidden_dims,
+                hidden_dim=hidden_dim,
+                num_layers=num_layers,
+                network_type=self.network_type,
+                evidential_regularization=param_value,
+            )
+        elif self.model_type == "mc_dropout":
+            return MonteCarloDropout(
+                input_dim=self.input_dim,
+                hidden_dims=hidden_dims,
+                hidden_dim=hidden_dim,
+                num_layers=num_layers,
+                network_type=self.network_type,
+                dropout_rate=param_value,
+            )
+        elif self.model_type == "nn_ensemble":
+            # param_value is the # of networks
+            return NeuralNetworkEnsemble(
+                input_dim=self.input_dim,
+                hidden_dims=hidden_dims,
+                hidden_dim=hidden_dim,
+                num_layers=num_layers,
+                network_type=self.network_type,
+                n_networks=int(param_value),
+            )
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")
+
+    def _evaluate_model(
+        self, model: "BasePredictionModel", val_loader: DataLoader
+    ) -> Tuple[float, float, float, float, float]:
+        """
+        Returns (combined_score, rmse, nll, msce, coverage_err).
+        """
+        model.eval()
+        model.to(self.device)
+
+        all_means, all_stds, all_targets = [], [], []
+
+        with torch.no_grad():
+            for batch_x, batch_y, lengths in val_loader:
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device).view(-1, 1)
+
+                means, stds = model.forward_predict(batch_x, lengths=lengths)
+                all_means.append(means)
+                all_stds.append(stds)
+                all_targets.append(batch_y)
+
+        means = torch.cat(all_means)
+        stds = torch.cat(all_stds)
+        targets = torch.cat(all_targets)
+
+        nll = self.negative_log_likelihood(means, stds, targets)
+        rmse = torch.sqrt(torch.mean((means - targets) ** 2)).item()
+        msce = self.reliability_calibration_error(means, stds, targets)
+        coverage_err = self.coverage_calibration_error(means, stds, targets)
+
+        combined_score = (
+            nll
+            + self.rmse_weight * rmse
+            + self.msce_weight * msce
+            + self.coverage_weight * coverage_err
+        )
+        return combined_score, rmse, nll, msce, coverage_err
+
+    @staticmethod
+    def negative_log_likelihood(
+        means: torch.Tensor, stds: torch.Tensor, targets: torch.Tensor
+    ) -> float:
+        """Standard Gaussian NLL."""
+        stds = torch.clamp(stds, min=1e-9)
+        nll = 0.5 * torch.log(2 * np.pi * stds**2) + 0.5 * ((targets - means) ** 2) / (stds**2)
+        return nll.mean().item()
+
+    @staticmethod
+    def reliability_calibration_error(
+        means: torch.Tensor, stds: torch.Tensor, targets: torch.Tensor, n_bins: int = 10
+    ) -> float:
+        """
+        MSCE: mean squared difference between observed and expected coverage
+        in a reliability diagram approach.
+        """
+        means_np = means.cpu().numpy().flatten()
+        stds_np = stds.cpu().numpy().flatten()
+        targets_np = targets.cpu().numpy().flatten()
+
+        # Normalized residual
+        residuals = (targets_np - means_np) / stds_np
+        expected_props = np.linspace(0, 1, n_bins + 1)[1:]
+
+        observed_props = []
+        for q in expected_props:
+            threshold = np.sqrt(2) * np.abs(np.percentile(residuals, q * 100))
+            observed_props.append(np.mean(np.abs(residuals) < threshold))
+
+        observed_props = np.array(observed_props)
+        msce = np.mean((observed_props - expected_props) ** 2)
+        return msce
+
+    def coverage_calibration_error(
+        self, means: torch.Tensor, stds: torch.Tensor, targets: torch.Tensor
+    ) -> float:
+        """
+        Average absolute difference between nominal and empirical coverage
+        for the coverage_levels provided.
+        """
+        means_np = means.cpu().numpy().flatten()
+        stds_np = stds.cpu().numpy().flatten()
+        targets_np = targets.cpu().numpy().flatten()
+
+        coverage_error_sum = 0.0
+        for alpha in self.coverage_levels:
+            # z-value for two-sided normal coverage
+            z_value = norm.ppf(0.5 + alpha / 2.0)
+            lower = means_np - z_value * stds_np
+            upper = means_np + z_value * stds_np
+            frac_in_interval = np.mean((targets_np >= lower) & (targets_np <= upper))
+            coverage_error_sum += abs(frac_in_interval - alpha)
+
+        return coverage_error_sum / len(self.coverage_levels)
+
+    def _fit_model(
+        self,
+        model: "BasePredictionModel",
+        train_embed_dict: Dict[str, np.ndarray],
+        train_scores_dict: Dict[str, float],
+        epochs: int,
+        learning_rate: float,
+        batch_size: int = 64,
+    ):
+        """
+        Just calls model.fit_dict(...) with your chosen hyperparams.
+        You can add early stopping or other logic if you wish.
+        """
+        model.fit_dict(
+            embedding_dict=train_embed_dict,
+            scores_dict=train_scores_dict,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            device=self.device,
+            verbose=False,
+        )
+
+    def objective(self, trial: optuna.Trial) -> float:
+        """
+        Samples architecture (depending on network_type), 
+        plus the uncertainty hyperparam.
+        Then does cross-validation and returns average combined score.
+        """
+        # 1) Sample architecture depending on network_type
+        if self.network_type == "mlp":
+            # We'll sample a variable number of MLP layers:
+            n_layers = trial.suggest_int("num_layers", 1, 3)
+            hidden_dims = []
+            for i in range(n_layers):
+                hd = trial.suggest_int(
+                    f"hidden_dim_{i}", self.hidden_dim_min, self.hidden_dim_max, log=True
+                )
+                hidden_dims.append(hd)
+            # For MLP, we won't use hidden_dim or anything in the RNN sense:
+            chosen_hidden_dim = None
+        else:
+            # We have an RNN (BiLSTM or BiGRU).
+            # We'll still sample num_layers, but only one "hidden_dim".
+            n_layers = trial.suggest_int("num_layers", 1, 3)
+            chosen_hidden_dim = trial.suggest_int(
+                "rnn_hidden_dim", self.hidden_dim_min, self.hidden_dim_max, log=True
+            )
+            hidden_dims = None  # Not used for RNN
+
+        # 2) Sample standard hyperparams
+        learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
+        epochs = trial.suggest_int("epochs", 50, 200)
+        batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
+
+        # 3) Sample the "uncertainty" hyperparam
+        if self.model_type in ["mve", "der"]:
+            param_value = trial.suggest_float("uncertainty_param", 1e-4, 1.0, log=True)
+        elif self.model_type == "mc_dropout":
+            param_value = trial.suggest_float("uncertainty_param", 0.05, 0.5)
+        elif self.model_type == "nn_ensemble":
+            param_value = trial.suggest_int("uncertainty_param", 2, 15)
+        else:
+            raise ValueError(f"Unknown model_type {self.model_type}")
+
+        # 4) K-fold cross validation
+        keys = list(self.embedding_dict.keys())
+        indices = np.arange(len(keys))
+        kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.random_state)
+
+        cv_scores = []
+        for train_idx, val_idx in kf.split(indices):
+            train_embed_dict = {keys[i]: self.embedding_dict[keys[i]] for i in train_idx}
+            train_scores_dict = {keys[i]: self.scores_dict[keys[i]] for i in train_idx}
+
+            val_embed_dict = {keys[i]: self.embedding_dict[keys[i]] for i in val_idx}
+            val_scores_dict = {keys[i]: self.scores_dict[keys[i]] for i in val_idx}
+
+            # Create the model
+            model = self._create_model(
+                param_value=param_value,
+                hidden_dims=hidden_dims,     # only for MLP
+                hidden_dim=chosen_hidden_dim, # only for RNN
+                num_layers=n_layers,
+            )
+            model.to(self.device)
+
+            # Fit
+            self._fit_model(
+                model,
+                train_embed_dict,
+                train_scores_dict,
+                epochs,
+                learning_rate,
+                batch_size=batch_size,
+            )
+
+            # Evaluate
+            val_dataset = VariableLengthDataset(val_embed_dict, val_scores_dict)
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                collate_fn=variable_length_collate_fn,
+            )
+
+            combined_score, _, _, _, _ = self._evaluate_model(model, val_loader)
+            cv_scores.append(combined_score)
+
+        avg_score = float(np.mean(cv_scores))
+
+        # Track best
+        if avg_score < self.best_score:
+            self.best_score = avg_score
+            # Store the best hyperparams
+            self.best_params = {
+                "network_type": self.network_type,
+                "num_layers": n_layers,
+                "hidden_dims": hidden_dims if hidden_dims is not None else None,
+                "hidden_dim": chosen_hidden_dim if chosen_hidden_dim is not None else None,
+                "learning_rate": learning_rate,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "uncertainty_param": param_value,
+                "avg_score": avg_score,
+            }
+
+        return avg_score
+
+    def tune(
+        self,
+        embedding_dict: Dict[str, np.ndarray],
+        scores_dict: Dict[str, float],
+    ) -> Dict[str, Union[float, List[int], None]]:
+        """
+        Main entry point: run the Optuna study for cross-validation 
+        and store best hyperparams in self.best_params.
+        """
+        self.embedding_dict = embedding_dict
+        self.scores_dict = scores_dict
+
+        study = optuna.create_study(direction="minimize")
+        study.optimize(self.objective, n_trials=self.n_trials)
+
+        print("Best trial metrics:")
+        print(f"  Score = {study.best_value}")
+        print(f"  Params = {study.best_params}")
+        return self.best_params or {}
+
+
+def tune_hyperparams(
+    model_type: Literal["mve", "der", "nn_ensemble", "mc_dropout"],
+    embedding_dict: Dict[str, np.ndarray],
+    scores_dict: Dict[str, float],
+
+    network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
+    coverage_levels: List[float] = [0.5, 0.9],
+    rmse_weight: float = 1.0,
+    msce_weight: float = 1.0,
+    coverage_weight: float = 1.0,
+    n_splits: int = 3,
+    n_trials: int = 20,
+    random_state: int = 42,
+    device: Optional[torch.device] = None,
+    hidden_dim_min: int = 16,
+    hidden_dim_max: int = 256,
+) -> Dict[str, Union[float, List[int], None]]:
+    """
+    High-level API for tuning architecture + uncertainty hyperparams with 
+    MLP/BiLSTM/BiGRU options, using a combined calibration metric.
+    """
+
+    sample_embedding = next(iter(embedding_dict.values()))
+    if sample_embedding.ndim == 2:
+        input_dim = sample_embedding.shape[1]  # (seq_len, feature_dim)
+    else:
+        input_dim = sample_embedding.shape[0]  # (feature_dim,)
+    
+    tuner = HyperparameterTuner(
+        model_type=model_type,
+        input_dim=input_dim,
+        network_type=network_type,
+        coverage_levels=coverage_levels,
+        rmse_weight=rmse_weight,
+        msce_weight=msce_weight,
+        coverage_weight=coverage_weight,
+        device=device,
+        n_splits=n_splits,
+        n_trials=n_trials,
+        random_state=random_state,
+        hidden_dim_min=hidden_dim_min,
+        hidden_dim_max=hidden_dim_max,
+    )
+
+    best_params = tuner.tune(embedding_dict, scores_dict)
+    return best_params
