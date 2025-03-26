@@ -137,7 +137,7 @@ def create_and_train_model(model_type, best_params, embedding_dict, scores_dict)
             hidden_dims=hidden_dims,
             mve_regularization=uncertainty_param
         )
-    elif model_type == "der":
+    elif model_type == "deep_evidential":
         model = DeepEvidentialRegression(
             input_dim=1,
             hidden_dims=hidden_dims,
@@ -205,7 +205,7 @@ def main():
     axes = axes.flatten()
     
     # List of model types to tune
-    model_types = ["mve", "der", "nn_ensemble", "mc_dropout"]
+    model_types = ["mve", "deep_evidential", "nn_ensemble", "mc_dropout"]
     results = {}
     
     # Run hyperparameter tuning for each model type
@@ -219,7 +219,9 @@ def main():
             n_trials=20,
             n_splits=3,
             random_state=SEED,
-            device=device
+            rmse_weight=1,
+            msce_weight=0,
+            coverage_weight=0,
         )
         
         print(f"Best {model_type.upper()} parameters: {best_params}")

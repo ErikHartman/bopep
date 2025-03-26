@@ -26,7 +26,7 @@ class HyperparameterTuner:
 
     def __init__(
         self,
-        model_type: Literal["mve", "der", "nn_ensemble", "mc_dropout"],
+        model_type: Literal["mve", "deep_evidential", "nn_ensemble", "mc_dropout"],
         input_dim: int,
         network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
         coverage_levels: List[float] = [0.5, 0.9],
@@ -42,7 +42,7 @@ class HyperparameterTuner:
     ):
         """
         Args:
-            model_type: "mve", "der", "nn_ensemble", or "mc_dropout"
+            model_type: "mve", "deep_evidential", "nn_ensemble", or "mc_dropout"
             input_dim: feature dimension
             network_type: "mlp", "bilstm", or "bigru"
             coverage_levels: coverage alphas for calibration
@@ -78,9 +78,7 @@ class HyperparameterTuner:
     def _create_model(
         self,
         param_value: float,
-        # For MLP:
         hidden_dims: Optional[List[int]] = None,
-        # For RNN:
         hidden_dim: Optional[int] = None,
         num_layers: int = 1,
     ) -> "BasePredictionModel":
@@ -97,7 +95,7 @@ class HyperparameterTuner:
                 network_type=self.network_type,
                 mve_regularization=param_value,
             )
-        elif self.model_type == "der":
+        elif self.model_type == "deep_evidential":
             return DeepEvidentialRegression(
                 input_dim=self.input_dim,
                 hidden_dims=hidden_dims,
@@ -116,7 +114,6 @@ class HyperparameterTuner:
                 dropout_rate=param_value,
             )
         elif self.model_type == "nn_ensemble":
-            # param_value is the # of networks
             return NeuralNetworkEnsemble(
                 input_dim=self.input_dim,
                 hidden_dims=hidden_dims,
@@ -251,43 +248,35 @@ class HyperparameterTuner:
         plus the uncertainty hyperparam.
         Then does cross-validation and returns average combined score.
         """
-        # 1) Sample architecture depending on network_type
         if self.network_type == "mlp":
-            # We'll sample a variable number of MLP layers:
-            n_layers = trial.suggest_int("num_layers", 1, 3)
+            n_layers = trial.suggest_int("num_layers", 1, 5)
             hidden_dims = []
             for i in range(n_layers):
                 hd = trial.suggest_int(
                     f"hidden_dim_{i}", self.hidden_dim_min, self.hidden_dim_max, log=True
                 )
                 hidden_dims.append(hd)
-            # For MLP, we won't use hidden_dim or anything in the RNN sense:
             chosen_hidden_dim = None
         else:
-            # We have an RNN (BiLSTM or BiGRU).
-            # We'll still sample num_layers, but only one "hidden_dim".
-            n_layers = trial.suggest_int("num_layers", 1, 3)
+            n_layers = trial.suggest_int("num_layers", 1, 5)
             chosen_hidden_dim = trial.suggest_int(
                 "rnn_hidden_dim", self.hidden_dim_min, self.hidden_dim_max, log=True
             )
             hidden_dims = None  # Not used for RNN
 
-        # 2) Sample standard hyperparams
         learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
         epochs = trial.suggest_int("epochs", 50, 200)
         batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
 
-        # 3) Sample the "uncertainty" hyperparam
-        if self.model_type in ["mve", "der"]:
-            param_value = trial.suggest_float("uncertainty_param", 1e-4, 1.0, log=True)
+        if self.model_type in ["mve", "deep_evidential"]:
+            param_value = trial.suggest_float("uncertainty_param", 0, 1)
         elif self.model_type == "mc_dropout":
-            param_value = trial.suggest_float("uncertainty_param", 0.05, 0.5)
+            param_value = trial.suggest_float("uncertainty_param", 0.01, 0.8)
         elif self.model_type == "nn_ensemble":
-            param_value = trial.suggest_int("uncertainty_param", 2, 15)
+            param_value = trial.suggest_int("uncertainty_param", 2, 10)
         else:
             raise ValueError(f"Unknown model_type {self.model_type}")
 
-        # 4) K-fold cross validation
         keys = list(self.embedding_dict.keys())
         indices = np.arange(len(keys))
         kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.random_state)
@@ -300,16 +289,14 @@ class HyperparameterTuner:
             val_embed_dict = {keys[i]: self.embedding_dict[keys[i]] for i in val_idx}
             val_scores_dict = {keys[i]: self.scores_dict[keys[i]] for i in val_idx}
 
-            # Create the model
             model = self._create_model(
                 param_value=param_value,
-                hidden_dims=hidden_dims,     # only for MLP
-                hidden_dim=chosen_hidden_dim, # only for RNN
+                hidden_dims=hidden_dims,     
+                hidden_dim=chosen_hidden_dim, 
                 num_layers=n_layers,
             )
             model.to(self.device)
 
-            # Fit
             self._fit_model(
                 model,
                 train_embed_dict,
@@ -319,7 +306,6 @@ class HyperparameterTuner:
                 batch_size=batch_size,
             )
 
-            # Evaluate
             val_dataset = VariableLengthDataset(val_embed_dict, val_scores_dict)
             val_loader = DataLoader(
                 val_dataset,
@@ -333,10 +319,8 @@ class HyperparameterTuner:
 
         avg_score = float(np.mean(cv_scores))
 
-        # Track best
         if avg_score < self.best_score:
             self.best_score = avg_score
-            # Store the best hyperparams
             self.best_params = {
                 "network_type": self.network_type,
                 "num_layers": n_layers,
@@ -373,10 +357,9 @@ class HyperparameterTuner:
 
 
 def tune_hyperparams(
-    model_type: Literal["mve", "der", "nn_ensemble", "mc_dropout"],
+    model_type: Literal["mve", "deep_evidential", "nn_ensemble", "mc_dropout"],
     embedding_dict: Dict[str, np.ndarray],
     scores_dict: Dict[str, float],
-
     network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
     coverage_levels: List[float] = [0.5, 0.9],
     rmse_weight: float = 1.0,
@@ -396,9 +379,9 @@ def tune_hyperparams(
 
     sample_embedding = next(iter(embedding_dict.values()))
     if sample_embedding.ndim == 2:
-        input_dim = sample_embedding.shape[1]  # (seq_len, feature_dim)
+        input_dim = sample_embedding.shape[1]
     else:
-        input_dim = sample_embedding.shape[0]  # (feature_dim,)
+        input_dim = sample_embedding.shape[0]
     
     tuner = HyperparameterTuner(
         model_type=model_type,
