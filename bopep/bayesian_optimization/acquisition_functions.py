@@ -1,3 +1,4 @@
+from typing import Iterable
 import numpy as np
 from scipy.stats import norm
 
@@ -6,7 +7,7 @@ class AcquisitionFunction:
         self.best_so_far_ei = 0.0
         self.best_so_far_pi = 0.0
 
-    def compute_acquisition(self, predictions, acquisition_function):
+    def compute_acquisition(self, predictions : dict, acquisition_function : str):
         """
         Args:
             peptides (dict): {peptide: embedding} -- used for consistent ordering if needed
@@ -31,7 +32,7 @@ class AcquisitionFunction:
         else:
             raise ValueError(f"Acquisition function '{acquisition_function}' not recognized.")
 
-    def expected_improvement(self, peptides, means, stds):
+    def expected_improvement(self, peptides : list, means : np.ndarray, stds : np.ndarray):
         """
         Compute the Expected Improvement (EI) for each peptide.
         """
@@ -54,7 +55,7 @@ class AcquisitionFunction:
             for peptide, value in zip(peptides, ei)
         }
 
-    def upper_confidence_bound(self, peptides, means, stds, kappa=1.96):
+    def upper_confidence_bound(self, peptides : list, means, stds, kappa=1.96):
         """
         Compute the UCB for each peptide.
 

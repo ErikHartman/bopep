@@ -65,7 +65,7 @@ def compare_all_hyperparameters(embedding_dict, scores_dict, test_x):
     }
     
     mc_dropout_rates = [0.1, 0.3, 0.5, 0.7]
-    ensemble_sizes = [1, 5, 10, 20]
+    ensemble_sizes = [3, 5, 10, 20]
     evidential_reg_values = [0, 0.1, 0.5, 1.0]
     mve_reg_values = [0.0001, 0.1, 0.3, 0.4]
     

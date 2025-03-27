@@ -125,9 +125,14 @@ class BasePredictionModel(torch.nn.Module):
         learning_rate: float = 1e-3,
         device: Optional[torch.device] = None,
         verbose: bool = True,
-        criterion=None,  # <-- this parameter will be auto-determined if None
+        criterion=None,
     ) -> float:
-        """Train using dictionaries of embeddings and scores."""
+        """
+        Train using dictionaries of embeddings and scores.
+        Implements early stopping. 
+        Uses the ADAM optimizer with ReduceLROnPlateau scheduler.
+        Returns the final epoch's average loss.
+        """
         # Use the model's device if none specified
         if device is None:
             device = next(self.parameters()).device

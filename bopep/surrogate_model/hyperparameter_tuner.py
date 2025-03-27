@@ -173,29 +173,25 @@ class HyperparameterTuner:
         return nll.mean().item()
 
     @staticmethod
-    def reliability_calibration_error(
-        means: torch.Tensor, stds: torch.Tensor, targets: torch.Tensor, n_bins: int = 10
-    ) -> float:
+    def reliability_calibration_error(means, stds, targets, quantiles=None):
         """
-        MSCE: mean squared difference between observed and expected coverage
-        in a reliability diagram approach.
+        We measure how often the absolute normalized residual
+        is below each standard Normal z-value for various coverage levels.
+        Returns the mean squared difference between the nominal coverage
+        and the observed coverage across all quantiles.
         """
-        means_np = means.cpu().numpy().flatten()
-        stds_np = stds.cpu().numpy().flatten()
-        targets_np = targets.cpu().numpy().flatten()
+        if quantiles is None:
+            quantiles = np.linspace(0.05, 0.95, 10)  # example range
 
-        # Normalized residual
-        residuals = (targets_np - means_np) / stds_np
-        expected_props = np.linspace(0, 1, n_bins + 1)[1:]
-
-        observed_props = []
-        for q in expected_props:
-            threshold = np.sqrt(2) * np.abs(np.percentile(residuals, q * 100))
-            observed_props.append(np.mean(np.abs(residuals) < threshold))
-
-        observed_props = np.array(observed_props)
-        msce = np.mean((observed_props - expected_props) ** 2)
-        return msce
+        residuals = (targets - means) / stds  # shape (N,)
+        residuals = residuals.cpu().numpy().ravel()
+        
+        errors = []
+        for q in quantiles:
+            z_q = norm.ppf((1.0 + q) / 2.0)  # e.g. q=0.9 -> z_q=1.645
+            observed_frac = np.mean(np.abs(residuals) < z_q)
+            errors.append((observed_frac - q)**2)
+        return np.mean(errors)
 
     def coverage_calibration_error(
         self, means: torch.Tensor, stds: torch.Tensor, targets: torch.Tensor
@@ -339,21 +335,36 @@ class HyperparameterTuner:
         self,
         embedding_dict: Dict[str, np.ndarray],
         scores_dict: Dict[str, float],
-    ) -> Dict[str, Union[float, List[int], None]]:
+        previous_study: Optional[optuna.study.Study] = None,
+    ) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
         """
         Main entry point: run the Optuna study for cross-validation 
         and store best hyperparams in self.best_params.
+        
+        Args:
+            embedding_dict: Dictionary of embeddings
+            scores_dict: Dictionary of scores
+            previous_study: Optional previous Optuna study to warm-start from
+            
+        Returns:
+            Tuple of (best_params, study) where study can be reused in future calls
         """
         self.embedding_dict = embedding_dict
         self.scores_dict = scores_dict
 
-        study = optuna.create_study(direction="minimize")
+        if previous_study is not None:
+            # Create a new study that inherits from the previous one
+            study = optuna.create_study(direction="minimize")
+            # Add the previous trials as "reference" for the TPE sampler
+            for trial in previous_study.trials:
+                if trial.state == optuna.trial.TrialState.COMPLETE:
+                    study.add_trial(trial)
+        else:
+            study = optuna.create_study(direction="minimize")
+            
         study.optimize(self.objective, n_trials=self.n_trials)
 
-        print("Best trial metrics:")
-        print(f"  Score = {study.best_value}")
-        print(f"  Params = {study.best_params}")
-        return self.best_params or {}
+        return self.best_params or {}, study
 
 
 def tune_hyperparams(
@@ -371,10 +382,14 @@ def tune_hyperparams(
     device: Optional[torch.device] = None,
     hidden_dim_min: int = 16,
     hidden_dim_max: int = 256,
-) -> Dict[str, Union[float, List[int], None]]:
+    previous_study: Optional[optuna.study.Study] = None,
+) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
     """
     High-level API for tuning architecture + uncertainty hyperparams with 
     MLP/BiLSTM/BiGRU options, using a combined calibration metric.
+    
+    Returns:
+        Tuple of (best_params, study) where study can be reused in future calls
     """
 
     sample_embedding = next(iter(embedding_dict.values()))
@@ -399,5 +414,5 @@ def tune_hyperparams(
         hidden_dim_max=hidden_dim_max,
     )
 
-    best_params = tuner.tune(embedding_dict, scores_dict)
-    return best_params
+    best_params, study = tuner.tune(embedding_dict, scores_dict, previous_study)
+    return best_params, study

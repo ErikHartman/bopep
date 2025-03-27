@@ -86,7 +86,7 @@ class MVE(BasePredictionModel):
         mu, log_var = self.forward_once(batch_x, lengths)
         nll_loss = self.negative_log_likelihood(mu, log_var, batch_y)
 
-        loss = nll_loss + self.mve_regularization * torch.mean(torch.exp(-log_var))
+        loss = nll_loss + self.mve_regularization * torch.mean(-log_var)
 
         return loss
 

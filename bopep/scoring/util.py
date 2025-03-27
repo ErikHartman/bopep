@@ -26,9 +26,7 @@ def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
     structure = parser.get_structure(id="complex", file=pdb_file_path)
 
     receptor_coords = []
-    receptor_bfactors = []
     peptide_coords = []
-    peptide_bfactors = []
 
     model = structure[0]
     for chain in model:
@@ -37,17 +35,18 @@ def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
             if not is_aa(residue, standard=True):
                 continue
             for atom in residue:
+                # if atom == alpha carbon
+                atom_type = atom.get_id()
+                if atom_type != "CA":
+                    continue    
                 x, y, z = atom.coord
                 bfactor = atom.bfactor
-
                 if chain_id == receptor_chain:
                     receptor_coords.append((x, y, z))
-                    receptor_bfactors.append(bfactor)
                 elif chain_id == peptide_chain:
                     peptide_coords.append((x, y, z))
-                    peptide_bfactors.append(bfactor)
 
-    return receptor_coords, receptor_bfactors, peptide_coords, peptide_bfactors
+    return receptor_coords, peptide_coords
 
 
 def get_plDDT_from_dir(colab_dir, rank_num : int = 1):
