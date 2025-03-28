@@ -65,7 +65,6 @@ class Logger:
         """
         timestamp = datetime.now().isoformat()
         
-        # Get all unique score types across all peptides
         score_types = set()
         for peptide, peptide_scores in scores.items():
             score_types.update(peptide_scores.keys())

@@ -212,11 +212,11 @@ def main():
     for i, model_type in enumerate(model_types):
         print(f"\n\nTuning {model_type.upper()} model with combined hyperparameter search...")
         
-        best_params = tune_hyperparams(
+        best_params, study = tune_hyperparams(
             model_type=model_type,
             embedding_dict=embedding_dict,
             scores_dict=scores_dict,
-            n_trials=20,
+            n_trials=10,
             n_splits=3,
             random_state=SEED,
             rmse_weight=2,
@@ -225,6 +225,20 @@ def main():
         )
         
         print(f"Best {model_type.upper()} parameters: {best_params}")
+
+        best_params, study = tune_hyperparams(model_type=model_type,
+            embedding_dict=embedding_dict,
+            scores_dict=scores_dict,
+            n_trials=10,
+            n_splits=3,
+            random_state=SEED,
+            rmse_weight=2,
+            msce_weight=1,
+            coverage_weight=1,
+            previous_study=study)
+        
+        print(f"Best {model_type.upper()} parameters: {best_params}")
+        
         results[model_type] = best_params
         
         # Create and train model with best parameters

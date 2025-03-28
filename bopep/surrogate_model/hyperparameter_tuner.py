@@ -352,16 +352,26 @@ class HyperparameterTuner:
         self.embedding_dict = embedding_dict
         self.scores_dict = scores_dict
 
-        if previous_study is not None:
-            # Create a new study that inherits from the previous one
-            study = optuna.create_study(direction="minimize")
-            # Add the previous trials as "reference" for the TPE sampler
-            for trial in previous_study.trials:
-                if trial.state == optuna.trial.TrialState.COMPLETE:
-                    study.add_trial(trial)
-        else:
-            study = optuna.create_study(direction="minimize")
+        # Create a new study without inheriting old trials
+        study = optuna.create_study(direction="minimize")
+        
+        # If we have a previous study, use it to seed initial configurations
+        # but don't keep the old scores - re-evaluate them on new data
+        if previous_study is not None and previous_study.trials:
+            # Sort trials by their values (best trials first)
+            sorted_trials = sorted(
+                [t for t in previous_study.trials if t.state == optuna.trial.TrialState.COMPLETE],
+                key=lambda t: t.value
+            )
             
+            # Take the top 5 best trials from previous study
+            num_trials_to_seed = min(5, len(sorted_trials))
+            for i in range(num_trials_to_seed):
+                trial = sorted_trials[i]
+                # Enqueue the trial for the new study, but it will be re-evaluated
+                study.enqueue_trial(trial.params)
+            
+        # Run optimization
         study.optimize(self.objective, n_trials=self.n_trials)
 
         return self.best_params or {}, study
