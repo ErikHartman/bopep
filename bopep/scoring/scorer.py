@@ -1,6 +1,6 @@
 from bopep.scoring.pep_prot_distance import distance_score_from_pdb
 from bopep.scoring.rosetta_scorer import RosettaScorer
-from bopep.scoring.iptm import get_ipTM_from_dir
+from bopep.scoring.af_scorer import AFScorer
 from bopep.scoring.is_peptide_in_binding_site import (
     is_peptide_in_binding_site_pdb_file,
     n_peptides_in_binding_site_colab_dir,
@@ -39,6 +39,8 @@ class Scorer:
             "negatively_charged_aa_percent",
             "delta_net_charge_frac",
             "uHrel",
+            "peptide_plddt",
+            "peptide_pae"
         ]
         pass
 
@@ -95,6 +97,8 @@ class Scorer:
             - "negatively_charged_aa_percent": Percentage of negatively charged amino acids
             - "delta_net_charge_frac": Net charge as a fraction of peptide length
             - "uHrel": Relative hydrophobic moment (measure of amphipathicity)
+            - "peptide_plddt": pLDDT score from ColabFold (requires colab_dir)
+            - "peptide_pae": Predicted Aligned Error (PAE) from ColabFold (requires colab_dir)
             
         pdb_file : str, optional
             Path to a PDB file for structure-based scores)
@@ -163,6 +167,7 @@ class Scorer:
             peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id="B")
             peptide_properties = PeptideProperties(pdb_file=pdb_file)
             rosetta_scorer = RosettaScorer(pdb_file)
+            af_scorer = AFScorer(colab_dir) if colab_dir else None
         elif pdb_file:
             peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id="B")
             peptide_properties = PeptideProperties(pdb_file=pdb_file)
@@ -190,12 +195,27 @@ class Scorer:
             if "distance_score" in scores_to_include:
                 scores["distance_score"] = distance_score_from_pdb(pdb_file)
 
-        # ipTM score needs colab_dir
+        # ipTM and plddt score needs colab_dir
         if "iptm" in scores_to_include:
             if not colab_dir:
                 print("WARNING: ipTM score needs a docking result directory.")
             else:
-                scores["iptm"] = get_ipTM_from_dir(colab_dir)
+                if af_scorer:
+                    scores["iptm"] = af_scorer.get_iptm()
+
+        if "peptide_plddt" in scores_to_include:
+            if not colab_dir:
+                print("WARNING: peptide_plddt score needs a docking result directory.")
+            else:
+                if af_scorer:
+                    scores["peptide_plddt"] = af_scorer.get_peptide_plddt()
+                    
+        if "peptide_pae" in scores_to_include:
+            if not colab_dir:
+                print("WARNING: peptide_pae score needs a docking result directory.")
+            else:
+                if af_scorer:
+                    scores["peptide_pae"] = af_scorer.get_peptide_pae()
 
         # Binding site scores need binding_site_residue_indices and a PDB file
         if "in_binding_site" in scores_to_include:
@@ -275,5 +295,5 @@ if __name__ == "__main__":
     scores = scorer.score(scores_to_include=["rosetta_score"], pdb_file=pdb_file_path)
     print(f"Rosetta score for {pdb_file_path}: {scores}")
 
-    scores = scorer.score(scores_to_include=["iptm", "rosetta_score", "uHrel"], colab_dir=colab_dir_path)
+    scores = scorer.score(scores_to_include=["iptm", "rosetta_score", "uHrel", "peptide_plddt"], colab_dir=colab_dir_path)
     print(f"Scores for {colab_dir_path}: {scores}")

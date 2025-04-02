@@ -162,9 +162,17 @@ class BasePredictionModel(torch.nn.Module):
         self, 
         embedding_dict: Dict[str, np.ndarray], 
         batch_size: int = 32,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        uncertainty_mode: Optional[str] = None
     ) -> Dict[str, Tuple[float, float]]:
-        """Predict for a dictionary of embeddings, returning {pep: (mean, std), ...}."""
+        """Predict for a dictionary of embeddings, returning {pep: (mean, std), ...}.
+        
+        Args:
+            embedding_dict: Dictionary mapping peptides to their embeddings
+            batch_size: Batch size for prediction
+            device: Device to use for prediction
+            uncertainty_mode: Which uncertainty component to use (for DeepEvidentialRegression)
+        """
 
         if device is None:
             device = next(self.parameters()).device
@@ -190,8 +198,14 @@ class BasePredictionModel(torch.nn.Module):
                 # Move batch to the correct device
                 batch_x = batch_x.to(device)
                 
-                # forward_predict should handle (N, L, D) or (N, D)
-                mean_pred, std_pred = self.forward_predict(batch_x, lengths)
+                # Pass uncertainty_mode to forward_predict if the method accepts it
+                # Check if the method has the uncertainty_mode parameter
+                if hasattr(self, "forward_predict") and "uncertainty_mode" in self.forward_predict.__code__.co_varnames:
+                    mean_pred, std_pred = self.forward_predict(batch_x, lengths, uncertainty_mode=uncertainty_mode)
+                else:
+                    # Default behavior for models that don't support uncertainty_mode
+                    mean_pred, std_pred = self.forward_predict(batch_x, lengths)
+                
                 mean_list.append(mean_pred.cpu())  # Move back to CPU for numpy
                 std_list.append(std_pred.cpu())    # Move back to CPU for numpy
 
