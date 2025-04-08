@@ -18,6 +18,7 @@ def dock_peptide(
     recycle_early_stop_tolerance: float,
     amber: bool,
     num_relax: int,
+    target_name: str = None
 ) -> str:
     """
     Dock a single peptide to the target structure using ColabFold.
@@ -25,7 +26,8 @@ def dock_peptide(
     """
     print(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
 
-    target_name = os.path.basename(target_structure).replace(".pdb", "")
+    if not target_name:
+        target_name = os.path.basename(target_structure).replace(".pdb", "")
     # Create a sub-directory for this peptide’s results
     peptide_output_dir = os.path.join(
         output_dir, f"{target_name}_{peptide_sequence}"
@@ -124,6 +126,7 @@ def dock_peptides_parallel(
     gpu_ids: Optional[List[str]] = None,
     num_processes: Optional[int] = None,
     overwrite_results: bool = False,
+    target_name :str = None,
 ) -> List[str]:
     """
     Dock multiple peptides to a target structure using ColabFold.
@@ -171,6 +174,7 @@ def dock_peptides_parallel(
         recycle_early_stop_tolerance=recycle_early_stop_tolerance,
         amber=amber,
         num_relax=num_relax,
+        target_name=target_name,
     )
 
     # Assign each peptide to a GPU in a round-robin fashion

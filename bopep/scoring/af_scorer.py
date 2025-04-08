@@ -2,26 +2,15 @@ import os
 import json
 import re
 
-
-
 class AFScorer:
     """
     Class for scoring AlphaFold/ColabFold predictions.
     
-    This class provides methods to extract various metrics from ColabFold output 
-    directories while avoiding multiple file parsings.
     """
     
     def __init__(self, colab_dir, rank_num=1):
         """
         Initialize the AFScorer with a ColabFold output directory.
-        
-        Parameters
-        ----------
-        colab_dir : str
-            Path to the ColabFold output directory
-        rank_num : int, default=1
-            Rank number to use for extracting metrics (typically 1 for best model)
         """
         self.colab_dir = colab_dir
         self.rank_num = rank_num
@@ -97,33 +86,12 @@ class AFScorer:
             raise
     
     def get_iptm(self):
-        """
-        Get the ipTM score from the ColabFold prediction.
-        
-        Returns
-        -------
-        float
-            ipTM score
-        """
         if not self.initialized:
             self._initialize()
         
         return self.data.get("iptm")
     
     def get_peptide_plddt(self, chain_id="B"):
-        """
-        Get the average pLDDT score for the peptide chain.
-        
-        Parameters
-        ----------
-        chain_id : str, default="B"
-            Chain ID to calculate pLDDT for, defaults to "B" (peptide)
-            
-        Returns
-        -------
-        float
-            Average pLDDT score for the peptide chain
-        """
         if not self.initialized:
             self._initialize()
         
@@ -148,20 +116,6 @@ class AFScorer:
         return sum(chain_plddt_vals) / len(chain_plddt_vals)
     
     def get_peptide_pae(self, chain_id="B"):
-        """
-        Get the average PAE (Predicted Aligned Error) for the peptide chain.
-        This calculates the average PAE between the peptide chain and all other residues.
-        
-        Parameters
-        ----------
-        chain_id : str, default="B"
-            Chain ID to calculate PAE for, defaults to "B" (peptide)
-            
-        Returns
-        -------
-        float
-            Average PAE for the peptide chain
-        """
         if not self.initialized:
             self._initialize()
         
@@ -198,14 +152,6 @@ class AFScorer:
             return None
     
     def get_all_metrics(self):
-        """
-        Get all available AF/ColabFold metrics.
-        
-        Returns
-        -------
-        dict
-            Dictionary containing all available metrics
-        """
         if not self.initialized:
             self._initialize()
             

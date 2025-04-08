@@ -1,6 +1,8 @@
 from bopep.docking.dock_peptides import dock_peptides_parallel
 from bopep.docking.utils import extract_sequence_from_pdb
 import os
+from Bio.PDB import PDBParser, PDBIO, Select
+import tempfile
 
 
 class Docker:
@@ -27,18 +29,73 @@ class Docker:
         self.overwrite_results = docker_kwargs.get("overwrite_results", False)
         self.target_structure_path = None
         self.target_sequence = None
+        self.temp_pdb_path = None
+        self.target_name = None
 
-    def set_target_structure(self, target_structure_path : str):
+    def set_target_structure(self, target_structure_path: str, strip_template: bool = False, 
+                            get_first_model: bool = False, keep_chains: str = "A"):
+        """
+        Set the target structure for docking.
+        
+        Parameters:
+        - target_structure_path: Path to the target PDB file
+        - strip_template: If True, keep only the specified chains
+        - get_first_model: If True, keep only the first model from the PDB
+        - keep_chains: Chains to keep when strip_template is True (default: "A")
+        """
         if not os.path.exists(target_structure_path):
             raise FileNotFoundError(
                 f"Target structure {target_structure_path} not found."
             )
-
+        
+        self.target_name = os.path.basename(target_structure_path).replace(".pdb", "")
+        
+        # Clean up any previous temporary files
+        if self.temp_pdb_path and os.path.exists(self.temp_pdb_path):
+            os.remove(self.temp_pdb_path)
+            self.temp_pdb_path = None
+            
+        # Store the original path
+        original_path = target_structure_path
+        
+        # Check if we need to process the PDB file
+        if strip_template or get_first_model:
+            # Define a custom selector for chains
+            class ChainSelect(Select):
+                def __init__(self, chains_to_keep):
+                    self.chains_to_keep = chains_to_keep
+                
+                def accept_chain(self, chain):
+                    return chain.id in self.chains_to_keep
+                
+                def accept_model(self, model):
+                    # For get_first_model, only accept model 0
+                    return model.id == 0 if get_first_model else True
+            
+            # Parse the PDB file
+            parser = PDBParser(QUIET=True)
+            structure = parser.get_structure("target", target_structure_path)
+            
+            # Create a temporary file for the cleaned structure
+            fd, temp_path = tempfile.mkstemp(suffix=".pdb", prefix="target_")
+            os.close(fd)
+            
+            # Save the cleaned structure
+            io = PDBIO()
+            io.set_structure(structure)
+            io.save(temp_path, ChainSelect(keep_chains))
+            
+            # Update the path to the temporary file
+            target_structure_path = temp_path
+            self.temp_pdb_path = temp_path
+        
         self.target_structure_path = target_structure_path
-        self.target_sequence = extract_sequence_from_pdb(self.target_structure_path)
-        print("Target is set to: ", self.target_structure_path)
+        self.target_sequence = extract_sequence_from_pdb(self.target_structure_path, chain_id=keep_chains[0])
+        print(f"Target is set to: {original_path}")
+        if self.temp_pdb_path:
+            print(f"Using cleaned version: {self.temp_pdb_path}")
 
-    def dock_peptides(self, peptide_sequences : list):
+    def dock_peptides(self, peptide_sequences: list):
         """
         Dock multiple peptides to a target structure using ColabFold.
 
@@ -59,7 +116,7 @@ class Docker:
             )
         
         # Dock the peptides and return results
-        return dock_peptides_parallel(
+        result = dock_peptides_parallel(
             peptides=peptide_sequences,
             target_structure=self.target_structure_path,
             target_sequence=self.target_sequence,
@@ -70,5 +127,20 @@ class Docker:
             num_relax=self.num_relax,
             output_dir=self.output_dir,
             gpu_ids=self.gpu_ids,
-            overwrite_results = self.overwrite_results
+            overwrite_results = self.overwrite_results,
+            target_name=self.target_name,
         )
+        
+        # Clean up temporary files
+        self._clean_up()
+        
+        return result
+    
+    def _clean_up(self):
+        """Remove any temporary files created during processing."""
+        if self.temp_pdb_path and os.path.exists(self.temp_pdb_path):
+            try:
+                os.remove(self.temp_pdb_path)
+                self.temp_pdb_path = None
+            except OSError as e:
+                print(f"Error removing temporary PDB file: {e}")
