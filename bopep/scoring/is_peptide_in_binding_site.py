@@ -7,11 +7,14 @@ import math
 
 
 def get_binding_site(
-    pdb_file: str, receptor_chain: str = "A", peptide_chain: str = "B", threshold: float = 5.0
+    pdb_file: str,
+    receptor_chain: str = "A",
+    peptide_chain: str = "B",
+    threshold: float = 5.0,
 ) -> tuple:
     """
     Identifies interacting residues in the binding site for both receptor and peptide chains.
-    
+
     Parameters
     ----------
     pdb_file : str
@@ -22,11 +25,11 @@ def get_binding_site(
         Chain ID for the peptide (default "B")
     threshold : float, optional
         Distance threshold (in Å) to consider residues as interacting (default 5.0)
-        
+
     Returns
     -------
     tuple
-        (receptor_binding_site_atoms, receptor_binding_site_residue_indices, 
+        (receptor_binding_site_atoms, receptor_binding_site_residue_indices,
          peptide_binding_site_residue_indices, peptide_atoms)
     """
     parser = PDBParser(QUIET=True)
@@ -40,48 +43,60 @@ def get_binding_site(
         model = structure[0]
         receptor_chain = model[receptor_chain]
         peptide_chain = model[peptide_chain]
-        
+
+        min_receptor_residue_id = min(
+            residue.id[1]
+            for residue in receptor_chain.get_residues()
+            if residue.id[0] == " "
+        )
+        min_peptide_residue_id = min(
+            residue.id[1]
+            for residue in peptide_chain.get_residues()
+            if residue.id[0] == " "
+        )
+
         # Get all atoms from both chains
         receptor_atoms = list(receptor_chain.get_atoms())
         peptide_atoms = list(peptide_chain.get_atoms())
-        
+
         if not receptor_atoms or not peptide_atoms:
             return [], [], [], []
-            
+
         # Build KD-trees for efficient distance calculations
-        receptor_coords = np.array([atom.coord for atom in receptor_atoms])
         peptide_coords = np.array([atom.coord for atom in peptide_atoms])
-        
-        receptor_tree = cKDTree(receptor_coords)
         peptide_tree = cKDTree(peptide_coords)
-        
+
         # Find interacting residues
         receptor_binding_site_residue_indices = set()
         peptide_binding_site_residue_indices = set()
-        
+
         # For each receptor atom, find peptide atoms within threshold
         for i, atom in enumerate(receptor_atoms):
             indices = peptide_tree.query_ball_point(atom.coord, threshold)
             if indices:
-                receptor_binding_site_residue_indices.add(atom.get_parent().id[1])
+                receptor_binding_site_residue_indices.add(
+                    atom.get_parent().id[1] - min_receptor_residue_id
+                )
                 for idx in indices:
-                    peptide_binding_site_residue_indices.add(peptide_atoms[idx].get_parent().id[1])
-                    
+                    peptide_binding_site_residue_indices.add(
+                        peptide_atoms[idx].get_parent().id[1] - min_peptide_residue_id
+                    )
+
         # Get the atoms from the binding site residues
         receptor_binding_site_atoms = [
-            atom 
-            for residue in receptor_chain 
+            atom
+            for residue in receptor_chain
             if residue.id[1] in receptor_binding_site_residue_indices
             for atom in residue.get_atoms()
         ]
-        
+
         return (
             receptor_binding_site_atoms,
             list(receptor_binding_site_residue_indices),
             list(peptide_binding_site_residue_indices),
-            peptide_atoms
+            peptide_atoms,
         )
-        
+
     except KeyError as e:
         print(f"Chain not found in structure: {e}")
         return [], [], [], []
@@ -97,7 +112,6 @@ def is_peptide_in_binding_site_pdb_file(
     _, receptor_binding_site_indices, _, _ = get_binding_site(
         pdb_file, threshold=threshold
     )
-
 
     if binding_site_residue_indices is not None:
         # if any receptor_binding_site_indices is in the binding_site_residue_indices, return True
@@ -143,7 +157,7 @@ def smooth_peptide_binding_site_score(
     pdb_file: str,
     binding_site_residue_indices: list,
     threshold: float = 4.0,
-    alpha: float = 1.0
+    alpha: float = 1.0,
 ) -> float:
     """
     Computes a continuous 'in-pocket' score for a peptide in chain B relative to
@@ -172,11 +186,12 @@ def smooth_peptide_binding_site_score(
         in the binding site. Higher is better (more in-pocket).
     """
     # Get the binding site - use a larger threshold for determining binding site
-    binding_site_threshold = max(threshold * 2, 10.0)  # Use a larger threshold to identify potential binding site
+    binding_site_threshold = max(
+        threshold * 2, 10.0
+    )  # Use a larger threshold to identify potential binding site
     _, _, _, peptide_atoms = get_binding_site(
         pdb_file, threshold=binding_site_threshold
     )
-
 
     # Now calculate the score using the identified binding site
     try:
@@ -184,14 +199,14 @@ def smooth_peptide_binding_site_score(
         structure = parser.get_structure("docked", pdb_file)
         model = structure[0]
         receptor_chain = model["A"]
-        
+
         peptide_coords = np.array([atom.coord for atom in peptide_atoms])
         tree = cKDTree(peptide_coords)
 
         # For each binding-site residue, find min distance to any peptide atom
         residue_scores = []
         for res_idx in binding_site_residue_indices:
-            residue = receptor_chain[(' ', res_idx, ' ')]
+            residue = receptor_chain[(" ", res_idx, " ")]
             residue_atom_coords = np.array([atom.coord for atom in residue.get_atoms()])
             if residue_atom_coords.size == 0:
                 continue
@@ -213,3 +228,12 @@ def smooth_peptide_binding_site_score(
     except (KeyError, Exception) as e:
         print(f"Error calculating binding site score: {e}")
         return 0.0
+
+if __name__ == "__main__":
+    original_pdb = "/srv/data1/general/immunopeptides_data/outputs/binding_score_function/1_processed/pdbs/2djy.pdb"
+    docked_pdb = "/srv/data1/general/immunopeptides_data/outputs/binding_score_function/2_scored/pdbs/docked_peptides/2djy_GPLGSELESPPPPYSRYPMD/2djy_GPLGSELESPPPPYSRYPMD_relaxed_rank_001_alphafold2_multimer_v3_model_5_seed_000.pdb"
+
+    receptor_binding_site_atoms, receptor_binding_site_residue_indices, peptide_binding_site_residue_indices, peptide_atoms = get_binding_site(original_pdb)
+    print(receptor_binding_site_residue_indices)
+    receptor_binding_site_atoms, receptor_binding_site_residue_indices, peptide_binding_site_residue_indices, peptide_atoms = get_binding_site(docked_pdb)
+    print(receptor_binding_site_residue_indices)

@@ -125,8 +125,8 @@ def dock_peptides_parallel(
     output_dir: str,
     gpu_ids: Optional[List[str]] = None,
     num_processes: Optional[int] = None,
+    target_name: str = None,
     overwrite_results: bool = False,
-    target_name :str = None,
 ) -> List[str]:
     """
     Dock multiple peptides to a target structure using ColabFold.
@@ -134,22 +134,9 @@ def dock_peptides_parallel(
 
     Filters out peptides that already have a docking result in the output directory.
     """
-
     # We need to filter out peptides that already have a docking result
     # if the peptide has been docked we also need to save the dir name to return it
-    previously_docked_dirs = []
-    peptides_to_dock = []
-    for peptide in peptides:
-        exists, peptide_dir = docking_folder_exists(output_dir, peptide, target_structure)
-        if exists and not overwrite_results:
-            previously_docked_dirs.append(peptide_dir)
-        else:
-            peptides_to_dock.append(peptide)
-
-    if len(peptides_to_dock) == 0:
-        return previously_docked_dirs
-    else:
-        print(f"Will dock {len(peptides_to_dock)} peptides...")
+    
 
     if gpu_ids is None:
         gpu_ids = ["0"]  # default to GPU 0 if none provided
@@ -179,13 +166,12 @@ def dock_peptides_parallel(
 
     # Assign each peptide to a GPU in a round-robin fashion
     peptide_gpu_pairs = [
-        (peptide, gpu_ids[i % len(gpu_ids)]) for i, peptide in enumerate(peptides_to_dock)
+        (peptide, gpu_ids[i % len(gpu_ids)]) for i, peptide in enumerate(peptides)
     ]
 
     # Run the docking in parallel and collect the output directories
     context = get_context("spawn")
     with context.Pool(processes=num_processes) as pool:
         docked_dirs = pool.starmap(dock_peptide_partial, peptide_gpu_pairs)
-    
-    docked_dirs += previously_docked_dirs
+        
     return docked_dirs

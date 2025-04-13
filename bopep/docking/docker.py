@@ -1,5 +1,7 @@
+import random
+import string
 from bopep.docking.dock_peptides import dock_peptides_parallel
-from bopep.docking.utils import extract_sequence_from_pdb
+from bopep.docking.utils import docking_folder_exists, extract_sequence_from_pdb
 import os
 from Bio.PDB import PDBParser, PDBIO, Select
 import tempfile
@@ -14,7 +16,7 @@ class Docker:
     - recycle_early_stop_tolerance: Early stopping tolerance for recycling.
     - amber: Whether to use AMBER relaxation.
     - num_relax: Number of relaxation steps.
-    - pdb_dir: Output directory for PDB files.
+    - output_dir: Output directory for PDB files.
     - gpu_ids: List of GPU IDs to use.
     - overwrite_results: Whether to overwrite existing results.
     """
@@ -24,10 +26,11 @@ class Docker:
         self.recycle_early_stop_tolerance = docker_kwargs.get("recycle_early_stop_tolerance", 0.01)
         self.amber = docker_kwargs.get("amber", True)
         self.num_relax = docker_kwargs.get("num_relax", 1)
-        self.output_dir = docker_kwargs["pdb_dir"]
-        self.gpu_ids = docker_kwargs.get("gpu_ids", [])
+        self.output_dir = docker_kwargs["output_dir"]
+        self.gpu_ids = docker_kwargs.get("gpu_ids", [0])
         self.overwrite_results = docker_kwargs.get("overwrite_results", False)
         self.target_structure_path = None
+        self.original_target_path = None
         self.target_sequence = None
         self.temp_pdb_path = None
         self.target_name = None
@@ -48,6 +51,8 @@ class Docker:
                 f"Target structure {target_structure_path} not found."
             )
         
+        # Store original path and name
+        self.original_target_path = target_structure_path
         self.target_name = os.path.basename(target_structure_path).replace(".pdb", "")
         
         # Clean up any previous temporary files
@@ -55,9 +60,6 @@ class Docker:
             os.remove(self.temp_pdb_path)
             self.temp_pdb_path = None
             
-        # Store the original path
-        original_path = target_structure_path
-        
         # Check if we need to process the PDB file
         if strip_template or get_first_model:
             # Define a custom selector for chains
@@ -77,8 +79,10 @@ class Docker:
             structure = parser.get_structure("target", target_structure_path)
             
             # Create a temporary file for the cleaned structure
-            fd, temp_path = tempfile.mkstemp(suffix=".pdb", prefix="target_")
-            os.close(fd)
+            # Generate a 4-character PDB-style ID
+            pdb_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+            temp_dir = tempfile.mkdtemp()  # Create a temporary directory
+            temp_path = os.path.join(temp_dir, f"{pdb_id}.pdb")  # Create path with exact PDB format
             
             # Save the cleaned structure
             io = PDBIO()
@@ -86,12 +90,14 @@ class Docker:
             io.save(temp_path, ChainSelect(keep_chains))
             
             # Update the path to the temporary file
-            target_structure_path = temp_path
+            self.target_structure_path = temp_path
             self.temp_pdb_path = temp_path
+        else:
+            # If no processing needed, use the original path
+            self.target_structure_path = target_structure_path
         
-        self.target_structure_path = target_structure_path
         self.target_sequence = extract_sequence_from_pdb(self.target_structure_path, chain_id=keep_chains[0])
-        print(f"Target is set to: {original_path}")
+        print(f"Target is set to: {self.original_target_path}")
         if self.temp_pdb_path:
             print(f"Using cleaned version: {self.temp_pdb_path}")
 
@@ -115,10 +121,26 @@ class Docker:
                 "Target structure not set. Please set the target structure using set_target_structure."
             )
         
+        previously_docked_dirs = []
+        peptides_to_dock = []
+
+        # Use original target path for checking existing docking results
+        for peptide in peptide_sequences: 
+            exists, peptide_dir = docking_folder_exists(self.output_dir, peptide, self.original_target_path)
+            if exists and not self.overwrite_results:
+                previously_docked_dirs.append(peptide_dir)
+            else:
+                peptides_to_dock.append(peptide)
+
+        if len(peptides_to_dock) == 0:
+            return previously_docked_dirs
+        else:
+            print(f"Will dock {len(peptides_to_dock)} peptides...")
+
         # Dock the peptides and return results
-        result = dock_peptides_parallel(
-            peptides=peptide_sequences,
-            target_structure=self.target_structure_path,
+        docked_dirs = dock_peptides_parallel(
+            peptides=peptides_to_dock,
+            target_structure=self.target_structure_path,  # Use cleaned structure for docking
             target_sequence=self.target_sequence,
             num_models=self.num_models,
             num_recycles=self.num_recycles,
@@ -127,20 +149,27 @@ class Docker:
             num_relax=self.num_relax,
             output_dir=self.output_dir,
             gpu_ids=self.gpu_ids,
-            overwrite_results = self.overwrite_results,
-            target_name=self.target_name,
+            overwrite_results=self.overwrite_results,
+            target_name=self.target_name,  # Pass the original target name for consistent naming
         )
-        
+        docked_dirs += previously_docked_dirs
         # Clean up temporary files
         self._clean_up()
         
-        return result
+        return docked_dirs
     
     def _clean_up(self):
         """Remove any temporary files created during processing."""
         if self.temp_pdb_path and os.path.exists(self.temp_pdb_path):
             try:
+                # Remove the file
                 os.remove(self.temp_pdb_path)
+                
+                # Also remove the parent directory if it was created with tempfile.mkdtemp()
+                temp_dir = os.path.dirname(self.temp_pdb_path)
+                if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                    os.rmdir(temp_dir)
+                    
                 self.temp_pdb_path = None
             except OSError as e:
                 print(f"Error removing temporary PDB file: {e}")
