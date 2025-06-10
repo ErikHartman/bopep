@@ -9,12 +9,6 @@ import os
 
 
 class Embedder:
-    """
-    TODO: 
-
-    Maybe we should always reduce embeddings?
-
-    """
     def __init__(self):
         pass
 

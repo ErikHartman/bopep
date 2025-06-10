@@ -4,7 +4,7 @@ from typing import Dict, List, Literal, Optional, Tuple, Union
 from torch.utils.data import DataLoader
 from sklearn.model_selection import KFold
 import optuna
-from scipy.stats import norm
+import math
 
 from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble
 from bopep.surrogate_model.mc_dropout import MonteCarloDropout
@@ -29,10 +29,6 @@ class HyperparameterTuner:
         model_type: Literal["mve", "deep_evidential", "nn_ensemble", "mc_dropout"],
         input_dim: int,
         network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
-        coverage_levels: List[float] = [0.5, 0.9],
-        rmse_weight: float = 1.0,
-        msce_weight: float = 5.0,
-        coverage_weight: float = 5.0,
         device: Optional[torch.device] = None,
         n_splits: int = 3,
         n_trials: int = 20,
@@ -45,8 +41,6 @@ class HyperparameterTuner:
             model_type: "mve", "deep_evidential", "nn_ensemble", or "mc_dropout"
             input_dim: feature dimension
             network_type: "mlp", "bilstm", or "bigru"
-            coverage_levels: coverage alphas for calibration
-            rmse_weight, msce_weight, coverage_weight: weighting in combined score
             device: Torch device
             n_splits: K-fold CV splits
             n_trials: Number of Optuna trials
@@ -56,10 +50,6 @@ class HyperparameterTuner:
         self.model_type = model_type
         self.input_dim = input_dim
         self.network_type = network_type
-        self.coverage_levels = coverage_levels
-        self.rmse_weight = rmse_weight
-        self.msce_weight = msce_weight
-        self.coverage_weight = coverage_weight
         self.n_splits = n_splits
         self.n_trials = n_trials
         self.random_state = random_state
@@ -129,7 +119,7 @@ class HyperparameterTuner:
         self, model: "BasePredictionModel", val_loader: DataLoader
     ) -> Tuple[float, float, float, float, float]:
         """
-        Returns (combined_score, rmse, nll, msce, coverage_err).
+        Returns crps.
         """
         model.eval()
         model.to(self.device)
@@ -150,70 +140,27 @@ class HyperparameterTuner:
         stds = torch.cat(all_stds)
         targets = torch.cat(all_targets)
 
-        nll = self.negative_log_likelihood(means, stds, targets)
-        rmse = torch.sqrt(torch.mean((means - targets) ** 2)).item()
-        msce = self.reliability_calibration_error(means, stds, targets)
-        coverage_err = self.coverage_calibration_error(means, stds, targets)
+        crps = self._crps_gaussian(means, stds, targets)
 
-        combined_score = (
-            nll
-            + self.rmse_weight * rmse
-            + self.msce_weight * msce
-            + self.coverage_weight * coverage_err
-        )
-        return combined_score, rmse, nll, msce, coverage_err
+        return crps
 
     @staticmethod
-    def negative_log_likelihood(
-        means: torch.Tensor, stds: torch.Tensor, targets: torch.Tensor
-    ) -> float:
-        """Standard Gaussian NLL."""
-        stds = torch.clamp(stds, min=1e-9)
-        nll = 0.5 * torch.log(2 * np.pi * stds**2) + 0.5 * ((targets - means) ** 2) / (stds**2)
-        return nll.mean().item()
+    def _crps_gaussian(means, stds, targets):
+        stds = torch.clamp(stds, min=1e-6)
+        z = (targets - means) / stds
 
-    @staticmethod
-    def reliability_calibration_error(means, stds, targets, quantiles=None):
-        """
-        We measure how often the absolute normalized residual
-        is below each standard Normal z-value for various coverage levels.
-        Returns the mean squared difference between the nominal coverage
-        and the observed coverage across all quantiles.
-        """
-        if quantiles is None:
-            quantiles = np.linspace(0.05, 0.95, 10)  # example range
+        # precompute the normalizing constants in Python
+        denom = math.sqrt(2 * math.pi)
+        inv_sqrt_pi = 1.0 / math.sqrt(math.pi)
 
-        residuals = (targets - means) / stds  # shape (N,)
-        residuals = residuals.cpu().numpy().ravel()
-        
-        errors = []
-        for q in quantiles:
-            z_q = norm.ppf((1.0 + q) / 2.0)  # e.g. q=0.9 -> z_q=1.645
-            observed_frac = np.mean(np.abs(residuals) < z_q)
-            errors.append((observed_frac - q)**2)
-        return np.mean(errors)
+        pdf = torch.exp(-0.5 * z**2) / denom
+        cdf = 0.5 * (1 + torch.erf(z / math.sqrt(2.0)))
 
-    def coverage_calibration_error(
-        self, means: torch.Tensor, stds: torch.Tensor, targets: torch.Tensor
-    ) -> float:
-        """
-        Average absolute difference between nominal and empirical coverage
-        for the coverage_levels provided.
-        """
-        means_np = means.cpu().numpy().flatten()
-        stds_np = stds.cpu().numpy().flatten()
-        targets_np = targets.cpu().numpy().flatten()
+        term = z * (2 * cdf - 1) + 2 * pdf - inv_sqrt_pi
+        crps = stds * term
 
-        coverage_error_sum = 0.0
-        for alpha in self.coverage_levels:
-            # z-value for two-sided normal coverage
-            z_value = norm.ppf(0.5 + alpha / 2.0)
-            lower = means_np - z_value * stds_np
-            upper = means_np + z_value * stds_np
-            frac_in_interval = np.mean((targets_np >= lower) & (targets_np <= upper))
-            coverage_error_sum += abs(frac_in_interval - alpha)
-
-        return coverage_error_sum / len(self.coverage_levels)
+        return crps.mean().item()
+    
 
     def _fit_model(
         self,
@@ -310,8 +257,8 @@ class HyperparameterTuner:
                 collate_fn=variable_length_collate_fn,
             )
 
-            combined_score, _, _, _, _ = self._evaluate_model(model, val_loader)
-            cv_scores.append(combined_score)
+            crps = self._evaluate_model(model, val_loader)
+            cv_scores.append(crps)
 
         avg_score = float(np.mean(cv_scores))
 
@@ -382,10 +329,6 @@ def tune_hyperparams(
     embedding_dict: Dict[str, np.ndarray],
     scores_dict: Dict[str, float],
     network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
-    coverage_levels: List[float] = [0.5, 0.9],
-    rmse_weight: float = 1.0,
-    msce_weight: float = 1.0,
-    coverage_weight: float = 1.0,
     n_splits: int = 3,
     n_trials: int = 20,
     random_state: int = 42,
@@ -412,10 +355,6 @@ def tune_hyperparams(
         model_type=model_type,
         input_dim=input_dim,
         network_type=network_type,
-        coverage_levels=coverage_levels,
-        rmse_weight=rmse_weight,
-        msce_weight=msce_weight,
-        coverage_weight=coverage_weight,
         device=device,
         n_splits=n_splits,
         n_trials=n_trials,
@@ -426,3 +365,4 @@ def tune_hyperparams(
 
     best_params, study = tuner.tune(embedding_dict, scores_dict, previous_study)
     return best_params, study
+

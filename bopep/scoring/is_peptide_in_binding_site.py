@@ -41,6 +41,7 @@ def get_binding_site(
 
     try:
         model = structure[0]
+
         receptor_chain = model[receptor_chain]
         peptide_chain = model[peptide_chain]
 
@@ -156,8 +157,8 @@ def n_peptides_in_binding_site_colab_dir(
 def smooth_peptide_binding_site_score(
     pdb_file: str,
     binding_site_residue_indices: list,
-    threshold: float = 4.0,
-    alpha: float = 1.0,
+    threshold: float = 10.0,
+    alpha: float = 0.5,
 ) -> float:
     """
     Computes a continuous 'in-pocket' score for a peptide in chain B relative to
@@ -174,10 +175,10 @@ def smooth_peptide_binding_site_score(
     binding_site_residue_indices : list, optional
         List of residue indices in the receptor chain that are considered part of the binding site.
     threshold : float, optional
-        Distance (Å) around which the logistic penalty transitions (default 4.0).
+        Distance (Å) around which the logistic penalty transitions (default 10.0).
         Lower distances yield higher "in-pocket" contribution.
     alpha : float, optional
-        Steepness of the logistic function (default 1.0).
+        Steepness of the logistic function (default 0.5).
 
     Returns
     -------
@@ -230,8 +231,8 @@ def smooth_peptide_binding_site_score(
         return 0.0
 
 if __name__ == "__main__":
-    original_pdb = "/srv/data1/general/immunopeptides_data/outputs/binding_score_function/1_processed/pdbs/2djy.pdb"
-    docked_pdb = "/srv/data1/general/immunopeptides_data/outputs/binding_score_function/2_scored/pdbs/docked_peptides/2djy_GPLGSELESPPPPYSRYPMD/2djy_GPLGSELESPPPPYSRYPMD_relaxed_rank_001_alphafold2_multimer_v3_model_5_seed_000.pdb"
+    original_pdb = "/srv/data1/general/immunopeptides_data/outputs/binding_score_function/0_complexes/pdbs/1d6w.pdb"
+    docked_pdb = "/srv/data1/general/immunopeptides_data/outputs/binding_score_function/2_docked/pdbs/1d6w_DFEEIPEEL/1d6w_DFEEIPEEL_relaxed_rank_001_alphafold2_multimer_v3_model_5_seed_000.pdb"
 
     receptor_binding_site_atoms, receptor_binding_site_residue_indices, peptide_binding_site_residue_indices, peptide_atoms = get_binding_site(original_pdb)
     print(receptor_binding_site_residue_indices)

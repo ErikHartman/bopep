@@ -126,7 +126,6 @@ def dock_peptides_parallel(
     gpu_ids: Optional[List[str]] = None,
     num_processes: Optional[int] = None,
     target_name: str = None,
-    overwrite_results: bool = False,
 ) -> List[str]:
     """
     Dock multiple peptides to a target structure using ColabFold.

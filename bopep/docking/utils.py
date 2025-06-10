@@ -101,8 +101,12 @@ def docking_folder_exists(base_docking_dir : str, peptide : str, target_structur
     # Check either for finished.txt or target_peptide.done.txt
     contains_done_txt = os.path.exists(os.path.join(peptide_dir, f"{target_name}_{peptide}.done.txt"))
     contains_finished_txt = os.path.exists(os.path.join(peptide_dir, "finished.txt"))
+    # find _relaxed_ using regex
+    contains_relaxed_structure = bool(
+        glob.glob(os.path.join(peptide_dir, "*_relaxed_*.pdb"))
+    )
     
-    if exists and (contains_done_txt or contains_finished_txt):
+    if exists and (contains_done_txt or contains_finished_txt) and contains_relaxed_structure:
         print(f"Docking result for {peptide} already exists in {peptide_dir}. Skipping...")
         return True, peptide_dir
     else:

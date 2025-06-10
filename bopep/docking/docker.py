@@ -36,13 +36,13 @@ class Docker:
         self.target_name = None
 
     def set_target_structure(self, target_structure_path: str, strip_template: bool = False, 
-                            get_first_model: bool = False, keep_chains: str = "A"):
+                        get_first_model: bool = False, keep_chains: str = "A"):
         """
         Set the target structure for docking.
         
         Parameters:
         - target_structure_path: Path to the target PDB file
-        - strip_template: If True, keep only the specified chains
+        - strip_template: If True, keep only the specified chains and amino acids (removes waters/ligands)
         - get_first_model: If True, keep only the first model from the PDB
         - keep_chains: Chains to keep when strip_template is True (default: "A")
         """
@@ -51,18 +51,14 @@ class Docker:
                 f"Target structure {target_structure_path} not found."
             )
         
-        # Store original path and name
         self.original_target_path = target_structure_path
         self.target_name = os.path.basename(target_structure_path).replace(".pdb", "")
         
-        # Clean up any previous temporary files
         if self.temp_pdb_path and os.path.exists(self.temp_pdb_path):
             os.remove(self.temp_pdb_path)
             self.temp_pdb_path = None
             
-        # Check if we need to process the PDB file
         if strip_template or get_first_model:
-            # Define a custom selector for chains
             class ChainSelect(Select):
                 def __init__(self, chains_to_keep):
                     self.chains_to_keep = chains_to_keep
@@ -71,8 +67,15 @@ class Docker:
                     return chain.id in self.chains_to_keep
                 
                 def accept_model(self, model):
-                    # For get_first_model, only accept model 0
                     return model.id == 0 if get_first_model else True
+                
+                def accept_residue(self, residue):
+                    # If strip_template is True, only keep standard amino acids
+                    if strip_template:
+                        if residue.get_resname() in ["HOH", "WAT"]:
+                            return 0
+                        return residue.get_id()[0] == " "
+                    return 1
             
             # Parse the PDB file
             parser = PDBParser(QUIET=True)
@@ -100,6 +103,8 @@ class Docker:
         print(f"Target is set to: {self.original_target_path}")
         if self.temp_pdb_path:
             print(f"Using cleaned version: {self.temp_pdb_path}")
+            if strip_template:
+                print("Removed waters and ligands, keeping only standard amino acids")
 
     def dock_peptides(self, peptide_sequences: list):
         """
@@ -149,7 +154,6 @@ class Docker:
             num_relax=self.num_relax,
             output_dir=self.output_dir,
             gpu_ids=self.gpu_ids,
-            overwrite_results=self.overwrite_results,
             target_name=self.target_name,  # Pass the original target name for consistent naming
         )
         docked_dirs += previously_docked_dirs

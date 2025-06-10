@@ -87,6 +87,7 @@ class BoPep:
         ]
 
         self._validate_surrogate_model_kwargs()
+        self.log_dir = log_dir
 
     def optimize(
         self,
@@ -203,6 +204,9 @@ class BoPep:
                 objectives = self.scores_to_objective.create_objective(
                     scores, self.objective_function, **self.objective_function_kwargs
                 )
+                
+                # Log the objective values
+                self.logger.log_objectives(objectives, iteration=iteration)
 
                 # 2.1) Train the model on *only the peptides we have scores for*
                 train_embeddings = {p: self.embeddings[p] for p in docked_peptides}
@@ -282,6 +286,8 @@ class BoPep:
 
                 # Log new scores
                 self.logger.log_scores(new_scores, iteration=iteration)
+
+        self._save_model(self.log_dir + "/model.pth")
 
     def _score_batch(self, docked_dirs: list):
         """
@@ -615,3 +621,13 @@ class BoPep:
 
             if not isinstance(phase["iterations"], int) or phase["iterations"] <= 0:
                 raise ValueError(f"Phase {idx}: iterations must be a positive integer")
+
+    def _save_model(self, save_path: str):
+        """
+        Save the current model to a file.
+        
+        Args:
+            save_path: Path to save the model
+        """
+        torch.save(self.model.state_dict(), save_path)
+        logging.info(f"Model saved to {save_path}")

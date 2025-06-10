@@ -219,9 +219,6 @@ def main():
             n_trials=10,
             n_splits=3,
             random_state=SEED,
-            rmse_weight=2,
-            msce_weight=1,
-            coverage_weight=1,
         )
         
         print(f"Best {model_type.upper()} parameters: {best_params}")
@@ -232,9 +229,6 @@ def main():
             n_trials=10,
             n_splits=3,
             random_state=SEED,
-            rmse_weight=2,
-            msce_weight=1,
-            coverage_weight=1,
             previous_study=study)
         
         print(f"Best {model_type.upper()} parameters: {best_params}")

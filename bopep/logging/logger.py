@@ -1,6 +1,7 @@
 import os
 import csv
 from datetime import datetime
+from typing import Optional, Dict, Any, List
 
 
 class Logger:
@@ -12,15 +13,17 @@ class Logger:
         self._model_losses_header_written = False
         self._predictions_header_written = False
         self._acquisition_header_written = False
+        self._objectives_header_written = False
 
         # Define base filenames
         scores_base = "scores.csv"
         model_losses_base = "model_losses.csv"
         predictions_base = "predictions.csv"
         acquisition_base = "acquisition.csv"
+        objectives_base = "objectives.csv"
         
         # Check if any of the files already exist
-        base_files = [scores_base, model_losses_base, predictions_base, acquisition_base]
+        base_files = [scores_base, model_losses_base, predictions_base, acquisition_base, objectives_base]
         file_exists = any(os.path.exists(os.path.join(self.log_dir, f)) for f in base_files)
         
         # If files exist, ask user about overwriting
@@ -35,10 +38,11 @@ class Logger:
             self._model_losses_file = os.path.join(self.log_dir, model_losses_base)
             self._predictions_file = os.path.join(self.log_dir, predictions_base)
             self._acquisition_file = os.path.join(self.log_dir, acquisition_base)
+            self._objectives_file = os.path.join(self.log_dir, objectives_base)
             
             # Delete existing files if overwriting
             for file_path in [self._scores_file, self._model_losses_file, 
-                             self._predictions_file, self._acquisition_file]:
+                             self._predictions_file, self._acquisition_file, self._objectives_file]:
                 if os.path.exists(file_path):
                     os.remove(file_path)
         else:
@@ -46,6 +50,7 @@ class Logger:
             self._model_losses_file = self._get_unique_filename(self.log_dir, model_losses_base)
             self._predictions_file = self._get_unique_filename(self.log_dir, predictions_base)
             self._acquisition_file = self._get_unique_filename(self.log_dir, acquisition_base)
+            self._objectives_file = self._get_unique_filename(self.log_dir, objectives_base)
     
     def _get_unique_filename(self, directory, base_filename):
         """Generate a unique filename by adding an incremental number if file exists."""
@@ -82,8 +87,27 @@ class Logger:
                 for score_type in score_types:
                     row.append(peptide_scores.get(score_type, None))
                 writer.writerow(row)
+                
+    def log_objectives(self, objectives: dict, iteration: int):
+        """
+        Log objective values for peptides.
+        
+        Args:
+            objectives: Dictionary mapping peptides to their objective values
+            iteration: Current iteration number
+        """
+        timestamp = datetime.now().isoformat()
+        
+        with open(self._objectives_file, "a", newline="") as f:
+            writer = csv.writer(f)
+            if not self._objectives_header_written:
+                writer.writerow(["timestamp", "iteration", "peptide", "objective"])
+                self._objectives_header_written = True
+            
+            for peptide, objective_value in objectives.items():
+                writer.writerow([timestamp, iteration, peptide, objective_value])
 
-    def log_model_loss(self, loss: float, iteration: int, r2: float = None):
+    def log_model_loss(self, loss: float, iteration: int, r2: Optional[float] = None):
         """
         losses: a float
         r2: coefficient of determination (optional)
