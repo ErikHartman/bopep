@@ -64,7 +64,7 @@ def plot_model_predictions(model, model_name, x_train, y_train, x_test, test_emb
     ax.plot(x_true, y_true, 'k-', linewidth=1, label='True function')
     
     # Plot training data
-    ax.scatter(x_train, y_train, alpha=0.3, s=10, label='Training data')
+    ax.scatter(x_train, y_train, alpha=0.3, s=10, color='k', label='Training data')
     
     # Plot predictions
     ax.plot(x_test, means, 'r-', linewidth=1.5, label='Prediction')
@@ -78,7 +78,7 @@ def plot_model_predictions(model, model_name, x_train, y_train, x_test, test_emb
             means + k * stds,
             alpha=0.3,
             edgecolor=None,
-            facecolor='#00aeef',
+            facecolor="#983ed4",
             linewidth=0,
             zorder=1,
             label="Unc." if i == 0 else None
@@ -107,26 +107,65 @@ def plot_model_predictions(model, model_name, x_train, y_train, x_test, test_emb
         
     ax.set_xlabel("x")
     ax.set_ylabel("y")
+    ax.legend(fontsize='small', frameon=False)
+    
+    return means, stds  # Return predictions for individual plotting
+
+
+def save_individual_plot(model_name, x_train, y_train, x_test, means, stds):
+
+    fig, ax = plt.figure(figsize=(3,3)), plt.gca()
+    
+    # Plot true function
+    x_true = np.linspace(min(x_test), max(x_test), 1000)
+    y_true = x_true**3
+    ax.plot(x_true, y_true, 'k-', linewidth=1, label='True function')
+    
+    # Plot training data
+    ax.scatter(x_train, y_train, alpha=0.8, s=6, color='k', label='Training data')
+    
+    # Plot predictions
+    ax.plot(x_test, means, '-', color="#ff8b50", linewidth=1.5, label='Prediction')
+    
+    # Plot uncertainty bands
+    n_stds = 4
+    for i, k in enumerate(np.linspace(0, n_stds, 4)):
+        ax.fill_between(
+            x_test,
+            means - k * stds,
+            means + k * stds,
+            alpha=0.3,
+            edgecolor=None,
+            facecolor="#ac69da",
+            linewidth=0,
+            zorder=1,
+            label="Unc." if i == 0 else None
+        )
+    
+    # Set plot limits and labels
+    ax.set_xlim(-7, 7)
+    ax.set_ylim(-150, 150)
+        
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
     ax.legend(fontsize='small')
-    ax.grid(True, alpha=0.3)
+    
+    # Save as SVG
+    file_path = f"examples/figures/{model_name.lower()}.svg"
+    plt.tight_layout()
+    plt.savefig(file_path, format='svg')
+    plt.close(fig)
+    print(f"Individual plot saved as '{file_path}'")
+
+
 
 def create_and_train_model(model_type, best_params, embedding_dict, scores_dict):
     """
     Create and train a model with the best parameters from the tuner.
-    
-    Args:
-        model_type: Type of model to create
-        best_params: Dictionary of best parameters from the tuner
-        embedding_dict: Dictionary of embeddings for training
-        scores_dict: Dictionary of scores for training
-        
-    Returns:
-        Trained model
     """
     # Extract common parameters
-    hidden_dims = best_params.get("hidden_dims", [32, 32])
+    hidden_dims = best_params.get("hidden_dims", [64,64])
     learning_rate = best_params.get("learning_rate", 0.001)
-    batch_size = 64  # Use fixed batch size of 64
     epochs = best_params.get("epochs", 100)
     uncertainty_param = best_params.get("uncertainty_param", 0.1)
     
@@ -165,7 +204,6 @@ def create_and_train_model(model_type, best_params, embedding_dict, scores_dict)
         embedding_dict=embedding_dict,
         scores_dict=scores_dict,
         epochs=epochs,
-        batch_size=batch_size,
         learning_rate=learning_rate,
         device=device,
         verbose=False
@@ -207,6 +245,8 @@ def main():
     # List of model types to tune
     model_types = ["mve", "deep_evidential", "nn_ensemble", "mc_dropout"]
     results = {}
+
+    fixed_params = {"mve": 0.3,  "deep_evidential": 1, "nn_ensemble": 10, "mc_dropout": 0.3}
     
     # Run hyperparameter tuning for each model type
     for i, model_type in enumerate(model_types):
@@ -216,20 +256,12 @@ def main():
             model_type=model_type,
             embedding_dict=embedding_dict,
             scores_dict=scores_dict,
-            n_trials=10,
+            n_trials=1,
             n_splits=3,
             random_state=SEED,
+            hidden_dim_max=32,
         )
         
-        print(f"Best {model_type.upper()} parameters: {best_params}")
-
-        best_params, study = tune_hyperparams(model_type=model_type,
-            embedding_dict=embedding_dict,
-            scores_dict=scores_dict,
-            n_trials=10,
-            n_splits=3,
-            random_state=SEED,
-            previous_study=study)
         
         print(f"Best {model_type.upper()} parameters: {best_params}")
         
@@ -238,13 +270,13 @@ def main():
         # Create and train model with best parameters
         model = create_and_train_model(
             model_type=model_type,
-            best_params=best_params,
+            best_params={"uncertainty_param": fixed_params[model_type], "epochs":500}, # best_params,
             embedding_dict=embedding_dict,
             scores_dict=scores_dict
         )
         
         # Plot results
-        plot_model_predictions(
+        means, stds = plot_model_predictions(
             model=model,
             model_name=model_type.upper(),
             x_train=x_values,
@@ -255,6 +287,16 @@ def main():
             y_scaler=y_scaler,
             ax=axes[i],
             params=best_params
+        )
+        
+        # Create and save individual SVG plot
+        save_individual_plot(
+            model_name=model_type.upper(),
+            x_train=x_values,
+            y_train=y_values,
+            x_test=test_x,
+            means=means,
+            stds=stds,
         )
     
     plt.tight_layout()

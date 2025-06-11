@@ -624,10 +624,27 @@ class BoPep:
 
     def _save_model(self, save_path: str):
         """
-        Save the current model to a file.
+        Save the current model to a file with metadata.
         
         Args:
             save_path: Path to save the model
         """
-        torch.save(self.model.state_dict(), save_path)
+        # Create a comprehensive save dictionary
+        save_dict = {
+            'model_state_dict': self.model.state_dict(),
+            'model_config': {
+                'model_type': self.surrogate_model_kwargs['model_type'],
+                'network_type': self.surrogate_model_kwargs['network_type'],
+                'input_dim': self.surrogate_model_kwargs['input_dim'],
+                'hyperparameters': self.best_hyperparams,
+            },
+            'model_class': self.model.__class__.__name__,
+            'embedding_kwargs': self.embedding_kwargs,
+            'surrogate_model_kwargs': self.surrogate_model_kwargs,
+        }
+        
+        torch.save(save_dict, save_path)
         logging.info(f"Model saved to {save_path}")
+        logging.info(f"Model type: {self.surrogate_model_kwargs['model_type']}")
+        logging.info(f"Network architecture: {self.surrogate_model_kwargs['network_type']}")
+        logging.info(f"Model class: {self.model.__class__.__name__}")

@@ -3,8 +3,7 @@ from typing import Dict, Literal, Any, Optional
 from bopep.surrogate_model.base_models import (
     BaseNetwork,
     MLPNetwork,
-    BiLSTMNetwork,
-    BiGRUNetwork,
+    RNNetwork
 )
 import torch
 
@@ -53,6 +52,7 @@ class NetworkFactory:
             # Handle BiLSTM specific parameters
             hidden_dim = kwargs.get("hidden_dim", kwargs.get("lstm_hidden_dim", 128))
             num_layers = kwargs.get("num_layers", kwargs.get("lstm_layers", 1))
+            network_params["architecture"] = "lstm"
 
             # Ensure hidden_dim is an int
             if hidden_dim is None:
@@ -61,12 +61,13 @@ class NetworkFactory:
 
             network_params["hidden_dim"] = hidden_dim
             network_params["num_layers"] = num_layers
-            model = BiLSTMNetwork(**network_params)
+            model = RNNetwork(**network_params)
 
         elif network_type in ["bigru"]:
             # Handle BiGRU specific parameters
             hidden_dim = kwargs.get("hidden_dim", kwargs.get("gru_hidden_dim", 128))
             num_layers = kwargs.get("num_layers", kwargs.get("gru_layers", 1))
+            network_params["architecture"] = "gru"
 
             # Ensure hidden_dim is an int
             if hidden_dim is None:
@@ -75,7 +76,7 @@ class NetworkFactory:
 
             network_params["hidden_dim"] = hidden_dim
             network_params["num_layers"] = num_layers
-            model = BiGRUNetwork(**network_params)
+            model = RNNetwork(**network_params)
 
         else:
             raise ValueError(f"Unsupported network_type: {network_type}")
