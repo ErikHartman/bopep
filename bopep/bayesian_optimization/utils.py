@@ -1,3 +1,6 @@
+import torch
+
+
 def check_starting_index_in_pdb(pdb_file: str) -> int:
     """
     Parses PDB file and checks what the starting residue index is. 
@@ -32,3 +35,30 @@ def check_starting_index_in_pdb(pdb_file: str) -> int:
     except Exception as e:
         print(f"Error reading PDB file: {e}")
         return None
+
+
+def load_model(self, load_path: str):
+    """
+    Load a saved model with its configuration.
+    
+    Args:
+        load_path: Path to the saved model file
+    """
+    checkpoint = torch.load(load_path, map_location='cpu')
+    
+    # Restore configuration
+    self.surrogate_model_kwargs = checkpoint['surrogate_model_kwargs']
+    self.best_hyperparams = checkpoint['model_config']['hyperparameters']
+    
+    # Initialize the model with the saved configuration
+    self._initialize_model(self.best_hyperparams)
+    
+    # Load the state dictionary
+    self.model.load_state_dict(checkpoint['model_state_dict'])
+    
+    print(f"Model loaded from {load_path}")
+    print(f"Model type: {checkpoint['model_config']['model_type']}")
+    print(f"Network architecture: {checkpoint['model_config']['network_type']}")
+    print(f"Model class: {checkpoint['model_class']}")
+    
+    return checkpoint['model_config']

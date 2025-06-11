@@ -13,6 +13,7 @@ class NeuralNetworkEnsemble(BasePredictionModel):
         input_dim: int,
         hidden_dims: List[int] = [128, 64],
         n_networks: int = 5,
+        dropout_rate: float = 0.05, # dropout so that networks don't converge on the same solution
         network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
         num_layers: int = 1,
         hidden_dim: Optional[int] = None,
@@ -30,6 +31,7 @@ class NeuralNetworkEnsemble(BasePredictionModel):
                     hidden_dims=hidden_dims,
                     hidden_dim=hidden_dim,
                     num_layers=num_layers,
+                    dropout_rate=dropout_rate,
                     **kwargs,
                 )
                 for _ in range(n_networks)

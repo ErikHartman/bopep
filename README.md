@@ -1,4 +1,7 @@
-# ⛏️ BoPep ⛏️
+<p align="center">
+  <img src="bopep_header_image.png" width="350", alt="BoPep">
+</p>
+
 ## *Mining for peptide binders in large-scale data with Bayesian Optimization*
 
 This repository contains the code for `BoPep`, a package for identifying peptide binders to a protein from a large set of candidate peptides.
@@ -30,6 +33,7 @@ source bopep_env/bin/activate
 1. **Install LocalColabFold**: LocalColabFold is a fantastic package that allows you to run ColabFold locally. Follow the installation procedure [here](https://github.com/YoshitakaMo/localcolabfold) to install it.
 
 Remember to export the `PATH` variable and make sure `colabfold_batch` is callable by running:
+
 ```bash
 # For bash or zsh
 # e.g. export PATH="/home/moriwaki/Desktop/localcolabfold/colabfold-conda/bin:$PATH"
@@ -37,21 +41,23 @@ export PATH="/path/to/your/localcolabfold/colabfold-conda/bin:$PATH"
 
 colabfold_batch --help
 ```
-This should work if you follow the instructions in the LocalColabFold git repo.
 
+This should work if you follow the instructions in the LocalColabFold git repo.
 
 2. **Install PyRosetta**: PyRosetta is freely available for academic users. Any commercial usage requires the purchasing of a license.
 
    - Go to the [PyRosetta download page](https://www.pyrosetta.org/downloads) and read up on the terms for the license.
-   - Install PyRosetta in your environment using the [pyrosetta-installer](https://pypi.org/project/pyrosetta-installer/) with pip: 
+   - Install PyRosetta in your environment using the [pyrosetta-installer](https://pypi.org/project/pyrosetta-installer/) with pip:
+
     ```bash
    pip install pyrosetta-installer
    ```
+
    - Then run:
+
    ```bash
    python -c 'import pyrosetta_installer; pyrosetta_installer.install_pyrosetta(skip_if_installed=True)'
    ```
-
 
 3. **Install Remaining Dependencies**:
    Finally, install any additional dependencies required for `bopep`:
@@ -60,11 +66,12 @@ This should work if you follow the instructions in the LocalColabFold git repo.
    pip install -r requirements.txt
    ```
 
-
 ## Credits
+
 Credits go out to those who have created great packages and tools such as LocalColabFold, PyRosetta, torch, optuna and other modules.
 
 Cite these modules:
+
 ```
 @article{Mirdita2022,
   title = {ColabFold: making protein folding accessible to all},

@@ -12,7 +12,7 @@ class MonteCarloDropout(BasePredictionModel):
         self,
         input_dim: int,
         hidden_dims: List[int] = [128, 64],
-        dropout_rate: float = 0.1,
+        dropout_rate: float = 0.1, # dropout so that networks don't converge on the same solution
         mc_samples: int = 20,
         network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
         num_layers: int = 1,

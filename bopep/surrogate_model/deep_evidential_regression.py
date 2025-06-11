@@ -35,10 +35,12 @@ class DeepEvidentialRegression(BasePredictionModel):
         num_layers: int = 1,
         hidden_dim: Optional[int] = None,
         evidential_regularization: float = 0.1,
+        uncertainty_type: Literal["aleatoric", "epistemic", "total"] = "total",
         **kwargs
     ):
         super().__init__()
         self.evidential_regularization = evidential_regularization
+        self.uncertainty_type = uncertainty_type
 
         # We need 4 outputs (mu, v, alpha, beta)
         output_dim = 4
@@ -66,13 +68,36 @@ class DeepEvidentialRegression(BasePredictionModel):
         return mu, v, alpha, beta
 
     def forward_predict(
-        self, x: torch.Tensor, lengths: Optional[List[int]] = None
+        self, 
+        x: torch.Tensor, 
+        lengths: Optional[List[int]] = None,
+        uncertainty_mode: Optional[str] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass returning predictive mean and standard deviation.
+        
+        Args:
+            x: Input tensor
+            lengths: Optional sequence lengths for variable-length inputs
+            uncertainty_mode: Which uncertainty component to use ("aleatoric", "epistemic", or "total")
+                              If None, uses the default set in __init__
         """
+        if uncertainty_mode is None:
+            uncertainty_mode = self.uncertainty_type
+            
         mu, v, alpha, beta = self.forward_once(x, lengths=lengths)
-        variance = (beta / (alpha - 1.0)) * (1.0 + 1.0 / v)
+        
+        # Calculate different uncertainty components
+        aleatoric_variance = beta / (alpha - 1.0)
+        epistemic_variance = beta / (v * (alpha - 1.0))
+        
+        if uncertainty_mode == "aleatoric":
+            variance = aleatoric_variance
+        elif uncertainty_mode == "epistemic":
+            variance = epistemic_variance
+        else:
+            variance = aleatoric_variance + epistemic_variance
+            
         std = torch.sqrt(variance)
         return mu, std
 

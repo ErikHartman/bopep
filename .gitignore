@@ -2,7 +2,7 @@
 *.egg-info
 env_config.py
 *.png
-
+!bopep_header_image.png
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
