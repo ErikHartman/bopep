@@ -1,3 +1,5 @@
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 from bopep.scoring.pep_prot_distance import distance_score_from_pdb
 from bopep.scoring.rosetta_scorer import RosettaScorer
 from bopep.scoring.af_scorer import AFScorer
@@ -253,13 +255,11 @@ class Scorer:
                 raise ValueError(
                     "WARNING: binding_site_residue_indices is required for smooth_peptide_binding_site_score"
                 )
-            in_binding_site_score = (
-                smooth_peptide_binding_site_score(
-                    pdb_file,
-                    binding_site_residue_indices=binding_site_residue_indices,
-                    threshold=5.0,
-                    alpha=1,
-                )
+            in_binding_site_score = smooth_peptide_binding_site_score(
+                pdb_file,
+                binding_site_residue_indices=binding_site_residue_indices,
+                threshold=5.0,
+                alpha=1,
             )
             scores["in_binding_site_score"] = in_binding_site_score
 
@@ -306,6 +306,109 @@ class Scorer:
 
         return {peptide_sequence: scores}
 
+    def score_batch(
+        self,
+        scores_to_include: list,
+        inputs: list,
+        input_type: str = "pdb_file",
+        binding_site_residue_indices: list = None,
+        n_jobs: int = None,
+    ) -> dict:
+        """
+        Score multiple peptides in parallel.
+
+        Parameters
+        ----------
+        scores_to_include : list
+            List of score names to include (same as in score method)
+        inputs : list
+            List of inputs based on input_type (pdb_files, colab_dirs, or peptide_sequences)
+        input_type : str
+            Type of input: "pdb_file", "colab_dir", or "peptide_sequence"
+        binding_site_residue_indices : list, optional
+            List of residue indices defining the binding site
+        n_jobs : int, optional
+            Number of parallel jobs to run. Default is None (use all available cores)
+
+        Returns
+        -------
+        dict
+            Dictionary with results for all inputs, keyed by peptide sequence
+        """
+        if n_jobs is None:
+            n_jobs = max(1, multiprocessing.cpu_count() - 1)
+
+        n_jobs = min(n_jobs, len(inputs))
+        all_scores = {}
+
+        # Use ProcessPoolExecutor for parallelization
+        if n_jobs > 1:
+            print(f"Processing {len(inputs)} inputs using {n_jobs} cores...")
+            # Create argument tuples for each input
+            args_list = [
+                (
+                    self,
+                    scores_to_include,
+                    input_val,
+                    input_type,
+                    binding_site_residue_indices,
+                )
+                for input_val in inputs
+            ]
+
+            with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+                # Use the static method for parallel processing
+                futures = [
+                    executor.submit(Scorer._process_single_input, *args)
+                    for args in args_list
+                ]
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        all_scores.update(result)
+                    except Exception as e:
+                        print(f"Error processing input: {e}")
+        else:
+            # Sequential processing
+            for input_value in inputs:
+                try:
+                    result = self._process_single_input(
+                        self,
+                        scores_to_include,
+                        input_value,
+                        input_type,
+                        binding_site_residue_indices,
+                    )
+                    all_scores.update(result)
+                except Exception as e:
+                    print(f"Error processing input {input_value}: {e}")
+
+        return all_scores
+
+    @staticmethod
+    def _process_single_input(
+        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices
+    ):
+        """
+        Process a single input for scoring.
+
+        This is a static method to allow pickling for multiprocessing.
+        """
+        if input_type == "pdb_file":
+            return scorer.score(
+                scores_to_include,
+                pdb_file=input_value,
+                binding_site_residue_indices=binding_site_residue_indices,
+            )
+        elif input_type == "colab_dir":
+            return scorer.score(
+                scores_to_include,
+                colab_dir=input_value,
+                binding_site_residue_indices=binding_site_residue_indices,
+            )
+        elif input_type == "peptide_sequence":
+            return scorer.score(scores_to_include, peptide_sequence=input_value)
+
     def print_scores(self):
         for score in self.available_scores:
             print(score)
@@ -315,12 +418,51 @@ if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
     colab_dir_path = "/srv/data1/general/immunopeptides_data/databases/benchmark_data/pdbs_erik/docked_peptides/1ydi_VGWEQLLTTIARTINEVENQILTR"
     scorer = Scorer()
+
+    # Single score example
     scores = scorer.score(scores_to_include=["rosetta_score"], pdb_file=pdb_file_path)
     print(f"Rosetta score for {pdb_file_path}: {scores}")
 
     scores = scorer.score(
-        scores_to_include=["iptm", "rosetta_score", "uHrel", "peptide_plddt", "in_binding_site_score"],
+        scores_to_include=[
+            "iptm",
+            "rosetta_score",
+            "uHrel",
+            "peptide_plddt",
+            "in_binding_site_score",
+        ],
         colab_dir=colab_dir_path,
-        binding_site_residue_indices=[110, 111,112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128],
+        binding_site_residue_indices=[
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127,
+            128,
+        ],
     )
     print(f"Scores for {colab_dir_path}: {scores}")
+
+    # Batch scoring example
+    peptide_sequences = ["ACDEFGH", "KLMNPQRS", "TVWY"]
+    batch_scores = scorer.score_batch(
+        scores_to_include=["molecular_weight", "gravy", "helix_fraction"],
+        inputs=peptide_sequences,
+        input_type="peptide_sequence",
+        n_jobs=3,
+    )
+
+    print(f"Batch scores for {len(peptide_sequences)} peptides: {batch_scores}")

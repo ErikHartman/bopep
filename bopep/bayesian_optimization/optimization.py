@@ -388,9 +388,6 @@ class BoPep:
         n_trials = hpo_config.get("n_trials", 20)
         n_splits = hpo_config.get("n_splits", 3)
         random_state = hpo_config.get("random_state", 42)
-        rmse_weight = hpo_config.get("rmse_weight", 1.0)
-        msce_weight = hpo_config.get("msce_weight", 1.0)
-        coverage_weight = hpo_config.get("coverage_weight", 1.0)
 
         # Log that we're starting hyperparameter optimization
         logging.info(
@@ -410,9 +407,6 @@ class BoPep:
             n_trials=n_trials,
             n_splits=n_splits,
             random_state=random_state,
-            rmse_weight=rmse_weight,
-            msce_weight=msce_weight,
-            coverage_weight=coverage_weight,
             previous_study=self.previous_study,
         )
 

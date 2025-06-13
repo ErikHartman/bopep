@@ -34,7 +34,7 @@ class ScoresToObjective:
     
 def benchmark_objective(scores: dict) -> dict:
     """
-    regression_equation_string = "(3.374078 - 4.3519845*interface_dG)*(distance_score + instability_index) + 5.4904785"
+    regression_equation_string = "-rosetta_score - (distance_score + 3.0185924)*(interface_dG - 2.4250882)"
     classification_equation_string = "-iptm*(peptide_pae - 1.2075188)"
 
     final function = regression_equation_string * classification_equation_string
@@ -48,28 +48,27 @@ def benchmark_objective(scores: dict) -> dict:
     classification_constant_1 = 1.2075188
 
     regression_delta_G_min, regression_delta_G_max = -98.70550256759547, 17.115022472542762
-    regression_instability_index_min, regression_instability_index_max = -12.405, 237.25
+    rosetta_score_min, rosetta_score_max = -1021.077541270006, 451.3142280816484
     regression_distance_score_min, regression_distance_score_max = 5.528944453683353, 7.361734707761549
-    regression_constant_1 = 3.374078
-    regression_contsant_2 = 4.3519845
-    regression_constant_3 = 5.4904785
+    regression_constant_1 = 3.0185924
+    regression_contsant_2 = 2.4250882
 
     scalar_objectives = {}
     for peptide, peptide_scores in scores.items():
         interface_dG = peptide_scores.get("interface_dG", 0)
         distance_score = peptide_scores.get("distance_score", 0)
-        instability_index = peptide_scores.get("instability_index", 0)
+        rosetta_score = peptide_scores.get("rosetta_score", 0)
         peptide_pae = peptide_scores.get("peptide_pae", 0)
         iptm = peptide_scores.get("iptm", 0)
         
         scaled_interface_dG = (interface_dG - regression_delta_G_min) / (regression_delta_G_max - regression_delta_G_min)
         scaled_distance_score = (distance_score - regression_distance_score_min) / (regression_distance_score_max - regression_distance_score_min)
-        scaled_instability_index = (instability_index - regression_instability_index_min) / (regression_instability_index_max - regression_instability_index_min)
+        scaled_rosetta_score = (rosetta_score - rosetta_score_min) / (rosetta_score_max - rosetta_score_min)
         scaled_peptide_pae = (peptide_pae - classification_peptide_pae_min) / (classification_peptide_pae_max - classification_peptide_pae_min)
         scaled_iptm = (iptm - classification_iptm_min) / (classification_iptm_max - classification_iptm_min)
 
         classification_value = -scaled_iptm * (scaled_peptide_pae - classification_constant_1)
-        regression_value = (regression_constant_1 - regression_contsant_2 * scaled_interface_dG) * (scaled_distance_score + scaled_instability_index) + regression_constant_3
+        regression_value = -scaled_rosetta_score - (scaled_distance_score + regression_constant_1) * (scaled_interface_dG - regression_contsant_2)
         objective_value = regression_value * classification_value
         if peptide_scores["in_binding_site"]:
             scalar_objectives[peptide] = objective_value
