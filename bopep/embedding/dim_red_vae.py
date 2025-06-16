@@ -54,11 +54,12 @@ class VariationalAutoencoder(nn.Module):
         h = self.encoder(x)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
+        logvar = torch.clamp(logvar, min=-10, max= 10)
         return mu, logvar
         
     def reparameterize(self, mu, logvar):
         """Reparameterization trick: sample from N(mu, var) using N(0, 1)"""
-        std = torch.exp(0.5 * logvar)
+        std = torch.exp(0.5 * logvar).clamp(min=1e-6)
         eps = torch.randn_like(std)
         z = mu + eps * std
         return z
@@ -89,11 +90,9 @@ def vae_loss_function(recon_x, x, mu, logvar, beta=1.0):
     Returns:
         Total loss, reconstruction loss, KL divergence
     """
-    # Reconstruction loss (MSE)
-    recon_loss = F.mse_loss(recon_x, x, reduction='sum')
-    
-    # KL divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+
+    recon_loss = F.mse_loss(recon_x, x, reduction='mean')
+    kl_div    = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
     
     # Total loss
     total_loss = recon_loss + beta * kl_div
@@ -164,6 +163,7 @@ def train_vae(data, latent_dim, hidden_layers=[], batch_size=64,
             # Backward and optimize
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
             # Track losses

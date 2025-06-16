@@ -35,6 +35,8 @@ class HyperparameterTuner:
         random_state: int = 42,
         hidden_dim_min: int = 16,
         hidden_dim_max: int = 256,
+        uncertainty_param_min: Optional[Union[float, int]] = None,
+        uncertainty_param_max: Optional[Union[float, int]] = None
     ):
         """
         Args:
@@ -56,6 +58,9 @@ class HyperparameterTuner:
 
         self.hidden_dim_min = hidden_dim_min
         self.hidden_dim_max = hidden_dim_max
+
+        self.uncertainty_param_min = uncertainty_param_min
+        self.uncertainty_param_max = uncertainty_param_max
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -212,11 +217,20 @@ class HyperparameterTuner:
         batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
 
         if self.model_type in ["mve", "deep_evidential"]:
-            param_value = trial.suggest_float("uncertainty_param", 0, 1)
+            # Ensure parameters are floats
+            min_param = 0.0 if self.uncertainty_param_min is None else float(self.uncertainty_param_min)
+            max_param = 1.0 if self.uncertainty_param_max is None else float(self.uncertainty_param_max)
+            param_value = trial.suggest_float("uncertainty_param", min_param, max_param)
         elif self.model_type == "mc_dropout":
-            param_value = trial.suggest_float("uncertainty_param", 0.01, 0.8)
+            # Ensure parameters are floats
+            min_param = 0.01 if self.uncertainty_param_min is None else float(self.uncertainty_param_min)
+            max_param = 0.8 if self.uncertainty_param_max is None else float(self.uncertainty_param_max)
+            param_value = trial.suggest_float("uncertainty_param", min_param, max_param)
         elif self.model_type == "nn_ensemble":
-            param_value = trial.suggest_int("uncertainty_param", 2, 10)
+            # Ensure parameters are integers
+            min_param = 2 if self.uncertainty_param_min is None else int(self.uncertainty_param_min)
+            max_param = 10 if self.uncertainty_param_max is None else int(self.uncertainty_param_max)
+            param_value = trial.suggest_int("uncertainty_param", min_param, max_param)
         else:
             raise ValueError(f"Unknown model_type {self.model_type}")
 
@@ -336,6 +350,8 @@ def tune_hyperparams(
     hidden_dim_min: int = 16,
     hidden_dim_max: int = 256,
     previous_study: Optional[optuna.study.Study] = None,
+    uncertainty_param_min: Optional[Union[float, int]] = None,
+    uncertainty_param_max: Optional[Union[float, int]] = None
 ) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
     """
     High-level API for tuning architecture + uncertainty hyperparams with 
@@ -361,6 +377,8 @@ def tune_hyperparams(
         random_state=random_state,
         hidden_dim_min=hidden_dim_min,
         hidden_dim_max=hidden_dim_max,
+        uncertainty_param_min = uncertainty_param_min,
+        uncertainty_param_max = uncertainty_param_max,
     )
 
     best_params, study = tuner.tune(embedding_dict, scores_dict, previous_study)

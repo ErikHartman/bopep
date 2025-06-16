@@ -185,6 +185,13 @@ class BoPep:
         # Log scores
         self.logger.log_scores(initial_scores, iteration=0)
 
+        # Create and log initial objectives
+        initial_objectives = self.scores_to_objective.create_objective(
+            scores, self.objective_function, **self.objective_function_kwargs
+        )
+        self.logger.log_objectives(initial_objectives, iteration=0, acquisition_name="initial")
+        all_logged_objectives = set(initial_objectives.keys())
+
         # 2) Main BO Loop over phases
         logging.info("Starting optimization loop")
         for phase_index, phase in enumerate(schedule, start=1):
@@ -197,16 +204,24 @@ class BoPep:
                     f"Invalid acquisition function: {acquisition}. "
                     f"Must be one of {self.available_acquistion_functions}"
                 )
+            self._optimize_hyperparameters(0, {p: self.embeddings[p] for p in docked_peptides}, initial_objectives)
+            self._initialize_model(self.best_hyperparams)
+            self.model.to(device)
 
-            for iteration in range(iterations):
+            for iteration in range(1, iterations+1):
 
                 # 2.0) Turn scores into a scalarized score dict of peptide: score
                 objectives = self.scores_to_objective.create_objective(
                     scores, self.objective_function, **self.objective_function_kwargs
                 )
                 
-                # Log the objective values
-                self.logger.log_objectives(objectives, iteration=iteration)
+                # Log the new objective values
+                new_objective_peptides = set(objectives.keys()) - all_logged_objectives
+                new_objectives = {peptide: objectives[peptide] for peptide in new_objective_peptides}
+
+                if new_objectives:
+                    self.logger.log_objectives(new_objectives, iteration=iteration, acquisition_name=acquisition)
+                    all_logged_objectives.update(new_objectives.keys())
 
                 # 2.1) Train the model on *only the peptides we have scores for*
                 train_embeddings = {p: self.embeddings[p] for p in docked_peptides}
@@ -215,7 +230,7 @@ class BoPep:
                 if iteration == 0 or (
                     iteration % self.hpo_kwargs.get("hpo_interval", 10) == 0
                 ):
-                    self._optimize_hyperparameters(train_embeddings, objectives)
+                    self._optimize_hyperparameters(iteration, train_embeddings, objectives)
                     self._initialize_model(self.best_hyperparams)
                     self.model.to(device)
 
@@ -286,6 +301,12 @@ class BoPep:
 
                 # Log new scores
                 self.logger.log_scores(new_scores, iteration=iteration)
+                
+                # Print top performers
+                self._print_top_performers(
+                    objectives=objectives,
+                    scores=scores,
+                )
 
         self._save_model(self.log_dir + "/model.pth")
 
@@ -295,13 +316,19 @@ class BoPep:
         """
         new_scores = {}
         scores_to_include = self.scoring_kwargs.get("scores_to_include", [])
-        for colab_dir in docked_dirs:
-            colab_dir_scores = self.scorer.score(
-                scores_to_include=scores_to_include,
-                colab_dir=colab_dir,
-                binding_site_residue_indices=self.binding_site_residue_indices,
+
+        if not scores_to_include:
+            raise ValueError(
+                "No scores to include for scoring. Please specify valid scores in 'scores_to_include'."
             )
-            new_scores.update(colab_dir_scores)
+
+        new_scores = self.scorer.score_batch(
+            scores_to_include=scores_to_include,
+            inputs=docked_dirs,
+            input_type="colab_dir",
+            binding_site_residue_indices=self.binding_site_residue_indices,
+            n_jobs=self.scoring_kwargs.get("n_jobs", 12),
+        )
 
         return new_scores
 
@@ -375,7 +402,7 @@ class BoPep:
                         f"Peptide '{pep}' has shape {emb.shape}."
                     )
 
-    def _optimize_hyperparameters(self, embeddings: dict, scores: dict):
+    def _optimize_hyperparameters(self, iteration:int, embeddings: dict, scores: dict):
         """
         Use the Hyperparameter Tuner to optimize all params.
         Sets self.best_hyperparams to the best found hyperparameters.
@@ -408,6 +435,13 @@ class BoPep:
             n_splits=n_splits,
             random_state=random_state,
             previous_study=self.previous_study,
+        )
+
+        self.logger.log_hyperparameters(
+            iteration,
+            self.best_hyperparams, 
+            model_type=self.surrogate_model_kwargs["model_type"], 
+            network_type=self.surrogate_model_kwargs["network_type"]
         )
 
         logging.info(
@@ -642,3 +676,20 @@ class BoPep:
         logging.info(f"Model type: {self.surrogate_model_kwargs['model_type']}")
         logging.info(f"Network architecture: {self.surrogate_model_kwargs['network_type']}")
         logging.info(f"Model class: {self.model.__class__.__name__}")
+
+    
+    def _print_top_performers(self, objectives, scores, top_n=5):
+
+        sorted_peptides = sorted(
+            objectives.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:top_n]
+        
+        logging.info(f"Top {top_n} peptides:")
+        logging.info(f"{'Peptide':<20} | {'Objective':<10} ")
+        logging.info("-" * 60)
+        
+        for peptide, obj_value in sorted_peptides:
+        
+            logging.info(f"{peptide:<20} | {obj_value:<10.4f} ")

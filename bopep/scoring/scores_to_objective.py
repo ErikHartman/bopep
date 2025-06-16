@@ -39,7 +39,7 @@ def benchmark_objective(scores: dict) -> dict:
 
     final function = regression_equation_string * classification_equation_string
 
-    scores contains a dict of peptides: {score_name: value, ..., "is_in_binding_site": bool}
+    scores contains a dict of peptides: {score_name: value, ..., "in_binding_site": bool}
 
     The mins and maxes should be used to do min-max scaling.
     """
@@ -47,19 +47,19 @@ def benchmark_objective(scores: dict) -> dict:
     classification_iptm_min, classification_iptm_max = 0.14,0.95
     classification_constant_1 = 1.2075188
 
-    regression_delta_G_min, regression_delta_G_max = -98.70550256759547, 17.115022472542762
-    rosetta_score_min, rosetta_score_max = -1021.077541270006, 451.3142280816484
-    regression_distance_score_min, regression_distance_score_max = 5.528944453683353, 7.361734707761549
+    regression_delta_G_min, regression_delta_G_max = -98.70550256759547,17.115022472542762
+    rosetta_score_min, rosetta_score_max = -1021.077541270006,451.3142280816484
+    regression_distance_score_min, regression_distance_score_max = 5.528944453683353,7.361734707761549
     regression_constant_1 = 3.0185924
     regression_contsant_2 = 2.4250882
 
     scalar_objectives = {}
     for peptide, peptide_scores in scores.items():
-        interface_dG = peptide_scores.get("interface_dG", 0)
-        distance_score = peptide_scores.get("distance_score", 0)
-        rosetta_score = peptide_scores.get("rosetta_score", 0)
-        peptide_pae = peptide_scores.get("peptide_pae", 0)
-        iptm = peptide_scores.get("iptm", 0)
+        interface_dG = peptide_scores["interface_dG"]
+        distance_score = peptide_scores["distance_score"]
+        rosetta_score = peptide_scores["rosetta_score"]
+        peptide_pae = peptide_scores["peptide_pae"]
+        iptm = peptide_scores["iptm"]
         
         scaled_interface_dG = (interface_dG - regression_delta_G_min) / (regression_delta_G_max - regression_delta_G_min)
         scaled_distance_score = (distance_score - regression_distance_score_min) / (regression_distance_score_max - regression_distance_score_min)
@@ -150,3 +150,31 @@ def bopep_objective(
         scalar_objectives[peptide] = total
 
     return scalar_objectives
+
+
+if __name__ == "__main__":
+    # Example usage
+    #peptide,objective,rosetta_score,interface_dG,distance_score,iptm,peptide_pae,in_binding_site,fraction_in_binding_site
+    #LKNPDDPDMVD,0.21621160762107358,-352.43062003747855,-10.933749597646795,6.070098449822542,0.25,25.55502085070889,True,1.0
+    example_scores = {
+        "KSLLQQLLTE": {
+            "rosetta_score": -636.1152754278565,
+            "interface_dG": -44.35348584226472,
+            "iptm": 0.92,
+            "peptide_pae": 7.250308300395252,
+            "distance_score": 7.110018269096763,
+            "in_binding_site": True
+        },
+        "LKNPDDPDMVD": {
+            "rosetta_score": -352.43062003747855,
+            "interface_dG": -10.933749597646795,
+            "iptm": 0.25,
+            "peptide_pae": 25.55502085070889,
+            "distance_score": 6.070098449822542,
+            "in_binding_site": True
+        },
+    }
+
+    objective = ScoresToObjective()
+    result = objective.create_objective(example_scores, benchmark_objective)
+    print(result)

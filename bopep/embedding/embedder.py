@@ -106,7 +106,11 @@ class Embedder:
             embedding_array = np.array(list(embeddings.values()))
             peptide_sequences = list(embeddings.keys())
 
-            pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
+            if n_components is not None:
+                pca = PCA(n_components=n_components)
+            else:
+                pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
+        
             reduced_embeddings_array = pca.fit_transform(embedding_array)
 
             print("The reduced embeddings are of shape: ", reduced_embeddings_array.shape)

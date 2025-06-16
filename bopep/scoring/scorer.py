@@ -416,7 +416,7 @@ class Scorer:
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
-    colab_dir_path = "/srv/data1/general/immunopeptides_data/databases/benchmark_data/pdbs_erik/docked_peptides/1ydi_VGWEQLLTTIARTINEVENQILTR"
+    colab_dir_path = "/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/docked_pdbs/4glf_LKNPDDPDMVD"#"/srv/data1/general/immunopeptides_data/databases/benchmark_data/pdbs_erik/docked_peptides/1ydi_VGWEQLLTTIARTINEVENQILTR"
     scorer = Scorer()
 
     # Single score example

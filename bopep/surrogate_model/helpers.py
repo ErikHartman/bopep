@@ -126,6 +126,7 @@ class BasePredictionModel(torch.nn.Module):
         device: Optional[torch.device] = None,
         verbose: bool = True,
         criterion=None,
+        clip_grad_norm: float = 1.0,
     ) -> float:
         """
         Train using dictionaries of embeddings and scores.
@@ -148,7 +149,7 @@ class BasePredictionModel(torch.nn.Module):
             shuffle=True,
             collate_fn=variable_length_collate_fn,
         )
-        return self._fit_from_dataloader(dataloader, epochs, learning_rate, device, verbose, criterion=criterion)
+        return self._fit_from_dataloader(dataloader, epochs, learning_rate, device, verbose, criterion=criterion, clip_grad_norm=clip_grad_norm)
         
     def _get_default_criterion(self):
         """
@@ -230,6 +231,7 @@ class BasePredictionModel(torch.nn.Module):
         patience: int = 10,  # Early stopping patience
         min_delta: float = 0.0001,  # Minimum improvement threshold
         criterion=None,
+        clip_grad_norm: Optional[float] = None
     ) -> float:
         """Internal method to train on a DataLoader. Returns the final epoch's average loss."""
         # Use the model's device if none specified
@@ -260,6 +262,10 @@ class BasePredictionModel(torch.nn.Module):
                 # Call model-specific loss calculation
                 loss = self._calculate_loss(batch_x, batch_y, lengths, criterion)
                 loss.backward()
+
+                if clip_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), clip_grad_norm)
+
                 optimizer.step()
                 epoch_loss += loss.item()
 

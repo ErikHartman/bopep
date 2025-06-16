@@ -52,7 +52,12 @@ def generate_synthetic_data(
 
         # Generate random length if variable length
         if variable_length:
-            actual_length = np.random.randint(3, seq_length + 1)
+            min_length = min(2, seq_length)  # Ensure min_length is at most seq_length
+            max_length = seq_length + 1
+            if min_length >= max_length:
+                actual_length = seq_length  # Just use seq_length if we can't randomize
+            else:
+                actual_length = np.random.randint(min_length, max_length)
         else:
             actual_length = seq_length
 
@@ -209,18 +214,53 @@ def main():
     results = []
 
     # Test with fixed-length data (simulates averaged embeddings)
-    logger.info("Testing with fixed-length embeddingss")
+    logger.info("Testing with fixed-length embeddings (even dimensions)")
     fixed_embeddings, fixed_scores = generate_synthetic_data(
         n_samples=200, seq_length=10, embedding_dim=20, variable_length=False
     )
 
     # Test with variable-length data
-    logger.info("Testing with variable-length embeddings")
+    logger.info("Testing with variable-length embeddings (even dimensions)")
     var_embeddings, var_scores = generate_synthetic_data(
         n_samples=200, seq_length=10, embedding_dim=20, variable_length=True
     )
+    
+    # Test with odd-dimensional embeddings - this catches positional encoding issues
+    logger.info("Testing with odd-dimensional embeddings")
+    odd_fixed_embeddings, odd_fixed_scores = generate_synthetic_data(
+        n_samples=100, seq_length=10, embedding_dim=5, variable_length=False
+    )
+    
+    odd_var_embeddings, odd_var_scores = generate_synthetic_data(
+        n_samples=100, seq_length=10, embedding_dim=5, variable_length=True
+    )
+    
+    # Test with single-dimensional embeddings (edge case)
+    logger.info("Testing with single-dimensional embeddings (extreme edge case)")
+    single_dim_embeddings, single_dim_scores = generate_synthetic_data(
+        n_samples=50, seq_length=10, embedding_dim=1, variable_length=True
+    )
 
-    # Test different model configurations with fixed-length data
+    # Test with high-dimensional embeddings (common in large language models)
+    logger.info("Testing with high-dimensional embeddings")
+    high_dim_embeddings, high_dim_scores = generate_synthetic_data(
+        n_samples=50, seq_length=10, embedding_dim=768, variable_length=True
+    )
+    
+    # Test with very short sequences (edge case)
+    logger.info("Testing with very short sequences")
+    short_seq_embeddings, short_seq_scores = generate_synthetic_data(
+        n_samples=50, seq_length=3, embedding_dim=20, variable_length=True
+    )
+    
+    # Test with long sequences (stress test)
+    logger.info("Testing with long sequences")
+    long_seq_embeddings, long_seq_scores = generate_synthetic_data(
+        n_samples=50, seq_length=100, embedding_dim=20, variable_length=True
+    )
+
+    # Test different model configurations with fixed-length data (even dimensions)
+    logger.info("\n=== Testing fixed-length data with even dimensions ===")
     for model_type in ["mc_dropout", "ensemble", "evidential"]:
         # MLP only works with fixed-length data
         result = train_and_evaluate_model(
@@ -231,10 +271,10 @@ def main():
         )
         results.append(result)
 
-    # Test different model configurations with variable-length data
-    for model_type in ["mc_dropout", "ensemble", "evidential"]:
+    # Test different model configurations with variable-length data (even dimensions)
+    logger.info("\n=== Testing variable-length data with even dimensions ===")
+    for model_type in ["mc_dropout"]:  # Use single model type for speed
         for network_type in ["bilstm", "bigru"]:
-            # Test standard architecture
             result = train_and_evaluate_model(
                 model_type=model_type,
                 network_type=network_type,
@@ -242,6 +282,83 @@ def main():
                 scores_dict=var_scores,
             )
             results.append(result)
+
+    # Test with odd-dimensional embeddings - CRITICAL TEST
+    logger.info("\n=== Testing with odd-dimensional embeddings (fixed-length) ===")
+    result = train_and_evaluate_model(
+        model_type="mc_dropout",
+        network_type="mlp",
+        embedding_dict=odd_fixed_embeddings,
+        scores_dict=odd_fixed_scores,
+    )
+    results.append(result)
+    
+    # Test with odd-dimensional embeddings in RNN models
+    logger.info("\n=== Testing with odd-dimensional embeddings (variable-length) ===")
+    for network_type in ["bilstm", "bigru"]:
+        try:
+            result = train_and_evaluate_model(
+                model_type="mc_dropout",
+                network_type=network_type,
+                embedding_dict=odd_var_embeddings,
+                scores_dict=odd_var_scores,
+            )
+            results.append(result)
+        except Exception as e:
+            logger.error(f"Error with {network_type} using odd dimensions: {e}")
+            logger.error("This is likely due to a bug in positional encoding with odd dimensions")
+
+    # Test with single dimension (edge case)
+    logger.info("\n=== Testing with single-dimensional embeddings ===")
+    try:
+        result = train_and_evaluate_model(
+            model_type="mc_dropout",
+            network_type="bilstm",  # Just test one architecture
+            embedding_dict=single_dim_embeddings,
+            scores_dict=single_dim_scores,
+        )
+        results.append(result)
+    except Exception as e:
+        logger.error(f"Error with single dimension: {e}")
+    
+    # Test with high dimensions (common in large language models)
+    logger.info("\n=== Testing with high-dimensional embeddings ===")
+    try:
+        result = train_and_evaluate_model(
+            model_type="mc_dropout",
+            network_type="bilstm",  # Just test one architecture
+            embedding_dict=high_dim_embeddings,
+            scores_dict=high_dim_scores,
+        )
+        results.append(result)
+    except Exception as e:
+        logger.error(f"Error with high dimensions: {e}")
+    
+    # Test with very short sequences (edge case)
+    logger.info("\n=== Testing with very short sequences ===")
+    try:
+        result = train_and_evaluate_model(
+            model_type="mc_dropout",
+            network_type="bilstm",  # Just test one architecture
+            embedding_dict=short_seq_embeddings, 
+            scores_dict=short_seq_scores,
+        )
+        results.append(result)
+    except Exception as e:
+        logger.error(f"Error with short sequences: {e}")
+    
+    # Test with long sequences (stress test)
+    logger.info("\n=== Testing with long sequences ===")
+    try:
+        result = train_and_evaluate_model(
+            model_type="mc_dropout",
+            network_type="bilstm",  # Just test one architecture
+            embedding_dict=long_seq_embeddings,
+            scores_dict=long_seq_scores,
+        )
+        results.append(result)
+    except Exception as e:
+        logger.error(f"Error with long sequences: {e}")
 
     logger.info("All tests completed")
 

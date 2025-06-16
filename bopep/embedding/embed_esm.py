@@ -39,7 +39,7 @@ def embed_esm(
     sequence_data = [(f"seq_{i}", seq) for i, seq in enumerate(peptide_sequences)]
 
     for i in tqdm(
-        range(0, len(sequence_data), batch_size), desc="Generating embeddings"
+        range(0, len(sequence_data), batch_size), desc="Generating ESM embeddings"
     ):
         batch_sequences = sequence_data[i : i + batch_size]
         batch_labels, batch_strs, batch_tokens = batch_converter(batch_sequences)
