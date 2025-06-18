@@ -67,7 +67,7 @@ class Logger:
             
         return os.path.join(directory, new_filename)
 
-    def log_scores(self, scores: dict, iteration: int):
+    def log_scores(self, scores: dict, iteration: int, acquisition_name: str = "unknown"):
         """
         Log scores for peptides where each peptide has multiple score types.
         """
@@ -81,12 +81,12 @@ class Logger:
         with open(self._scores_file, "a", newline="") as f:
             writer = csv.writer(f)
             if not self._scores_header_written:
-                header = ["timestamp", "iteration", "peptide"] + score_types
+                header = ["timestamp", "iteration", "peptide", "acquisition_phase_when_added"] + score_types
                 writer.writerow(header)
                 self._scores_header_written = True
             
             for peptide, peptide_scores in scores.items():
-                row = [timestamp, iteration, peptide]
+                row = [timestamp, iteration, peptide, acquisition_name]
                 for score_type in score_types:
                     row.append(peptide_scores.get(score_type, None))
                 writer.writerow(row)

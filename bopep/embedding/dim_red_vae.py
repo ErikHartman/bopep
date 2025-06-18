@@ -163,7 +163,6 @@ def train_vae(data, latent_dim, hidden_layers=[], batch_size=64,
             # Backward and optimize
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
             # Track losses

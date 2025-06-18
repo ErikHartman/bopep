@@ -153,7 +153,7 @@ def save_individual_plot(model_name, x_train, y_train, x_test, means, stds):
     # Save as SVG
     file_path = f"examples/figures/{model_name.lower()}.svg"
     plt.tight_layout()
-    plt.savefig(file_path, format='svg')
+    #plt.savefig(file_path, format='svg')
     plt.close(fig)
     print(f"Individual plot saved as '{file_path}'")
 
@@ -256,10 +256,11 @@ def main():
             model_type=model_type,
             embedding_dict=embedding_dict,
             scores_dict=scores_dict,
-            n_trials=1,
+            n_trials=10,
             n_splits=3,
             random_state=SEED,
             hidden_dim_max=32,
+            target_fxn="nll_gaussian"
         )
         
         
@@ -270,7 +271,7 @@ def main():
         # Create and train model with best parameters
         model = create_and_train_model(
             model_type=model_type,
-            best_params={"uncertainty_param": fixed_params[model_type], "epochs":500}, # best_params,
+            best_params= best_params, # {"uncertainty_param": fixed_params[model_type], "epochs":500}, #
             embedding_dict=embedding_dict,
             scores_dict=scores_dict
         )

@@ -30,14 +30,15 @@ class BoPep:
     def __init__(
         self,
         surrogate_model_kwargs: Optional[Dict[str, Any]] = None,
-        objective_function: Optional[Callable] = None,  # defaults to bopep_objective
+        objective_function: Optional[Callable] = None,
         objective_function_kwargs: Optional[Dict[str, Any]] = None,
         scoring_kwargs: Optional[Dict[str, Any]] = None,
         embedding_kwargs: Optional[Dict[str, Any]] = None,
         docker_kwargs: Optional[Dict[str, Any]] = None,
         hpo_kwargs: Optional[Dict[str, Any]] = None,
         log_dir: str = "logs",
-    ):
+        custom_scorer: Optional[Callable] = None, 
+          ):
         """
         Initialize the BoPep optimizer with various configuration options.
 
@@ -45,12 +46,15 @@ class BoPep:
             surrogate_model_kwargs: Configuration for the surrogate model including:
                 - network_type: 'mlp', 'bilstm', or 'bigru'
                 - model_type: 'nn_ensemble', 'mc_dropout', 'deep_evidential', or 'mve'
-            objective_function: Custom objective function (defaults to bopep_objective if None)
+            objective_function: Custom objective function (defaults to maximize iptm/pae and minimize dG and rosetta_score, see paper)
             objective_function_kwargs: Parameters for the objective function
             embedding_kwargs: Configuration for peptide embedding generation
             docker_kwargs: Configuration for the Docker component
             hpo_kwargs: Configuration for hyperparameter optimization
             log_dir: Directory for logging output
+            custom_scorer: Optional function that takes docking directories and
+                    returns score dictionaries. If provided, this will be used
+                    instead of the default scorer.
         """
         self._setup()
 
@@ -65,6 +69,7 @@ class BoPep:
         self.docker_kwargs = docker_kwargs or {}
         self.hpo_kwargs = hpo_kwargs or {}
         self.scoring_kwargs = scoring_kwargs or {}
+        self.custom_scorer = custom_scorer
 
         # Initialize components
         self.embedder = Embedder()
@@ -74,6 +79,8 @@ class BoPep:
         self.acquisition_function_obj = AcquisitionFunction()
         self.selector = PeptideSelector()
         self.scores_to_objective = ScoresToObjective()
+
+        self.embeddings_save_path = log_dir + "/embeddings.npy"
         
         # Store the Optuna study for warm-starting
         self.previous_study = None
@@ -144,7 +151,7 @@ class BoPep:
 
         # Generate embeddings for all peptides if not provided
         if embeddings is None:
-            self.embeddings = self._generate_embeddings(peptides)
+            self.embeddings = self._generate_embeddings(peptides) # loads if str
         else:
             # If you passed precomputed embeddings, we can still do shape checks:
             self._check_embedding_shapes(embeddings)
@@ -183,7 +190,7 @@ class BoPep:
         scores.update(initial_scores)
 
         # Log scores
-        self.logger.log_scores(initial_scores, iteration=0)
+        self.logger.log_scores(initial_scores, iteration=0, acquisition_name="initial")
 
         # Create and log initial objectives
         initial_objectives = self.scores_to_objective.create_objective(
@@ -300,13 +307,27 @@ class BoPep:
                 scores.update(new_scores)
 
                 # Log new scores
-                self.logger.log_scores(new_scores, iteration=iteration)
+                self.logger.log_scores(new_scores, iteration=iteration, acquisition_name=acquisition)
                 
                 # Print top performers
                 self._print_top_performers(
                     objectives=objectives,
                     scores=scores,
                 )
+                
+        # Loop is over
+        final_objectives = self.scores_to_objective.create_objective(
+            scores, self.objective_function, **self.objective_function_kwargs
+        )
+
+        # Log any final new objectives
+        final_new_objective_peptides = set(final_objectives.keys()) - all_logged_objectives
+        final_new_objectives = {peptide: final_objectives[peptide] for peptide in final_new_objective_peptides}
+
+        if final_new_objectives:
+            # Use the last iteration number + 1, or create a "final" entry
+            last_iteration = sum(phase["iterations"] for phase in schedule)
+            self.logger.log_objectives(final_new_objectives, iteration=last_iteration, acquisition_name="final")
 
         self._save_model(self.log_dir + "/model.pth")
 
@@ -314,6 +335,9 @@ class BoPep:
         """
         Scores a batch (list of dirs) and outputs the score dict
         """
+        if self.custom_scorer:
+            return self.custom_scorer(docked_dirs)
+        
         new_scores = {}
         scores_to_include = self.scoring_kwargs.get("scores_to_include", [])
 
@@ -357,6 +381,7 @@ class BoPep:
                 raise ValueError(
                     f"Invalid or missing embedding function: {embedding_function}"
                 )
+            
 
         if self.embedding_kwargs.get("scale", False):
             embeddings = self.embedder.scale_embeddings(embeddings)
@@ -373,6 +398,11 @@ class BoPep:
                     embeddings,
                     n_components=self.embedding_kwargs.get("feature_dim", 128),
                 )
+        if not embeddings_path:
+            # Save embeddings
+            self.embedder.save_embeddings(
+                embeddings, self.embeddings_save_path
+            )
 
         # **Check final shapes**:
         self._check_embedding_shapes(embeddings)
