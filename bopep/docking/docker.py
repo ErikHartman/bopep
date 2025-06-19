@@ -5,6 +5,11 @@ from bopep.docking.utils import docking_folder_exists, extract_sequence_from_pdb
 import os
 from Bio.PDB import PDBParser, PDBIO, Select
 import tempfile
+import logging
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 class Docker:
@@ -100,11 +105,12 @@ class Docker:
             self.target_structure_path = target_structure_path
         
         self.target_sequence = extract_sequence_from_pdb(self.target_structure_path, chain_id=keep_chains[0])
-        print(f"Target is set to: {self.original_target_path}")
+        logging.info(f"Target is set to: {self.original_target_path}")
         if self.temp_pdb_path:
-            print(f"Using cleaned version: {self.temp_pdb_path}")
+            logging.info(f"Using cleaned version: {self.temp_pdb_path}")
             if strip_template:
-                print("Removed waters and ligands, keeping only standard amino acids")
+                logging.info("Removed waters and ligands, keeping only standard amino acids")
+        self._log_config()
 
     def dock_peptides(self, peptide_sequences: list):
         """
@@ -140,7 +146,7 @@ class Docker:
         if len(peptides_to_dock) == 0:
             return previously_docked_dirs
         else:
-            print(f"Will dock {len(peptides_to_dock)} peptides...")
+            logging.info(f"Will dock {len(peptides_to_dock)} peptides...")
 
         # Dock the peptides and return results
         docked_dirs = dock_peptides_parallel(
@@ -176,4 +182,17 @@ class Docker:
                     
                 self.temp_pdb_path = None
             except OSError as e:
-                print(f"Error removing temporary PDB file: {e}")
+                logging.info(f"Error removing temporary PDB file: {e}")
+
+    def _log_config(self):
+        """Log the current configuration of the Docker instance."""
+        logging.info(f"Docker configuration:")
+        logging.info(f"Target structure: {self.target_structure_path}")
+        logging.info(f"Output directory: {self.output_dir}")
+        logging.info(f"Number of models: {self.num_models}")
+        logging.info(f"Number of recycles: {self.num_recycles}")
+        logging.info(f"Recycle early stop tolerance: {self.recycle_early_stop_tolerance}")
+        logging.info(f"Using AMBER relaxation: {self.amber}")
+        logging.info(f"Number of relaxations: {self.num_relax}")
+        logging.info(f"GPU IDs: {self.gpu_ids}")
+        logging.info(f"Overwrite results: {self.overwrite_results}")

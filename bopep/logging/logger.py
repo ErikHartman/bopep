@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any, List
 
 
 class Logger:
-    def __init__(self, log_dir: str = "logs"):
+    def __init__(self, log_dir: str = "logs", overwrite_logs: Optional[bool] = None):
         self.log_dir = log_dir
         os.makedirs(self.log_dir, exist_ok=True)
 
@@ -28,10 +28,14 @@ class Logger:
         file_exists = any(os.path.exists(os.path.join(self.log_dir, f)) for f in base_files)
         
         # If files exist, ask user about overwriting
-        overwrite = True
-        if file_exists:
-            response = input("Log files already exist. Do you want to overwrite them? (y/n): ").lower()
-            overwrite = response == 'y' or response == 'yes'
+        if overwrite_logs is None:
+            if file_exists:
+                response = input("Log files already exist. Do you want to overwrite them? (y/n): ").lower()
+                overwrite = response == 'y' or response == 'yes'
+        elif overwrite_logs is True:
+            overwrite = True
+        else:
+            overwrite = False
         
         # Either use base filenames or find alternative names
         if overwrite:

@@ -5,7 +5,11 @@ from functools import partial
 from multiprocessing import get_context
 from typing import List, Optional
 from bopep.docking.utils import clean_up_files, docking_folder_exists
+import logging
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 def dock_peptide(
     peptide_sequence: str,
@@ -24,7 +28,7 @@ def dock_peptide(
     Dock a single peptide to the target structure using ColabFold.
     Returns the directory path where the peptide's results are stored.
     """
-    print(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
+    logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
 
     if not target_name:
         target_name = os.path.basename(target_structure).replace(".pdb", "")
@@ -99,7 +103,7 @@ def dock_peptide(
             raise subprocess.CalledProcessError(
                 returncode=process.returncode, cmd=command
             )
-        print(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
+        logging.info(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
 
         # Clean up temporary files after successful docking
         clean_up_files(peptide_output_dir, target_copy_path, peptide_sequence)
@@ -107,7 +111,7 @@ def dock_peptide(
         with open(os.path.join(peptide_output_dir, "finished.txt"), "w") as f:
             f.write("Docking finished successfully.")
     except subprocess.CalledProcessError as e:
-        print(f"An error occurred during docking of {peptide_sequence}: {e}")
+        logging.info(f"An error occurred during docking of {peptide_sequence}: {e}")
 
     # Return the directory containing the docked peptide results
     return peptide_output_dir
@@ -133,10 +137,6 @@ def dock_peptides_parallel(
 
     Filters out peptides that already have a docking result in the output directory.
     """
-    # We need to filter out peptides that already have a docking result
-    # if the peptide has been docked we also need to save the dir name to return it
-    
-
     if gpu_ids is None:
         gpu_ids = ["0"]  # default to GPU 0 if none provided
 
@@ -145,32 +145,72 @@ def dock_peptides_parallel(
     # Decide how many processes to run in parallel
     if num_processes is None:
         num_processes = len(gpu_ids)
-    num_processes = max(1, num_processes)
-
-    print(f"Starting docking on {num_processes} process(es)...")
-
-    # Prepare partial function for starmap
-    dock_peptide_partial = partial(
-        dock_peptide,
-        target_sequence=target_sequence,
-        target_structure=target_structure,
-        output_dir=output_dir,
-        num_models=num_models,
-        num_recycles=num_recycles,
-        recycle_early_stop_tolerance=recycle_early_stop_tolerance,
-        amber=amber,
-        num_relax=num_relax,
-        target_name=target_name,
-    )
-
-    # Assign each peptide to a GPU in a round-robin fashion
-    peptide_gpu_pairs = [
-        (peptide, gpu_ids[i % len(gpu_ids)]) for i, peptide in enumerate(peptides)
-    ]
-
-    # Run the docking in parallel and collect the output directories
+    num_processes = max(1, min(num_processes, len(gpu_ids)))  # Can't have more processes than GPUs
+    
+    logging.info(f"Starting docking on {num_processes} process(es)...")
+    
+    # Group peptides by GPU - each GPU gets its own batch of peptides
+    peptides_by_gpu = [[] for _ in range(len(gpu_ids))]
+    for i, peptide in enumerate(peptides):
+        gpu_index = i % len(gpu_ids)
+        peptides_by_gpu[gpu_index].append(peptide)
+    
+    # Create arguments for each worker process - one process per GPU
+    process_args = []
+    for gpu_index, gpu_peptides in enumerate(peptides_by_gpu[:num_processes]):
+        if not gpu_peptides:
+            continue  # Skip empty peptide lists
+        
+        process_args.append((
+            gpu_peptides,
+            gpu_ids[gpu_index],
+            target_sequence,
+            target_structure,
+            output_dir,
+            num_models,
+            num_recycles,
+            recycle_early_stop_tolerance,
+            amber,
+            num_relax,
+            target_name,
+        ))
+    
+    # Run the GPU-specific workers in parallel
     context = get_context("spawn")
     with context.Pool(processes=num_processes) as pool:
-        docked_dirs = pool.starmap(dock_peptide_partial, peptide_gpu_pairs)
-        
+        all_docked_dirs = pool.starmap(dock_peptides_for_gpu, process_args)
+    
+    # Flatten the list of lists
+    return [dir_path for dirs in all_docked_dirs for dir_path in dirs]
+
+def dock_peptides_for_gpu(
+    peptides: list,
+    gpu_id: str,
+    target_sequence: str,
+    target_structure: str,
+    output_dir: str,
+    num_models: int,
+    num_recycles: int,
+    recycle_early_stop_tolerance: float,
+    amber: bool,
+    num_relax: int,
+    target_name: str = None,
+) -> List[str]:
+    """Process a batch of peptides on a specific GPU"""
+    docked_dirs = []
+    for peptide in peptides:
+        dir_path = dock_peptide(
+            peptide,
+            gpu_id,
+            target_sequence,
+            target_structure,
+            output_dir,
+            num_models,
+            num_recycles,
+            recycle_early_stop_tolerance,
+            amber,
+            num_relax,
+            target_name,
+        )
+        docked_dirs.append(dir_path)
     return docked_dirs

@@ -20,10 +20,7 @@ def iptm_objective(scores: dict) -> dict:
     """
     scalar_objectives = {}
     for peptide, peptide_scores in scores.items():
-        if peptide_scores["in_binding_site"]:
-            scalar_objectives[peptide] = peptide_scores["iptm"]
-        else:
-            scalar_objectives[peptide] = 0
+        scalar_objectives[peptide] = peptide_scores["iptm"]
     return scalar_objectives
 
 
@@ -145,9 +142,6 @@ def test_bopep_with_precomputed_data(
     # Skip the actual docking step
     bopep.docker.dock_peptides = lambda peptides: peptides  # Just return the peptide names
     
-    # Also mock binding site check to avoid interactive prompts
-    bopep._check_binding_site_residue_indices = lambda binding_site, target: [1, 2, 3, 4, 5]
-    
     # Define a minimal optimization schedule
     schedule = [
         {"acquisition": "expected_improvement", "iterations": iterations},
@@ -158,11 +152,12 @@ def test_bopep_with_precomputed_data(
     try:
         bopep.optimize(
             peptides=filtered_peptides,
-            target_structure_path="/home/er8813ha/bopep/data/4glp.pdb",  # Not used with our mocks
+            target_structure_path="/home/er8813ha/bopep/data/4glf.pdb",  # Not used with our mocks
             num_initial=10,
             batch_size=batch_size,
             schedule=schedule,
             embeddings=filtered_embeddings,
+            binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
         )
         logging.info(f"Test completed, output saved to {output_dir}")
     except Exception as e:

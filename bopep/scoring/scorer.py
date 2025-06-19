@@ -382,7 +382,7 @@ class Scorer:
                     all_scores.update(result)
                 except Exception as e:
                     print(f"Error processing input {input_value}: {e}")
-
+        print(f"Scored {len(all_scores)} inputs.")
         return all_scores
 
     @staticmethod

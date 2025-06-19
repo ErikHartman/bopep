@@ -37,6 +37,7 @@ class BoPep:
         docker_kwargs: Optional[Dict[str, Any]] = None,
         hpo_kwargs: Optional[Dict[str, Any]] = None,
         log_dir: str = "logs",
+        overwrite_logs: Optional[bool] = None,
         custom_scorer: Optional[Callable] = None, 
           ):
         """
@@ -75,7 +76,7 @@ class BoPep:
         self.embedder = Embedder()
         self.scorer = Scorer()
         self.docker = Docker(self.docker_kwargs)
-        self.logger = Logger(log_dir=log_dir)
+        self.logger = Logger(log_dir=log_dir, overwrite_logs=overwrite_logs)
         self.acquisition_function_obj = AcquisitionFunction()
         self.selector = PeptideSelector()
         self.scores_to_objective = ScoresToObjective()
@@ -106,6 +107,7 @@ class BoPep:
         schedule: Optional[List[Dict[str, Any]]] = None,
         embeddings: Optional[Dict[str, Any]] = None,
         initial_peptides: Optional[List[str]] = None,
+        assume_zero_indexed: Optional[bool] = None,
     ):
         """
         Runs Bayesian optimization on peptide sequences.
@@ -140,7 +142,7 @@ class BoPep:
         self.docker.set_target_structure(target_structure_path)
 
         self.binding_site_residue_indices = self._check_binding_site_residue_indices(
-            binding_site_residue_indices, target_structure_path
+            binding_site_residue_indices, target_structure_path, assume_zero_indexed=assume_zero_indexed
         )  # Checks if pdb starting index is 0, adjusts if needed.
 
         docked_peptides = set()
@@ -448,7 +450,7 @@ class BoPep:
 
         # Log that we're starting hyperparameter optimization
         logging.info(
-            f"Starting hyperparameter optimization for {self.surrogate_model_kwargs['model_type']} model..."
+            f"Starting hyperparameter optimization for {self.surrogate_model_kwargs['network_type']} {self.surrogate_model_kwargs['model_type']} model..."
         )
         
         # If we have a previous study, let's log that we're using it
@@ -537,7 +539,7 @@ class BoPep:
         )
 
     def _check_binding_site_residue_indices(
-        self, binding_site_residue_indices, target_structure_path
+        self, binding_site_residue_indices, target_structure_path, assume_zero_indexed=None
     ):
         """
         Checks if starting index is 0.
@@ -553,10 +555,22 @@ class BoPep:
             return None
 
         if starting_index != 0:
-            print(
-                f"\n\nStarting index is {starting_index}. Are the provided binding site residues 0-indexed?"
-            )
-            answer = input("y/n: ")
+            if assume_zero_indexed is None:
+                print(
+                    f"\n\nStarting index is {starting_index}. Are the provided binding site residues 0-indexed?"
+                )
+                answer = input("y/n: ")
+            else:
+                if assume_zero_indexed is True:
+                    print(
+                        f"\n\nStarting index is {starting_index}. Assuming binding site residues are 0-indexed."
+                    )
+                    answer = "y"
+                else:
+                    print(
+                        f"\n\nStarting index is {starting_index}. Assuming binding site residues are 1-indexed."
+                    )
+                    answer = "n"
             if answer == "y":
                 binding_site_residue_indices = [
                     residue - starting_index for residue in binding_site_residue_indices
@@ -604,7 +618,7 @@ class BoPep:
         return {
             "network_type": "mlp",  # mlp, bilstm, bigru
             "model_type": "mc_dropout",  # nn_ensemble, mc_dropout, deep_evidential, mve
-            "n_networks": 5,
+            "uncertainty_param": 0.1,  # For mc_dropout, this is dropout rate; for others, it's regularization strength
         }
 
     def _validate_surrogate_model_kwargs(self):

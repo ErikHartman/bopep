@@ -170,9 +170,9 @@ def train_vae(data, latent_dim, hidden_layers=[], batch_size=64,
             recon_loss_sum += recon_loss.item()
             kl_loss_sum += kl_loss.item()
             
-        train_loss /= len(dataloader.dataset)
-        recon_loss_avg = recon_loss_sum / len(dataloader.dataset)
-        kl_loss_avg = kl_loss_sum / len(dataloader.dataset)
+        train_loss /= len(dataloader)
+        recon_loss_avg = recon_loss_sum / len(dataloader)
+        kl_loss_avg = kl_loss_sum / len(dataloader)
         
         # Update learning rate
         scheduler.step(train_loss)
@@ -184,7 +184,9 @@ def train_vae(data, latent_dim, hidden_layers=[], batch_size=64,
             )
         
         # Early stopping
-        if train_loss < best_loss:
+        improvement_threshold = 1e-6
+
+        if train_loss < best_loss - improvement_threshold:
             best_loss = train_loss
             best_model = copy.deepcopy(model)
             counter = 0
