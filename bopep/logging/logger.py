@@ -115,19 +115,31 @@ class Logger:
             for peptide, objective_value in objectives.items():
                 writer.writerow([timestamp, iteration, peptide, objective_value, acquisition_name])
 
-    def log_model_loss(self, loss: float, iteration: int, r2: Optional[float] = None):
+    def log_model_metrics(self, loss: float, iteration: int, metrics: Optional[Dict[str, float]] = None):
         """
-        losses: a float
-        r2: coefficient of determination (optional)
+        Log model loss and additional metrics
+        
+        Args:
+            loss: The primary loss value
+            iteration: Current iteration number
+            metrics: Optional dictionary of additional metrics (e.g. 'r2', 'mae', 'rmse')
         """
         timestamp = datetime.now().isoformat()
+        metrics = metrics or {}
+        
         with open(self._model_losses_file, "a", newline="") as f:
             writer = csv.writer(f)
             if not self._model_losses_header_written:
-                writer.writerow(["timestamp", "iteration", "loss", "r2"])
+                # Create header with all metric keys
+                header = ["timestamp", "iteration", "loss"] + list(metrics.keys())
+                writer.writerow(header)
                 self._model_losses_header_written = True
-
-            writer.writerow([timestamp, iteration, loss, r2])
+                
+            # Write row with loss and all metric values
+            row = [timestamp, iteration, loss]
+            for metric_name in list(metrics.keys()):
+                row.append(metrics.get(metric_name, None))
+            writer.writerow(row)
 
     def log_predictions(self, predictions: dict, iteration: int):
         """

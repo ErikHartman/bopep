@@ -143,8 +143,8 @@ def test_bopep_with_precomputed_data(
     bopep.docker.dock_peptides = lambda peptides: peptides  # Just return the peptide names
     
     # Define a minimal optimization schedule
-    schedule = [
-        {"acquisition": "expected_improvement", "iterations": iterations},
+    schedule = [ {"acquisition": "standard_deviation", "iterations": 1},
+        {"acquisition": "expected_improvement", "iterations": iterations-1},
     ]
     
     # Run the optimization loop
@@ -153,11 +153,12 @@ def test_bopep_with_precomputed_data(
         bopep.optimize(
             peptides=filtered_peptides,
             target_structure_path="/home/er8813ha/bopep/data/4glf.pdb",  # Not used with our mocks
-            num_initial=10,
+            num_initial=100,
             batch_size=batch_size,
             schedule=schedule,
             embeddings=filtered_embeddings,
             binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
+            num_validate=50
         )
         logging.info(f"Test completed, output saved to {output_dir}")
     except Exception as e:
@@ -178,8 +179,8 @@ if __name__ == "__main__":
         objectives_csv=objectives_csv,
         embedding_type="esm_1d_pca",
         output_dir="/home/er8813ha/docking-peptide/src/plot/dummy_logs",
-        iterations=20, 
-        n_trials=3,
+        iterations=35, 
+        n_trials=10,
         batch_size=10
     )
     
