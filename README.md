@@ -66,13 +66,17 @@ This should work if you follow the instructions in the LocalColabFold git repo.
    pip install -r requirements.txt
    ```
 
+## Running BoPep
+
+Details on running can be found in [examples](examples/how_to_run/README.md).
+
 ## Credits
 
-Credits go out to those who have created great packages and tools such as LocalColabFold, PyRosetta, torch, optuna and other modules.
+Credits go out to those who have created great packages and tools such as ESM, LocalColabFold, PyRosetta, torch, optuna and other modules.
 
 Cite these modules:
 
-```
+```bib
 @article{Mirdita2022,
   title = {ColabFold: making protein folding accessible to all},
   volume = {19},
@@ -123,4 +127,18 @@ Cite these modules:
       url={https://arxiv.org/abs/1907.10902}, 
 }
 
+@article{Lin2023,
+  title = {Evolutionary-scale prediction of atomic-level protein structure with a language model},
+  volume = {379},
+  ISSN = {1095-9203},
+  url = {http://dx.doi.org/10.1126/science.ade2574},
+  DOI = {10.1126/science.ade2574},
+  number = {6637},
+  journal = {Science},
+  publisher = {American Association for the Advancement of Science (AAAS)},
+  author = {Lin,  Zeming and Akin,  Halil and Rao,  Roshan and Hie,  Brian and Zhu,  Zhongkai and Lu,  Wenting and Smetanin,  Nikita and Verkuil,  Robert and Kabeli,  Ori and Shmueli,  Yaniv and dos Santos Costa,  Allan and Fazel-Zarandi,  Maryam and Sercu,  Tom and Candido,  Salvatore and Rives,  Alexander},
+  year = {2023},
+  month = mar,
+  pages = {1123–1130}
+}
 ```

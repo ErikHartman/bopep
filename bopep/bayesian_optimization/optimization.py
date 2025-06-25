@@ -224,11 +224,11 @@ class BoPep:
                 )
             
             for iteration in range(1, iterations+1):
+                logging.info("=" * 60)
+                logging.info(f"Starting iteration {iteration} out of {iterations} of phase {phase_index} with acquisition '{acquisition}'")
 
                 # Initialize fresh model for each iteration
                 self._initialize_model(self.best_hyperparams)
-
-                logging.info(f"Starting iteration {iteration} out of {iterations} of phase {phase_index} with acquisition '{acquisition}'")
 
                 # 2.0) Turn scores into a scalarized score dict of peptide: score
                 objectives = self.scores_to_objective.create_objective(
@@ -808,14 +808,7 @@ class BoPep:
     def _split_train_validation(self, docked_embeddings: dict, objectives: dict, num_validate: int):
         """
         Split the available data into training and validation sets.
-        
-        Args:
-            docked_embeddings: Dictionary of embeddings for docked peptides
-            objectives: Dictionary of objective values for docked peptides
-            num_validate: Number of peptides to use for validation
-            
-        Returns:
-            Tuple of (train_embeddings, train_objectives, val_embeddings, val_objectives)
+
         """
         # Get all peptides that have been docked and scored
         peptides = list(objectives.keys())
