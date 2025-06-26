@@ -1,5 +1,5 @@
 import subprocess
-from typing import Callable, List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any, Union
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
 from bopep.surrogate_model import (
@@ -28,6 +28,9 @@ logging.basicConfig(
 
 
 class BoPep:
+    
+    
+
     def __init__(
         self,
         surrogate_model_kwargs: Optional[Dict[str, Any]] = None,
@@ -40,6 +43,8 @@ class BoPep:
         log_dir: str = "logs",
         overwrite_logs: Optional[bool] = None,
         custom_scorer: Optional[Callable] = None, 
+        min_validation_samples: int = 3,
+        min_training_samples: int = 10,
           ):
         """
         Initialize the BoPep optimizer with various configuration options.
@@ -98,12 +103,16 @@ class BoPep:
         self._validate_surrogate_model_kwargs()
         self.log_dir = log_dir
 
+        self.MIN_VALIDATION_SAMPLES = min_validation_samples
+        self.MIN_TRAINING_SAMPLES   = min_training_samples
+
+
     def optimize(
         self,
         peptides: List[str],
         target_structure_path: str,
         num_initial: int = 10,
-        num_validate: Optional[int] = None, # new arg
+        n_validate: Optional[Union[float, int]] = None, # new arg
         batch_size: int = 4,
         binding_site_residue_indices: Optional[List[int]] = None,
         schedule: Optional[List[Dict[str, Any]]] = None,
@@ -118,9 +127,10 @@ class BoPep:
             peptides: List of peptide sequences to optimize
             target_structure_path: Path to the target protein structure file
             num_initial: Number of initial peptides to sample before optimization
-            num_validate: Number of peptides to use for validation (optional). When specified,
-                          the model will be trained on the remaining data and metrics will be
-                          reported for both training and validation sets.
+            n_validate: Number or fraction of peptides to use for validation.
+                   If float (0-1): uses that fraction of data for validation
+                   If int (>0): uses that many peptides for validation
+                   If None: no validation is performed
             batch_size: Number of peptides to evaluate in each iteration
             binding_site_residue_indices: List of residue indices defining the binding site
             schedule: List of optimization phases, each with:
@@ -132,6 +142,7 @@ class BoPep:
         Returns:
             None: Results are logged through the logger component
         """
+        
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # Set default schedule if none provided
@@ -142,7 +153,7 @@ class BoPep:
             ]
 
         # Validate schedule
-        self._validate_schedule(schedule)
+        self._validate_args(schedule=schedule, n_validate=n_validate)
 
         self.docker.set_target_structure(target_structure_path)
 
@@ -253,72 +264,23 @@ class BoPep:
                     self._optimize_hyperparameters(iteration, docked_embeddings, objectives)
                     self._initialize_model(self.best_hyperparams)
 
-                logging.info(f"Training model on {len(docked_peptides)} peptides")
-                
-                # Split data into training and validation sets if num_validate is specified
-                if num_validate is not None and num_validate > 0:
-                    train_embeddings, train_objectives, val_embeddings, val_objectives = self._split_train_validation(
-                        docked_embeddings, objectives, num_validate
-                    )
-                    
-                    # Train on the training set only
-                    loss = self.model.fit_dict(
-                        embedding_dict=train_embeddings,
-                        scores_dict=train_objectives,
-                        epochs=self.best_hyperparams.get("epochs", 100),
-                        learning_rate=self.best_hyperparams.get("learning_rate", 0.001),
-                        batch_size=self.best_hyperparams.get("batch_size", 16),
-                        device=self.device,
-                    )
+                logging.info(f"Model will be trained (potentially validated) on {len(docked_peptides)} peptides")
 
-                    # Get predictions for both training and validation sets
-                    train_predictions = self.model.predict_dict(train_embeddings, device=self.device)
-                    val_predictions = self.model.predict_dict(val_embeddings, device=self.device)
-                    
-                    # Compute metrics for both sets
-                    train_metrics = self._compute_model_metrics(
-                        predictions_dict=train_predictions,
-                        objectives=train_objectives,
+                # Check if we can split into train/validation
+                split = None
+                if n_validate is not None:
+                    split = self._compute_split_indices(len(docked_peptides), n_validate)
+
+                # If we can split, do it; otherwise, train on all
+                if split:
+                    train_emb, train_obj, val_emb, val_obj = self._split_train_validation(
+                        docked_embeddings, objectives, split
                     )
-                    
-                    val_metrics = self._compute_model_metrics(
-                        predictions_dict=val_predictions,
-                        objectives=val_objectives,
+                    loss, metrics = self._train_and_validate(
+                        train_emb, train_obj, val_emb, val_obj
                     )
-                    
-                    # Combine metrics
-                    metrics = {
-                        "train_r2": train_metrics["r2"], 
-                        "train_mae": train_metrics["mae"],
-                        "val_r2": val_metrics["r2"],
-                        "val_mae": val_metrics["mae"]
-                    }
-                    
-                    r2 = train_metrics["r2"]
-                    val_r2 = val_metrics["r2"]
-                    
-                    logging.info(f"Iteration {iteration} - Loss: {loss:.4f}, Train R²: {r2:.4f}, Val R²: {val_r2:.4f}, Train N: {len(train_embeddings)}, Val N: {len(val_embeddings)}")
                 else:
-                    # Train on all data when no validation is requested
-                    loss = self.model.fit_dict(
-                        embedding_dict=docked_embeddings,
-                        scores_dict=objectives,
-                        epochs=self.best_hyperparams.get("epochs", 100),
-                        learning_rate=self.best_hyperparams.get("learning_rate", 0.001),
-                        batch_size=self.best_hyperparams.get("batch_size", 16),
-                        device=self.device,
-                    )
-
-                    predictions_dict = self.model.predict_dict(docked_embeddings, device=self.device)
-                    
-                    metrics = self._compute_model_metrics(
-                        predictions_dict=predictions_dict,
-                        objectives=objectives,
-                    )
-
-                    r2 = metrics["r2"]
-
-                    logging.info(f"Iteration {iteration} - Loss: {loss:.4f}, R²: {r2:.4f}, Total N: {len(docked_embeddings)})")
+                    loss, metrics = self._train_on_all(docked_embeddings, objectives)
 
                 # Log the loss and metrics
                 self.logger.log_model_metrics(loss, iteration, metrics)
@@ -371,7 +333,6 @@ class BoPep:
                 # Print top performers
                 self._print_top_performers(
                     objectives=objectives,
-                    scores=scores,
                 )
                 
         # Loop is over
@@ -720,15 +681,16 @@ class BoPep:
         except:
             raise ValueError("Cannot initialize pyrosetta")
 
-    def _validate_schedule(self, schedule: List[Dict[str, Any]]):
+    def _validate_args(self, schedule: List[Dict[str, Any]], n_validate: Optional[Union[int, float]]):
         """
-        Validate the optimization schedule.
+        Validates optimization args.
 
         Args:
             schedule: List of phase configurations
+            n_validate: Number or fraction of peptides to use for validation (or None)
 
         Raises:
-            ValueError: If the schedule is invalid
+            ValueError: If the args are invalid
         """
         if not schedule:
             raise ValueError("Schedule cannot be empty")
@@ -751,6 +713,17 @@ class BoPep:
 
             if not isinstance(phase["iterations"], int) or phase["iterations"] <= 0:
                 raise ValueError(f"Phase {idx}: iterations must be a positive integer")
+        
+        if n_validate is not None:
+            if isinstance(n_validate, float) and not (0 < n_validate < 1):
+                raise ValueError(
+                    f"When n_validate is a float, it must be between 0 and 1, got {n_validate}"
+                )
+            elif isinstance(n_validate, int) and n_validate <= 0:
+                raise ValueError(
+                    f"When n_validate is an integer, it must be positive, got {n_validate}"
+                )
+            
 
     def _save_model(self, save_path: str):
         """
@@ -780,7 +753,7 @@ class BoPep:
         logging.info(f"Model class: {self.model.__class__.__name__}")
 
     
-    def _print_top_performers(self, objectives, scores, top_n=5):
+    def _print_top_performers(self, objectives, top_n=5):
 
         sorted_peptides = sorted(
             objectives.items(),
@@ -805,18 +778,73 @@ class BoPep:
 
         return {"r2": r2, "mae": mae}
     
+    def _compute_split_indices(self, total_samples: int, n_validate: Union[int,float]) -> Optional[int]:
+        """Return num_validate or None if split is infeasible."""
+        if isinstance(n_validate, float):
+            num = int(total_samples * n_validate)
+        else:
+            num = n_validate
+
+        if num < self.MIN_VALIDATION_SAMPLES or (total_samples - num) < self.MIN_TRAINING_SAMPLES:
+            logging.warning(
+                f"Cannot split {total_samples} samples into "
+                f"{self.MIN_TRAINING_SAMPLES} train + "
+                f"{self.MIN_VALIDATION_SAMPLES} val; training on all."
+            )
+            return None
+
+        return num
+
+    def _train_and_validate(self, train_emb, train_obj, val_emb, val_obj):
+        """Train on train set, evaluate on both splits."""
+        loss = self.model.fit_dict(
+            embedding_dict=train_emb,
+            scores_dict=train_obj,
+            epochs=self.best_hyperparams.get("epochs", 100),
+            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
+            batch_size=self.best_hyperparams.get("batch_size", 16),
+            device=self.device
+        )
+
+        train_pred = self.model.predict_dict(train_emb, device=self.device)
+        val_pred   = self.model.predict_dict(val_emb,   device=self.device)
+
+        train_m = self._compute_model_metrics(train_pred, train_obj)
+        val_m   = self._compute_model_metrics(val_pred,   val_obj)
+
+        metrics = {
+            "train_r2": train_m["r2"], "train_mae": train_m["mae"],
+            "val_r2":   val_m["r2"],   "val_mae":   val_m["mae"],
+        }
+        logging.info(
+            f"Loss {loss:.4f}, train R2 {train_m['r2']:.4f}, "
+            f"val R2 {val_m['r2']:.4f} "
+            f"(N_train={len(train_emb)}, N_val={len(val_emb)})"
+        )
+        return loss, metrics
+
+    def _train_on_all(self, embeddings, objectives):
+        """Train on the entire dataset (no validation)."""
+        loss = self.model.fit_dict(
+            embedding_dict=embeddings,
+            scores_dict=objectives,
+            epochs=self.best_hyperparams.get("epochs", 100),
+            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
+            batch_size=self.best_hyperparams.get("batch_size", 16),
+            device=self.device
+        )
+        preds = self.model.predict_dict(embeddings, device=self.device)
+        m = self._compute_model_metrics(preds, objectives)
+        metrics = {"r2": m["r2"], "mae": m["mae"]}
+        logging.info(f"Loss {loss:.4f}, R2 {m['r2']:.4f}, N={len(embeddings)}")
+        return loss, metrics
+    
     def _split_train_validation(self, docked_embeddings: dict, objectives: dict, num_validate: int):
         """
         Split the available data into training and validation sets.
-
         """
         # Get all peptides that have been docked and scored
         peptides = list(objectives.keys())
-        
-        # Check if we have enough data for validation
-        if len(peptides) <= num_validate:
-            logging.warning(f"Not enough data for validation. Using {len(peptides) // 2} samples for validation instead of requested {num_validate}.")
-            num_validate = max(1, len(peptides) // 2)
         
         # Randomly select validation peptides
         np.random.seed(42)  # For reproducibility

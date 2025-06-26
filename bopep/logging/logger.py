@@ -30,7 +30,7 @@ class Logger:
         # If files exist, ask user about overwriting
         if overwrite_logs is None:
             if file_exists:
-                response = input("Log files already exist. Do you want to overwrite them? (y/n): ").lower()
+                response = input(f"Log files already exist in {self.log_dir}. Do you want to overwrite them? (y/n): ").lower()
                 overwrite = response == 'y' or response == 'yes'
         elif overwrite_logs is True:
             overwrite = True

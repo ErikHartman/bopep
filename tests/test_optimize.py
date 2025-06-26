@@ -158,7 +158,7 @@ def test_bopep_with_precomputed_data(
             schedule=schedule,
             embeddings=filtered_embeddings,
             binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
-            num_validate=50
+            n_validate=50
         )
         logging.info(f"Test completed, output saved to {output_dir}")
     except Exception as e:
