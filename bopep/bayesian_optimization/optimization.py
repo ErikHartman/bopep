@@ -1,3 +1,6 @@
+import datetime
+from pathlib import Path
+import pickle
 import subprocess
 from typing import Callable, List, Optional, Dict, Any, Union
 from bopep.docking.docker import Docker
@@ -29,9 +32,7 @@ logging.basicConfig(
 
 class BoPep:
 
-    # TODO:
-    # - Add load save functionality for continuing the optimization
-    # - Fix the absolute iterations number for the logging and hyperparameter optimization
+    # Loading and saving is still buggy!
 
     def __init__(
         self,
@@ -121,6 +122,7 @@ class BoPep:
         embeddings: Optional[Dict[str, Any]] = None,
         initial_peptides: Optional[List[str]] = None,
         assume_zero_indexed: Optional[bool] = None,
+        continue_from_checkpoint: Optional[bool] = None,
     ):
         """
         Runs Bayesian optimization on peptide sequences.
@@ -146,9 +148,35 @@ class BoPep:
         """
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        docked_peptides = set()
-        not_docked_peptides = set(peptides)
-        scores = dict()
+
+        if continue_from_checkpoint is None and self._has_previous_results():
+            continue_from_checkpoint = self._prompt_continue_or_overwrite()
+        
+        # Try to load from checkpoint if requested
+        starting_iteration = 0 # This is wrong
+        if continue_from_checkpoint:
+            latest_checkpoint = self._find_latest_checkpoint()
+            if latest_checkpoint:
+                starting_iteration = self._load_checkpoint(latest_checkpoint)
+                # Skip initial setup since we're continuing
+                return self._run_phase_loop(
+                    schedule=schedule,
+                    all_logged_objectives=set(self.scores.keys()),
+                    docked_peptides=self.docked_peptides,
+                    not_docked_peptides=self.not_docked_peptides,
+                    scores=self.scores,
+                    batch_size=batch_size,
+                    n_validate=n_validate,
+                    starting_global_iteration=starting_iteration,
+                )
+            else:
+                logging.warning("No checkpoint found, starting from scratch")
+
+        # TODO: create function for intial setup
+        self.docked_peptides = set()
+        self.not_docked_peptides = set(peptides)
+        self.scores = dict()
+        starting_iteration = 1
 
         # Validate args
         self._validate_args(schedule=schedule, n_validate=n_validate)
@@ -193,27 +221,27 @@ class BoPep:
         # Dock initial
         logging.info("Docking initial peptides")
         docked_dirs = self.docker.dock_peptides(initial_peptides)
-        docked_peptides.update(initial_peptides)
-        not_docked_peptides.difference_update(initial_peptides)
+        self.docked_peptides.update(initial_peptides)
+        self.not_docked_peptides.difference_update(initial_peptides)
 
         # Score initial
         logging.info(f"Scoring {len(initial_peptides)} initial peptides")
         initial_scores = self._score_batch(docked_dirs=docked_dirs)
-        scores.update(initial_scores)
+        self.scores.update(initial_scores)
 
         # Log scores
         self.logger.log_scores(initial_scores, iteration=0, acquisition_name="initial")
 
         # Create and log initial objectives
         objectives = self.scores_to_objective.create_objective(
-            scores, self.objective_function, **self.objective_function_kwargs
+            self.scores, self.objective_function, **self.objective_function_kwargs
         )
         self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
         all_logged_objectives = set(objectives.keys())
 
         # Optimize and create initial model
         self._optimize_hyperparameters(
-            0, {p: self.embeddings[p] for p in docked_peptides}, objectives
+            0, {p: self.embeddings[p] for p in self.docked_peptides}, objectives
         )
         self._initialize_model(self.best_hyperparams)
 
@@ -223,14 +251,14 @@ class BoPep:
         self._run_phase_loop(
             schedule=schedule,
             all_logged_objectives=all_logged_objectives,
-            docked_peptides=docked_peptides,
-            not_docked_peptides=not_docked_peptides,
-            scores=scores,
+            docked_peptides=self.docked_peptides,
+            not_docked_peptides=self.not_docked_peptides,
+            scores=self.scores,
             batch_size=batch_size,
             n_validate=n_validate,
+            starting_global_iteration=starting_iteration,
         )
 
-        self._save_model(self.log_dir + "/model.pth")
 
     def _run_phase_loop(
         self,
@@ -241,8 +269,12 @@ class BoPep:
         scores: dict,
         batch_size: int,
         n_validate: Optional[Union[int, float]] = None,
+        starting_global_iteration: int = 1,
     ):
-        global_iteration = 1
+        """ 
+        Runs the main optimization loop over the defined phases.
+        """
+        global_iteration = starting_global_iteration
         for phase_index, phase in enumerate(schedule, start=1):
             acquisition = phase["acquisition"]
             iterations = phase["iterations"]
@@ -388,6 +420,10 @@ class BoPep:
                 iteration=global_iteration+1,
                 acquisition_name=acquisition,
             )
+        
+        # Here we'll want to save the checkpoint and model
+        self._save_checkpoint(global_iteration)
+        
 
     def _score_batch(self, docked_dirs: list):
         """
@@ -727,14 +763,7 @@ class BoPep:
         self, schedule: List[Dict[str, Any]], n_validate: Optional[Union[int, float]]
     ):
         """
-        Validates optimization args.
-
-        Args:
-            schedule: List of phase configurations
-            n_validate: Number or fraction of peptides to use for validation (or None)
-
-        Raises:
-            ValueError: If the args are invalid
+        Validates optimization args
         """
         if not schedule:
             raise ValueError("Schedule cannot be empty")
@@ -771,9 +800,6 @@ class BoPep:
     def _save_model(self, save_path: str):
         """
         Save the current model to a file with metadata.
-
-        Args:
-            save_path: Path to save the model
         """
         # Create a comprehensive save dictionary
         save_dict = {
@@ -914,3 +940,104 @@ class BoPep:
         )
 
         return train_embeddings, train_objectives, val_embeddings, val_objectives
+    
+    def _save_checkpoint(self, iteration: int):
+        """Save the current state of the optimization process."""
+        checkpoint_dir = Path(self.log_dir) / f"checkpoint_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        
+        state = {
+            'iteration': iteration,
+            'docked_peptides': list(self.docked_peptides),
+            'not_docked_peptides': list(self.not_docked_peptides),
+            'scores': self.scores,
+            'embeddings': self.embeddings,
+            'best_hyperparams': self.best_hyperparams,
+            'surrogate_model_kwargs': self.surrogate_model_kwargs,
+            'objective_function_kwargs': self.objective_function_kwargs,
+            'binding_site_residue_indices': self.binding_site_residue_indices,
+        }
+        
+        # Save the state
+        with open(checkpoint_dir / "state.pkl", "wb") as f:
+            pickle.dump(state, f)
+            
+        # Save the model separately
+        self._save_model(checkpoint_dir / "model.pth")
+        
+        logging.info(f"Checkpoint saved at iteration {iteration} in {checkpoint_dir}")
+
+    def _load_checkpoint(self, checkpoint_path: Path):
+        """Load a previous optimization state."""
+        with open(checkpoint_path / "state.pkl", "rb") as f:
+            state = pickle.load(f)
+            
+        # Load basic state
+        self.docked_peptides = set(state['docked_peptides'])
+        self.not_docked_peptides = set(state['not_docked_peptides'])
+        self.scores = state['scores']
+        self.embeddings = state['embeddings']
+        self.best_hyperparams = state['best_hyperparams']
+        self.previous_study = None
+        self.binding_site_residue_indices = state['binding_site_residue_indices']
+        self.surrogate_model_kwargs = state['surrogate_model_kwargs']
+        self.objective_function_kwargs = state['objective_function_kwargs']
+        self.embedding_kwargs = state.get('embedding_kwargs', self.embedding_kwargs)
+        
+        # Load the model
+        self._load_model(checkpoint_path / "model.pth")
+        
+        logging.info(f"Loaded checkpoint from {checkpoint_path}")
+        return state['iteration']
+
+    def _load_model(self, model_path: Path):
+        """Load a saved model with its configuration."""
+        checkpoint = torch.load(model_path)
+        config = checkpoint['model_config']
+        self.surrogate_model_kwargs.update({
+            'model_type': config['model_type'],
+            'network_type': config['network_type'],
+            'input_dim':   config['input_dim'],
+        })
+        self._initialize_model(config['hyperparameters'])
+        logging.info(f"Loaded {config['model_type']} model from {model_path}")
+
+    def _find_latest_checkpoint(self):
+        """Find the most recent checkpoint in the log directory."""
+        checkpoint_dirs = []
+        for item in Path(self.log_dir).iterdir():
+            if item.is_dir() and item.name.startswith("checkpoint_"):
+                checkpoint_dirs.append(item)
+                
+        if not checkpoint_dirs:
+            return None
+            
+        # Sort by creation time (newest first)
+        checkpoint_dirs.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+        return checkpoint_dirs[0]
+
+
+    def _has_previous_results(self):
+        """Check if log directory contains previous results."""
+        log_dir = Path(self.log_dir)
+        return (
+            any(log_dir.glob("*.csv")) or  # Check for CSV logs
+            any(log_dir.glob("checkpoint_*"))  # Check for checkpoints
+        )
+
+    def _prompt_continue_or_overwrite(self):
+        """Prompt user to continue or overwrite previous results."""
+        print("\n" + "=" * 60)
+        print(f"Found previous results in {self.log_dir}")
+        print("Do you want to:")
+        print("1) Continue from last checkpoint")
+        print("2) Overwrite previous results and start fresh")
+        print("=" * 60)
+        
+        while True:
+            choice = input("Enter your choice (1 or 2): ").strip()
+            if choice == "1":
+                return True
+            elif choice == "2":
+                return False
+            print("Invalid choice, please enter 1 or 2")
