@@ -5,12 +5,10 @@ import numpy as np
 import pickle
 import logging
 
-# Add the parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from bopep.bayesian_optimization.optimization import BoPep
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
