@@ -60,9 +60,6 @@ def test_bopep_with_precomputed_data(
     objectives_csv,
     output_dir="./test_output",
     embedding_type="esm_1d_pca", 
-    n_trials=5,
-    iterations=10,
-    batch_size=4
 ):
     """
 
@@ -113,7 +110,7 @@ def test_bopep_with_precomputed_data(
         "num_cores": 1  # Use minimal resources for testing
         },
         hpo_kwargs={
-            "n_trials": n_trials,
+            "n_trials": 3,
             "hpo_interval": 20 
         },
         objective_function=iptm_objective,
@@ -141,46 +138,73 @@ def test_bopep_with_precomputed_data(
     bopep.docker.dock_peptides = lambda peptides: peptides  # Just return the peptide names
     
     # Define a minimal optimization schedule
-    schedule = [ {"acquisition": "standard_deviation", "iterations": 1},
-        {"acquisition": "expected_improvement", "iterations": iterations-1},
+    schedule = [ {"acquisition": "standard_deviation", "iterations": 2},
+        {"acquisition": "expected_improvement", "iterations": 10},
+    ]
+
+    schedule_continue = [
+        {"acquisition": "standard_deviation", "iterations": 2},
+        {"acquisition": "expected_improvement", "iterations": 5},
     ]
     
     # Run the optimization loop
     logging.info("Starting test optimization loop")
     try:
-        bopep.optimize(
-            peptides=filtered_peptides,
-            target_structure_path="/home/er8813ha/bopep/data/4glf.pdb",  # Not used with our mocks
-            num_initial=100,
-            batch_size=batch_size,
-            schedule=schedule,
+        # bopep.optimize(
+        #     target_structure_path="/home/er8813ha/bopep/data/4glf.pdb",
+        #     num_initial=100,
+        #     batch_size=10,
+        #     schedule=schedule,
+        #     embeddings=filtered_embeddings,
+        #     binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
+        #     n_validate=50
+        # )
+
+        bopep_cont = BoPep(
+            surrogate_model_kwargs={
+                "network_type": network_type,
+                "model_type": "deep_evidential",
+            },
+            docker_kwargs={
+            "output_dir": os.path.join(output_dir, "docking"),
+            "num_cores": 1
+            },
+            hpo_kwargs={
+                "n_trials": 3,
+                "hpo_interval": 20 
+            },
+            objective_function=iptm_objective,
+            scoring_kwargs={"scores_to_include": ["iptm", "in_binding_site"]},
+            log_dir=output_dir
+        )
+
+        logging.info("Continuing optimization from checkpoint")
+        bopep_cont._score_batch = mock_score_batch
+        bopep_cont.docker.dock_peptides = lambda peptides: peptides
+
+        bopep_cont.optimize(
+            target_structure_path="/home/er8813ha/bopep/data/4glf.pdb",
+            batch_size=10,
+            schedule=schedule_continue,
             embeddings=filtered_embeddings,
             binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
-            n_validate=50
+            n_validate=50,
+            checkpoint_path=os.path.join(output_dir, "checkpoint_0"),
         )
+
         logging.info(f"Test completed, output saved to {output_dir}")
     except Exception as e:
         logging.error(f"Error during optimization: {e}")
     
-    # Return the trained model for inspection
-    return bopep
 
 
 if __name__ == "__main__":
 
     embeddings_path = "/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/embedding_methods/embedding_benchmark_data.pkl"
     objectives_csv ="/home/er8813ha/docking-peptide/src/benchmark/benchmark_scores.csv"
-    
-    # Run the test with ESM 1D embeddings
-    bopep = test_bopep_with_precomputed_data(
+    test_bopep_with_precomputed_data(
         embeddings_path=embeddings_path,
         objectives_csv=objectives_csv,
         embedding_type="esm_1d_pca",
-        output_dir="/home/er8813ha/docking-peptide/src/plot/dummy_logs",
-        iterations=35, 
-        n_trials=10,
-        batch_size=10
+        output_dir="/home/er8813ha/bopep/tests/optimize_test", # "/home/er8813ha/docking-peptide/src/plot/dummy_logs",
     )
-    
-    if bopep and bopep.model:
-        print(f"Trained model: {type(bopep.model).__name__}")

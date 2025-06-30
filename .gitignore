@@ -8,6 +8,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+/tests/optimize_test
+
 # C extensions
 *.so
 

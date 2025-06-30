@@ -5,10 +5,11 @@ from typing import Optional, Dict, Any, List
 
 
 class Logger:
-    def __init__(self, log_dir: str = "logs", overwrite_logs: Optional[bool] = None):
+    def __init__(self, log_dir: str = "logs", overwrite_logs: Optional[bool] = None, continue_from_checkpoint: bool = False):
         self.log_dir = log_dir
         os.makedirs(self.log_dir, exist_ok=True)
 
+        # Initialize header flags - need to check if files exist and have headers
         self._scores_header_written = False
         self._model_losses_header_written = False
         self._predictions_header_written = False
@@ -23,41 +24,63 @@ class Logger:
         objectives_base = "objectives.csv"
         hyperparameters_base = "hyperparameters.csv"
         
-        # Check if any of the files already exist
+        # Always use base filenames (no more numbered alternatives)
+        self._scores_file = os.path.join(self.log_dir, scores_base)
+        self._model_losses_file = os.path.join(self.log_dir, model_losses_base)
+        self._predictions_file = os.path.join(self.log_dir, predictions_base)
+        self._acquisition_file = os.path.join(self.log_dir, acquisition_base)
+        self._objectives_file = os.path.join(self.log_dir, objectives_base)
+        self._hyperparameter_file = os.path.join(self.log_dir, hyperparameters_base)
+        
+        # Check if files exist
         base_files = [scores_base, model_losses_base, predictions_base, acquisition_base, objectives_base, hyperparameters_base]
         file_exists = any(os.path.exists(os.path.join(self.log_dir, f)) for f in base_files)
         
-        # If files exist, ask user about overwriting
-        if overwrite_logs is None:
+        if continue_from_checkpoint:
+            # When continuing, we want to append to existing files
+            # Check if headers already exist in files
+            self._scores_header_written = self._file_has_header(self._scores_file)
+            self._model_losses_header_written = self._file_has_header(self._model_losses_file)
+            self._predictions_header_written = self._file_has_header(self._predictions_file)
+            self._acquisition_header_written = self._file_has_header(self._acquisition_file)
+            self._objectives_header_written = self._file_has_header(self._objectives_file)
+        else:
+            # Fresh start logic
             if file_exists:
-                response = input(f"Log files already exist in {self.log_dir}. Do you want to overwrite them? (y/n): ").lower()
-                overwrite = response == 'y' or response == 'yes'
-        elif overwrite_logs is True:
-            overwrite = True
-        else:
-            overwrite = False
+                if overwrite_logs is None:
+                    response = input(f"Log files already exist in {self.log_dir}. Do you want to overwrite them? (y/n): ").lower()
+                    overwrite = response == 'y' or response == 'yes'
+                else:
+                    overwrite = False
+                
+                if overwrite:
+                    # Delete existing files if overwriting
+                    for file_path in [self._scores_file, self._model_losses_file, 
+                                    self._predictions_file, self._acquisition_file, 
+                                    self._objectives_file, self._hyperparameter_file]:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                else:
+                    # Generate unique filenames by appending numbers
+                    self._scores_file = self._get_unique_filename(self.log_dir, scores_base)
+                    self._model_losses_file = self._get_unique_filename(self.log_dir, model_losses_base)
+                    self._predictions_file = self._get_unique_filename(self.log_dir, predictions_base)
+                    self._acquisition_file = self._get_unique_filename(self.log_dir, acquisition_base)
+                    self._objectives_file = self._get_unique_filename(self.log_dir, objectives_base)
+                    self._hyperparameter_file = self._get_unique_filename(self.log_dir, hyperparameters_base)
+
+
+    def _file_has_header(self, file_path: str) -> bool:
+        """Check if a CSV file exists and has a header (non-empty first line)"""
+        if not os.path.exists(file_path):
+            return False
         
-        # Either use base filenames or find alternative names
-        if overwrite:
-            self._scores_file = os.path.join(self.log_dir, scores_base)
-            self._model_losses_file = os.path.join(self.log_dir, model_losses_base)
-            self._predictions_file = os.path.join(self.log_dir, predictions_base)
-            self._acquisition_file = os.path.join(self.log_dir, acquisition_base)
-            self._objectives_file = os.path.join(self.log_dir, objectives_base)
-            self._hyperparameter_file = os.path.join(self.log_dir, hyperparameters_base)
-            
-            # Delete existing files if overwriting
-            for file_path in [self._scores_file, self._model_losses_file, 
-                             self._predictions_file, self._acquisition_file, self._objectives_file, self._hyperparameter_file]:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-        else:
-            self._scores_file = self._get_unique_filename(self.log_dir, scores_base)
-            self._model_losses_file = self._get_unique_filename(self.log_dir, model_losses_base)
-            self._predictions_file = self._get_unique_filename(self.log_dir, predictions_base)
-            self._acquisition_file = self._get_unique_filename(self.log_dir, acquisition_base)
-            self._objectives_file = self._get_unique_filename(self.log_dir, objectives_base)
-            self._hyperparameter_file = self._get_unique_filename(self.log_dir, hyperparameters_base)
+        try:
+            with open(file_path, 'r') as f:
+                first_line = f.readline().strip()
+                return len(first_line) > 0
+        except:
+            return False
     
     def _get_unique_filename(self, directory, base_filename):
         """Generate a unique filename by adding an incremental number if file exists."""
