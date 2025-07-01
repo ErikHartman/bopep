@@ -1,7 +1,6 @@
 import numpy as np
 from Bio.SVDSuperimposer import SVDSuperimposer
-
-from util import parse_pdb
+from bopep.scoring.utils import parse_pdb
 
 
 def count_agreeing_pdbs(

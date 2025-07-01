@@ -1,6 +1,5 @@
 import math
-from bopep.scoring.util import parse_pdb
-from bopep.scoring.util import get_plDDT_from_dir
+from bopep.scoring.utils import parse_pdb
 
 """
 Distance-based loss function for protein-peptide interactions.

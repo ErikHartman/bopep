@@ -144,21 +144,21 @@ def test_bopep_with_precomputed_data(
 
     schedule_continue = [
         {"acquisition": "standard_deviation", "iterations": 2},
-        {"acquisition": "expected_improvement", "iterations": 5},
+        {"acquisition": "expected_improvement", "iterations": 10},
     ]
     
     # Run the optimization loop
     logging.info("Starting test optimization loop")
     try:
-        # bopep.optimize(
-        #     target_structure_path="/home/er8813ha/bopep/data/4glf.pdb",
-        #     num_initial=100,
-        #     batch_size=10,
-        #     schedule=schedule,
-        #     embeddings=filtered_embeddings,
-        #     binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
-        #     n_validate=50
-        # )
+        bopep.optimize(
+            target_structure_path="/home/er8813ha/bopep/data/4glf.pdb",
+            num_initial=100,
+            batch_size=10,
+            schedule=schedule,
+            embeddings=filtered_embeddings,
+            binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
+            n_validate=50
+        )
 
         bopep_cont = BoPep(
             surrogate_model_kwargs={
@@ -186,7 +186,6 @@ def test_bopep_with_precomputed_data(
             target_structure_path="/home/er8813ha/bopep/data/4glf.pdb",
             batch_size=10,
             schedule=schedule_continue,
-            embeddings=filtered_embeddings,
             binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
             n_validate=50,
             checkpoint_path=os.path.join(output_dir, "checkpoint_0"),
@@ -206,5 +205,5 @@ if __name__ == "__main__":
         embeddings_path=embeddings_path,
         objectives_csv=objectives_csv,
         embedding_type="esm_1d_pca",
-        output_dir="/home/er8813ha/bopep/tests/optimize_test", # "/home/er8813ha/docking-peptide/src/plot/dummy_logs",
+        output_dir="/home/er8813ha/docking-peptide/src/plot/dummy_logs",
     )

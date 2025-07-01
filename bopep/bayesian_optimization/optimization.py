@@ -4,7 +4,6 @@ from pathlib import Path
 import pickle
 import datetime
 import shutil
-import subprocess
 from typing import Callable, List, Optional, Dict, Any, Union
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
@@ -17,11 +16,9 @@ from bopep.surrogate_model import (
 )
 from bopep.logging.logger import Logger
 from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
+from bopep.bayesian_optimization.utils import (_check_binding_site_residue_indices, _save_model, _validate_checkpoint, _validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
 from bopep.bayesian_optimization.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
-from bopep.bayesian_optimization.utils import check_starting_index_in_pdb
-from bopep.docking.utils import extract_sequence_from_pdb
-import pyrosetta
 import torch
 import logging
 import numpy as np
@@ -64,7 +61,7 @@ class BoPep:
                     returns score dictionaries. If provided, this will be used
                     instead of the default scorer.
         """
-        self._validate_dependencies()
+        _validate_dependencies()
 
         self.surrogate_model_kwargs = surrogate_model_kwargs
         self.objective_function = objective_function
@@ -84,15 +81,7 @@ class BoPep:
         # Store the Optuna study for warm-starting
         self.previous_study = None
 
-        self.available_acquistion_functions = [
-            "expected_improvement",
-            "standard_deviation",
-            "upper_confidence_bound",
-            "probability_of_improvement",
-            "mean",
-        ]
-
-        self._validate_surrogate_model_kwargs()
+        _validate_surrogate_model_kwargs(self.surrogate_model_kwargs)
         self.log_dir = log_dir
         self.overwrite_logs = overwrite_logs
 
@@ -101,11 +90,9 @@ class BoPep:
 
     def optimize(
         self,
-        
         schedule: List[Dict[str, Any]],
         batch_size: int,
-        target_structure_path: Optional[str],
-
+        target_structure_path: str,
         embeddings: Optional[Dict[str, Any]] = None,
         num_initial: Optional[int] = 10,
         n_validate: Optional[Union[float, int]] = None,
@@ -129,7 +116,8 @@ class BoPep:
             binding_site_residue_indices: List of residue indices defining the binding site.
             initial_peptides: Optional list of initial peptides to dock.
             assume_zero_indexed: If True, assumes residue indices are zero-indexed.
-            checkpoint_path: Path to a checkpoint directory to continue from.
+            checkpoint_path: Path to a checkpoint directory to continue from. If none is provided,
+                a fresh optimization will be started.
 
         """
         continue_from_checkpoint = False if checkpoint_path is None else True
@@ -151,7 +139,7 @@ class BoPep:
                 raise ValueError("embeddings must be provided for fresh initialization")
             logging.info("Fresh initialization")
             self._fresh_init(initial_peptides, num_initial, assume_zero_indexed)
-            starting_iteration = 1
+            starting_iteration = 0
         else:
             logging.info("Continuing from checkpoint")
             starting_iteration = self._continue_init()
@@ -183,9 +171,9 @@ class BoPep:
         self.scores = dict()
 
         # Validate args
-        self._validate_args(schedule=self.schedule, n_validate=self.n_validate)
+        _validate_args(schedule=self.schedule, n_validate=self.n_validate)
         self.docker.set_target_structure(self.target_structure_path)
-        self.binding_site_residue_indices = self._check_binding_site_residue_indices(
+        self.binding_site_residue_indices = _check_binding_site_residue_indices(
             self.binding_site_residue_indices,
             self.target_structure_path,
             assume_zero_indexed=assume_zero_indexed,
@@ -251,7 +239,7 @@ class BoPep:
     def _save_checkpoint(self, global_iteration: int):
         checkpoint_dir = self._next_checkpoint_dir()
         checkpoint_dir.mkdir(parents=True, exist_ok=False)
-        self._save_model(str(checkpoint_dir / "model.pt"))
+        _save_model(str(checkpoint_dir / "model.pt"), model=self.model, surrogate_model_kwargs=self.surrogate_model_kwargs, best_hyperparams=self.best_hyperparams)
         meta_json_path = checkpoint_dir / "checkpoint_metadata.json"
         
         meta = {
@@ -292,8 +280,8 @@ class BoPep:
             "scores.csv",
             "objectives.csv", 
             "model_losses.csv",
-            "predictions.csv",
-            "acquisition.csv",
+            "predictions.csv.gz",
+            "acquisition.csv.gz",
             "hyperparameters.csv"
         ]
         
@@ -312,14 +300,10 @@ class BoPep:
         checkpoint_path = Path(self.checkpoint_path)
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"No checkpoint directory found at {self.checkpoint_path}")
+        _validate_checkpoint(checkpoint_path=checkpoint_path)
         
         embeddings_path = checkpoint_path / "embeddings.pkl"
-        if not embeddings_path.exists():
-            raise FileNotFoundError(f"No embeddings file found at {embeddings_path}")
-        
         meta_path = checkpoint_path / "checkpoint_metadata.json"
-        if not meta_path.exists():
-            raise FileNotFoundError(f"No metadata file found at {meta_path}")
         
         with open(meta_path, 'r') as f:
             meta = json.load(f)
@@ -331,6 +315,14 @@ class BoPep:
             self.embeddings = pickle.load(f)
         
         self._check_embedding_shapes(self.embeddings)
+
+        if self.surrogate_model_kwargs != meta.get("surrogate_model_kwargs"):
+            logging.warning(
+                "Note that current surrogate model kwargs differ from checkpoint. " \
+                "Using provided kwargs"
+            )
+            logging.warning("Previous kwargs: " + str(self.surrogate_model_kwargs))
+            logging.warning("Checkpoint kwargs: " + str(meta.get("surrogate_model_kwargs")))
         
         if self.surrogate_model_kwargs["network_type"] == "mlp":
             any_key = next(iter(self.embeddings))
@@ -344,7 +336,7 @@ class BoPep:
         logging.info("Rebuilding optimization state from logs...")
         self._rebuild_logs_from_csvs()
 
-        self._validate_args(schedule=self.schedule, n_validate=self.n_validate)
+        _validate_args(schedule=self.schedule, n_validate=self.n_validate)
         self.docker.set_target_structure(self.target_structure_path)
         
         objectives = self.scores_to_objective.create_objective(
@@ -372,7 +364,7 @@ class BoPep:
             for row in reader:
                 pep = row["peptide"]
                 score_cols = [c for c in reader.fieldnames
-                              if c not in ("timestamp", "iteration", "peptide", "acquisition_phase_when_added")]
+                              if c not in ("timestamp", "iteration", "peptide", "phase")]
                 sc = {
                     col: float(row[col]) if row[col] not in (None, "") else None
                     for col in score_cols
@@ -399,7 +391,7 @@ class BoPep:
         scores: dict,
         batch_size: int,
         n_validate: Optional[Union[int, float]] = None,
-        starting_global_iteration: int = 1,
+        starting_global_iteration: int = 0,
     ):
         """
         Runs the main optimization loop over the defined phases.
@@ -408,13 +400,6 @@ class BoPep:
         for phase_index, phase in enumerate(schedule, start=1):
             acquisition = phase["acquisition"]
             iterations = phase["iterations"]
-
-            # (Optional) double-check acquisition name:
-            if acquisition not in self.available_acquistion_functions:
-                raise ValueError(
-                    f"Invalid acquisition function: {acquisition}. "
-                    f"Must be one of {self.available_acquistion_functions}"
-                )
 
             for iteration in range(1, iterations + 1):
                 global_iteration += 1
@@ -704,190 +689,6 @@ class BoPep:
         )
         self.model.to(self.device)
 
-    def _check_binding_site_residue_indices(
-        self,
-        binding_site_residue_indices,
-        target_structure_path,
-        assume_zero_indexed=None,
-    ):
-        """
-        Checks if starting index is 0.
-
-        If not, asks the user if the binding site residues are expected to be 0-indexed.
-        Corrects for the starting index if wanted.
-
-        Return a visualization of the residues that are selected as binding site residues.
-        """
-        starting_index = check_starting_index_in_pdb(target_structure_path)
-        protein_sequence = extract_sequence_from_pdb(target_structure_path)
-        if binding_site_residue_indices is None:
-            return None
-
-        if starting_index != 0:
-            if assume_zero_indexed is None:
-                print(
-                    f"\n\nStarting index is {starting_index}. Are the provided binding site residues 0-indexed?"
-                )
-                answer = input("y/n: ")
-            else:
-                if assume_zero_indexed is True:
-                    print(
-                        f"\n\nStarting index is {starting_index}. Assuming binding site residues are 0-indexed."
-                    )
-                    answer = "y"
-                else:
-                    print(
-                        f"\n\nStarting index is {starting_index}. Assuming binding site residues are 1-indexed."
-                    )
-                    answer = "n"
-            if answer == "y":
-                binding_site_residue_indices = [
-                    residue - starting_index for residue in binding_site_residue_indices
-                ]
-
-        print("\nBinding Site Residues Visualization:")
-        print("=" * 60)
-        print(f"Full sequence length: {len(protein_sequence)}")
-        print(f"Selected binding site residues: {binding_site_residue_indices}")
-        print("-" * 60)
-
-        binding_site_residue_indices = sorted(binding_site_residue_indices)
-        context_size = 5
-
-        for residue_idx in binding_site_residue_indices:
-            if residue_idx < 0 or residue_idx >= len(protein_sequence):
-                print(f"Warning: Residue index {residue_idx} out of range")
-                continue
-
-            # Calculate start and end positions for context
-            start = max(0, residue_idx - context_size)
-            end = min(len(protein_sequence), residue_idx + context_size + 1)
-
-            positions = list(range(start + starting_index, end + starting_index))
-            vis_seq = list(protein_sequence[start:end])
-
-            # Mark the selected residue
-            rel_pos = residue_idx - start
-            if 0 <= rel_pos < len(vis_seq):
-                vis_seq[rel_pos] = f"[{vis_seq[rel_pos]}]"
-
-            print(
-                f"Residue {residue_idx + starting_index} ({protein_sequence[residue_idx]}):"
-            )
-            print("Position:" + " ".join(f"{pos:3d}" for pos in positions))
-            print("Sequence: " + " ".join(f"{aa:3s}" for aa in vis_seq))
-            print("-" * 60)
-
-        print("=" * 60)
-        print(
-            f"The internally stored binding site residues are: {binding_site_residue_indices}"
-        )
-        return binding_site_residue_indices
-
-    def _validate_surrogate_model_kwargs(self):
-        """Validate the surrogate model configuration."""
-        valid_network_types = ["mlp", "bilstm", "bigru"]
-        valid_model_types = ["nn_ensemble", "mc_dropout", "deep_evidential", "mve"]
-
-        network_type = self.surrogate_model_kwargs.get("network_type")
-        if network_type not in valid_network_types:
-            raise ValueError(
-                f"Invalid network type: {network_type}. "
-                f"Must be one of: {', '.join(valid_network_types)}"
-            )
-
-        model_type = self.surrogate_model_kwargs.get("model_type")
-        if model_type not in valid_model_types:
-            raise ValueError(
-                f"Invalid model type: {model_type}. "
-                f"Must be one of: {', '.join(valid_model_types)}"
-            )
-
-    def _validate_dependencies(self):
-        """
-        Check if colabfold -help is callable
-        Check if output dir exists
-        """
-        try:
-            subprocess.Popen(
-                ["colabfold_batch", "--help"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-            )
-        except:
-            raise ValueError(
-                "colabfold is not callable through the command: colabfold_batch --help"
-            )
-
-        try:
-            pyrosetta.init("-mute all")
-        except:
-            raise ValueError("Cannot initialize pyrosetta")
-
-    def _validate_args(
-        self, schedule: List[Dict[str, Any]], n_validate: Optional[Union[int, float]]
-    ):
-        """
-        Validates optimization args
-        """
-        if not schedule:
-            raise ValueError("Schedule cannot be empty")
-
-        for idx, phase in enumerate(schedule):
-            if not isinstance(phase, dict):
-                raise ValueError(f"Phase {idx} must be a dictionary")
-
-            if "acquisition" not in phase:
-                raise ValueError(f"Phase {idx} missing required key 'acquisition'")
-
-            if phase["acquisition"] not in self.available_acquistion_functions:
-                raise ValueError(
-                    f"Invalid acquisition function in phase {idx}: {phase['acquisition']}. "
-                    f"Must be one of: {', '.join(self.available_acquistion_functions)}"
-                )
-
-            if "iterations" not in phase:
-                raise ValueError(f"Phase {idx} missing required key 'iterations'")
-
-            if not isinstance(phase["iterations"], int) or phase["iterations"] <= 0:
-                raise ValueError(f"Phase {idx}: iterations must be a positive integer")
-
-        if n_validate is not None:
-            if isinstance(n_validate, float) and not (0 < n_validate < 1):
-                raise ValueError(
-                    f"When n_validate is a float, it must be between 0 and 1, got {n_validate}"
-                )
-            elif isinstance(n_validate, int) and n_validate <= 0:
-                raise ValueError(
-                    f"When n_validate is an integer, it must be positive, got {n_validate}"
-                )
-
-    def _save_model(self, save_path: str):
-        """
-        Save the current model to a file with metadata.
-        """
-        # Create a comprehensive save dictionary
-        save_dict = {
-            "model_state_dict": self.model.state_dict(),
-            "model_config": {
-                "model_type": self.surrogate_model_kwargs["model_type"],
-                "network_type": self.surrogate_model_kwargs["network_type"],
-                "input_dim": self.surrogate_model_kwargs["input_dim"],
-                "hyperparameters": self.best_hyperparams,
-            },
-            "model_class": self.model.__class__.__name__,
-            "surrogate_model_kwargs": self.surrogate_model_kwargs,
-        }
-
-        torch.save(save_dict, save_path)
-        logging.info(f"Model saved to {save_path}")
-        logging.info(f"Model type: {self.surrogate_model_kwargs['model_type']}")
-        logging.info(
-            f"Network architecture: {self.surrogate_model_kwargs['network_type']}"
-        )
-        logging.info(f"Model class: {self.model.__class__.__name__}")
-
     def _compute_model_metrics(self, predictions_dict: dict, objectives: dict):
         peptides = list(predictions_dict.keys())
         actual = np.array([objectives[p] for p in peptides])
@@ -929,10 +730,8 @@ class BoPep:
             batch_size=self.best_hyperparams.get("batch_size", 16),
             device=self.device,
         )
-
         train_pred = self.model.predict_dict(train_emb, device=self.device)
         val_pred = self.model.predict_dict(val_emb, device=self.device)
-
         train_m = self._compute_model_metrics(train_pred, train_obj)
         val_m = self._compute_model_metrics(val_pred, val_obj)
 
@@ -971,16 +770,10 @@ class BoPep:
         """
         Split the available data into training and validation sets.
         """
-        # Get all peptides that have been docked and scored
         peptides = list(objectives.keys())
-
-        # Randomly select validation peptides
-        np.random.seed(42)  # For reproducibility
         val_indices = np.random.choice(len(peptides), num_validate, replace=False)
         val_peptides = [peptides[i] for i in val_indices]
         train_peptides = [p for p in peptides if p not in val_peptides]
-
-        # Create training and validation dictionaries
         train_embeddings = {p: docked_embeddings[p] for p in train_peptides}
         train_objectives = {p: objectives[p] for p in train_peptides}
         val_embeddings = {p: docked_embeddings[p] for p in val_peptides}
@@ -993,15 +786,12 @@ class BoPep:
         return train_embeddings, train_objectives, val_embeddings, val_objectives
 
     def _print_top_performers(self, objectives: dict, top_n: int = 10):
-
         sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[
             :top_n
         ]
-
         logging.info(f"Top {top_n} peptides:")
         logging.info(f"{'Peptide':<20} | {'Objective':<10} ")
         logging.info("-" * 60)
-
         for peptide, obj_value in sorted_peptides:
-
             logging.info(f"{peptide:<20} | {obj_value:<10.4f} ")
+
