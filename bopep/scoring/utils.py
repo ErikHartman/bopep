@@ -1,6 +1,5 @@
 from Bio.PDB import PDBParser
 from Bio.PDB.Polypeptide import is_aa
-from scipy.spatial import cKDTree
 import os
 import json
 import re

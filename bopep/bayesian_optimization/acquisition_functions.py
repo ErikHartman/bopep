@@ -1,6 +1,14 @@
-from typing import Iterable
+
 import numpy as np
 from scipy.stats import norm
+
+available_acquistion_functions = [
+            "expected_improvement",
+            "standard_deviation",
+            "upper_confidence_bound",
+            "probability_of_improvement",
+            "mean",
+        ]
 
 class AcquisitionFunction:
     def __init__(self):

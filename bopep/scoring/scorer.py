@@ -1,5 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
+from typing import Optional
 from bopep.scoring.pep_prot_distance import distance_score_from_pdb
 from bopep.scoring.rosetta_scorer import RosettaScorer
 from bopep.scoring.af_scorer import AFScorer
@@ -55,6 +56,8 @@ class Scorer:
         colab_dir: str = None,
         binding_site_residue_indices: list = None,
         peptide_sequence: str = None,
+        required_n_contact_residues: Optional[int] = 2,
+        binding_site_distance_threshold: Optional[int] = 5.0,
     ) -> dict:
         """
         Calculate and return selected scores for a peptide.
@@ -113,6 +116,10 @@ class Scorer:
             List of residue indices defining the binding site (required for in_binding_site score)
         peptide_sequence : str, optional
             Direct peptide sequence (if no PDB file is available)
+        required_n_contact_residues : int, optional
+            Minimum number of contact residues required to consider peptide in binding site (default is 3)
+        binding_site_distance_threshold : float, optional
+            Distance threshold (in Angstroms) to define binding site proximity (default is 5.0)
 
         Returns
         -------
@@ -248,6 +255,8 @@ class Scorer:
                     is_peptide_in_binding_site_pdb_file(
                         pdb_file,
                         binding_site_residue_indices=binding_site_residue_indices,
+                        threshold=binding_site_distance_threshold,
+                        required_n_contact_residues=required_n_contact_residues,
                     )
                 )  # boolean
         if "in_binding_site_score" in scores_to_include:
@@ -413,7 +422,6 @@ class Scorer:
         for score in self.available_scores:
             print(score)
 
-
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
     colab_dir_path = "/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/docked_pdbs/4glf_LKNPDDPDMVD"#"/srv/data1/general/immunopeptides_data/databases/benchmark_data/pdbs_erik/docked_peptides/1ydi_VGWEQLLTTIARTINEVENQILTR"
@@ -429,6 +437,7 @@ if __name__ == "__main__":
             "rosetta_score",
             "uHrel",
             "peptide_plddt",
+            "in_binding_site",
             "in_binding_site_score",
         ],
         colab_dir=colab_dir_path,

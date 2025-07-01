@@ -1,4 +1,9 @@
-import subprocess
+import csv
+import json
+from pathlib import Path
+import pickle
+import datetime
+import shutil
 from typing import Callable, List, Optional, Dict, Any, Union
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
@@ -9,14 +14,11 @@ from bopep.surrogate_model import (
     tune_hyperparams,
     MVE,
 )
-from bopep.embedding.embedder import Embedder
 from bopep.logging.logger import Logger
 from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
+from bopep.bayesian_optimization.utils import (_check_binding_site_residue_indices, _save_model, _validate_checkpoint, _validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
 from bopep.bayesian_optimization.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
-from bopep.bayesian_optimization.utils import check_starting_index_in_pdb
-from bopep.docking.utils import extract_sequence_from_pdb
-import pyrosetta
 import torch
 import logging
 import numpy as np
@@ -28,24 +30,21 @@ logging.basicConfig(
 
 
 class BoPep:
-    
-    
 
     def __init__(
         self,
-        surrogate_model_kwargs: Optional[Dict[str, Any]] = None,
+        surrogate_model_kwargs: Dict[str, Any] = None,
         objective_function: Optional[Callable] = None,
         objective_function_kwargs: Optional[Dict[str, Any]] = None,
         scoring_kwargs: Optional[Dict[str, Any]] = None,
-        embedding_kwargs: Optional[Dict[str, Any]] = None,
         docker_kwargs: Optional[Dict[str, Any]] = None,
         hpo_kwargs: Optional[Dict[str, Any]] = None,
         log_dir: str = "logs",
         overwrite_logs: Optional[bool] = None,
-        custom_scorer: Optional[Callable] = None, 
+        custom_scorer: Optional[Callable] = None,
         min_validation_samples: int = 3,
         min_training_samples: int = 10,
-          ):
+    ):
         """
         Initialize the BoPep optimizer with various configuration options.
 
@@ -55,7 +54,6 @@ class BoPep:
                 - model_type: 'nn_ensemble', 'mc_dropout', 'deep_evidential', or 'mve'
             objective_function: Custom objective function (defaults to maximize iptm/pae and minimize dG and rosetta_score, see paper)
             objective_function_kwargs: Parameters for the objective function
-            embedding_kwargs: Configuration for peptide embedding generation
             docker_kwargs: Configuration for the Docker component
             hpo_kwargs: Configuration for hyperparameter optimization
             log_dir: Directory for logging output
@@ -63,218 +61,402 @@ class BoPep:
                     returns score dictionaries. If provided, this will be used
                     instead of the default scorer.
         """
-        self._setup()
+        _validate_dependencies()
 
-        # Set default kwargs with proper handling of mutable defaults
-        self.surrogate_model_kwargs = self._get_default_surrogate_model_kwargs()
-        if surrogate_model_kwargs:
-            self.surrogate_model_kwargs.update(surrogate_model_kwargs)
-
+        self.surrogate_model_kwargs = surrogate_model_kwargs
         self.objective_function = objective_function
         self.objective_function_kwargs = objective_function_kwargs or {}
-        self.embedding_kwargs = embedding_kwargs or {}
         self.docker_kwargs = docker_kwargs or {}
         self.hpo_kwargs = hpo_kwargs or {}
         self.scoring_kwargs = scoring_kwargs or {}
         self.custom_scorer = custom_scorer
 
         # Initialize components
-        self.embedder = Embedder()
         self.scorer = Scorer()
         self.docker = Docker(self.docker_kwargs)
-        self.logger = Logger(log_dir=log_dir, overwrite_logs=overwrite_logs)
         self.acquisition_function_obj = AcquisitionFunction()
         self.selector = PeptideSelector()
         self.scores_to_objective = ScoresToObjective()
 
-        self.embeddings_save_path = log_dir + "/embeddings.npy"
-        
         # Store the Optuna study for warm-starting
         self.previous_study = None
 
-        self.available_acquistion_functions = [
-            "expected_improvement",
-            "standard_deviation",
-            "upper_confidence_bound",
-            "probability_of_improvement",
-            "mean",
-        ]
-
-        self._validate_surrogate_model_kwargs()
+        _validate_surrogate_model_kwargs(self.surrogate_model_kwargs)
         self.log_dir = log_dir
+        self.overwrite_logs = overwrite_logs
 
         self.MIN_VALIDATION_SAMPLES = min_validation_samples
-        self.MIN_TRAINING_SAMPLES   = min_training_samples
-
+        self.MIN_TRAINING_SAMPLES = min_training_samples
 
     def optimize(
         self,
-        peptides: List[str],
+        schedule: List[Dict[str, Any]],
+        batch_size: int,
         target_structure_path: str,
-        num_initial: int = 10,
-        n_validate: Optional[Union[float, int]] = None, # new arg
-        batch_size: int = 4,
-        binding_site_residue_indices: Optional[List[int]] = None,
-        schedule: Optional[List[Dict[str, Any]]] = None,
         embeddings: Optional[Dict[str, Any]] = None,
+        num_initial: Optional[int] = 10,
+        n_validate: Optional[Union[float, int]] = None,
+        binding_site_residue_indices: Optional[List[int]] = None,
         initial_peptides: Optional[List[str]] = None,
         assume_zero_indexed: Optional[bool] = None,
+        checkpoint_path: Optional[str] = None,
     ):
         """
         Runs Bayesian optimization on peptide sequences.
 
         Args:
-            peptides: List of peptide sequences to optimize
-            target_structure_path: Path to the target protein structure file
-            num_initial: Number of initial peptides to sample before optimization
-            n_validate: Number or fraction of peptides to use for validation.
-                   If float (0-1): uses that fraction of data for validation
-                   If int (>0): uses that many peptides for validation
-                   If None: no validation is performed
-            batch_size: Number of peptides to evaluate in each iteration
-            binding_site_residue_indices: List of residue indices defining the binding site
-            schedule: List of optimization phases, each with:
-                - acquisition: The acquisition function to use
-                - iterations: Number of iterations for this phase
-            embeddings: Pre-computed embeddings for peptides (optional). These should be COMPLETELY PROCESSED.
-            initial_peptides: Specific peptides to start with instead of k-means selection
+            schedule: List of dictionaries defining the optimization phases.
+                Each dict should have 'acquisition' and 'iterations' keys.
+            batch_size: Number of peptides to dock in each iteration.
+            target_structure_path: Path to the target structure PDB file.
+            embeddings: Dictionary of peptide embeddings {peptide: embedding}.
+            num_initial: Number of initial peptides to dock and score.
+            n_validate: Number of peptides to use for validation.
+                If None, no validation is performed.
+            binding_site_residue_indices: List of residue indices defining the binding site.
+            initial_peptides: Optional list of initial peptides to dock.
+            assume_zero_indexed: If True, assumes residue indices are zero-indexed.
+            checkpoint_path: Path to a checkpoint directory to continue from. If none is provided,
+                a fresh optimization will be started.
 
-        Returns:
-            None: Results are logged through the logger component
         """
-        
+        continue_from_checkpoint = False if checkpoint_path is None else True
+
+        self.checkpoint_path = checkpoint_path
+        self.logger = Logger(log_dir=self.log_dir, overwrite_logs=self.overwrite_logs, continue_from_checkpoint=continue_from_checkpoint)
+
+        self.embeddings = embeddings
+        self.target_structure_path = target_structure_path
+        self.schedule = schedule
+        self.batch_size = batch_size
+        self.n_validate = n_validate
+        self.binding_site_residue_indices = binding_site_residue_indices
+
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # Set default schedule if none provided
-        if schedule is None:
-            schedule = [
-                {"acquisition": "standard_deviation", "iterations": 10},
-                {"acquisition": "expected_improvement", "iterations": 10},
-            ]
-
-        # Validate schedule
-        self._validate_args(schedule=schedule, n_validate=n_validate)
-
-        self.docker.set_target_structure(target_structure_path)
-
-        self.binding_site_residue_indices = self._check_binding_site_residue_indices(
-            binding_site_residue_indices, target_structure_path, assume_zero_indexed=assume_zero_indexed
-        )  # Checks if pdb starting index is 0, adjusts if needed.
-
-        docked_peptides = set()
-        not_docked_peptides = set(peptides)
-
-        # Keep a dict of {peptide: score}, to update after each docking/score
-        scores = dict()
-
-        # Generate embeddings for all peptides if not provided
-        if embeddings is None:
-            self.embeddings = self._generate_embeddings(peptides) # loads if str
+        if not continue_from_checkpoint:
+            if not embeddings:
+                raise ValueError("embeddings must be provided for fresh initialization")
+            logging.info("Fresh initialization")
+            self._fresh_init(initial_peptides, num_initial, assume_zero_indexed)
+            starting_iteration = 0
         else:
-            # If you passed precomputed embeddings, we can still do shape checks:
-            self._check_embedding_shapes(embeddings)
-            self.embeddings = embeddings
+            logging.info("Continuing from checkpoint")
+            starting_iteration = self._continue_init()
+        
+        logging.info("Starting optimization loop")
+        self._run_phase_loop(
+            schedule=schedule,
+            all_logged_objectives=self.all_logged_objectives,
+            docked_peptides=self.docked_peptides,
+            not_docked_peptides=self.not_docked_peptides,
+            scores=self.scores,
+            batch_size=batch_size,
+            n_validate=n_validate,
+            starting_global_iteration=starting_iteration,
+        )
 
-        # Once embeddings exist, set input_dim based on shape
+    def _fresh_init(
+        self,
+        initial_peptides: Optional[List[str]] = None,
+        num_initial: int = 10,
+        assume_zero_indexed: Optional[bool] = None,
+    ):
+        """
+        Initializes the BoPep optimizer for a fresh search
+        """
+        peptides = list(self.embeddings.keys())
+        self.docked_peptides = set()
+        self.not_docked_peptides = set(peptides)
+        self.scores = dict()
+
+        # Validate args
+        _validate_args(schedule=self.schedule, n_validate=self.n_validate)
+        self.docker.set_target_structure(self.target_structure_path)
+        self.binding_site_residue_indices = _check_binding_site_residue_indices(
+            self.binding_site_residue_indices,
+            self.target_structure_path,
+            assume_zero_indexed=assume_zero_indexed,
+        )
+
+        self._check_embedding_shapes(self.embeddings)
+
         if self.surrogate_model_kwargs["network_type"] == "mlp":
-            # For MLP we expect 1D embeddings => input_dim is the length
-            # (If user gave shape mismatch, `_check_embedding_shapes` will raise)
             any_key = next(iter(self.embeddings))
             self.surrogate_model_kwargs["input_dim"] = len(self.embeddings[any_key])
         else:
-            # For LSTM/GRU we expect 2D embeddings => input_dim is the last dimension
             any_key = next(iter(self.embeddings))
-            self.surrogate_model_kwargs["input_dim"] = self.embeddings[any_key].shape[-1]
+            self.surrogate_model_kwargs["input_dim"] = self.embeddings[any_key].shape[
+                -1
+            ]
 
-        logging.info(f"Embeddings dimension: {self.surrogate_model_kwargs['input_dim']}")
+        logging.info(
+            f"Embeddings dimension: {self.surrogate_model_kwargs['input_dim']}"
+        )
 
-        # Store best hyperparameters
+
         self.best_hyperparams = None
-
-        # 1) Select initial peptides for docking
         if initial_peptides is None:
             initial_peptides = self.selector.select_initial_peptides(
                 embeddings=self.embeddings, num_initial=num_initial, random_state=42
             )
-        # Dock them
+
         logging.info("Docking initial peptides")
         docked_dirs = self.docker.dock_peptides(initial_peptides)
-        docked_peptides.update(initial_peptides)
-        not_docked_peptides.difference_update(initial_peptides)
+        self.docked_peptides.update(initial_peptides)
+        self.not_docked_peptides.difference_update(initial_peptides)
 
-        # Score them
         logging.info(f"Scoring {len(initial_peptides)} initial peptides")
         initial_scores = self._score_batch(docked_dirs=docked_dirs)
-        scores.update(initial_scores)
-
-        # Log scores
+        self.scores.update(initial_scores)
         self.logger.log_scores(initial_scores, iteration=0, acquisition_name="initial")
 
-        # Create and log initial objectives
         objectives = self.scores_to_objective.create_objective(
-            scores, self.objective_function, **self.objective_function_kwargs
+            self.scores, self.objective_function, **self.objective_function_kwargs
         )
         self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
-        all_logged_objectives = set(objectives.keys())
+        self.all_logged_objectives = set(objectives.keys())
 
-        # Optimize and create initial model
-        self._optimize_hyperparameters(0, {p: self.embeddings[p] for p in docked_peptides}, objectives)
+        self._optimize_hyperparameters(
+            0, {p: self.embeddings[p] for p in self.docked_peptides}, objectives
+        )
         self._initialize_model(self.best_hyperparams)
 
-        # 2) Main BO Loop over phases
-        logging.info("Starting optimization loop")
+    def _next_checkpoint_dir(self) -> Path:
+        """Find the next available checkpoint_{i} directory under self.log_dir."""
+        base = Path(self.log_dir)
+        existing = [d for d in base.iterdir() if d.is_dir() and d.name.startswith("checkpoint_")]
+        # Extract suffix numbers
+        idxs = []
+        for d in existing:
+            try:
+                idxs.append(int(d.name.split("_", 1)[1]))
+            except (IndexError, ValueError):
+                continue
+        next_idx = max(idxs) + 1 if idxs else 0
+        return base / f"checkpoint_{next_idx}"
+
+    def _save_checkpoint(self, global_iteration: int):
+        checkpoint_dir = self._next_checkpoint_dir()
+        checkpoint_dir.mkdir(parents=True, exist_ok=False)
+        _save_model(str(checkpoint_dir / "model.pt"), model=self.model, surrogate_model_kwargs=self.surrogate_model_kwargs, best_hyperparams=self.best_hyperparams)
+        meta_json_path = checkpoint_dir / "checkpoint_metadata.json"
+        
+        meta = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "global_iteration": global_iteration,
+            "surrogate_model_kwargs": self.surrogate_model_kwargs,
+            "target_structure_path": self.target_structure_path,
+            "binding_site_residue_indices": self.binding_site_residue_indices,
+            "docker_kwargs": self.docker_kwargs,
+            "hpo_kwargs": self.hpo_kwargs,
+            "objective_function_kwargs": self.objective_function_kwargs,
+            "scoring_kwargs": self.scoring_kwargs,
+            "num_docked_peptides": len(self.docked_peptides),
+            "num_remaining_peptides": len(self.not_docked_peptides),
+        }
+
+        if self.checkpoint_path:
+            meta["checkpoint_path"] = self.checkpoint_path
+        
+        with open(meta_json_path, 'w') as f:
+            json.dump(meta, f, indent=2, default=str)
+        
+        with open(checkpoint_dir / "embeddings.pkl", "wb") as f:
+            pickle.dump(self.embeddings, f)
+
+        self._copy_logs_to_checkpoint(checkpoint_dir)
+
+        logging.info(f"Saved checkpoint at iteration {global_iteration}")
+        logging.info(f"Checkpoint metadata saved to {meta_json_path}")
+
+    def _copy_logs_to_checkpoint(self, checkpoint_dir: Path):
+        """Copy all log files to the checkpoint directory."""
+        
+        results_dir = checkpoint_dir / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+
+        log_files = [
+            "scores.csv",
+            "objectives.csv", 
+            "model_losses.csv",
+            "predictions.csv.gz",
+            "acquisition.csv.gz",
+            "hyperparameters.csv"
+        ]
+        
+        logs_copied = 0
+        for log_file in log_files:
+            source_path = Path(self.log_dir) / log_file
+            if source_path.exists():
+                dest_path = results_dir / log_file
+                shutil.copy2(source_path, dest_path)
+                logs_copied += 1
+                logging.debug(f"Copied {log_file} to checkpoint")
+        
+        logging.info(f"Copied {logs_copied} log files to checkpoint")
+
+    def _continue_init(self) -> int:
+        checkpoint_path = Path(self.checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"No checkpoint directory found at {self.checkpoint_path}")
+        _validate_checkpoint(checkpoint_path=checkpoint_path)
+        
+        embeddings_path = checkpoint_path / "embeddings.pkl"
+        meta_path = checkpoint_path / "checkpoint_metadata.json"
+        
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+
+        logging.info(f"Loading metadata from {meta_path}")
+
+        logging.info("Loading embeddings from checkpoint...")
+        with open(embeddings_path, "rb") as f:
+            self.embeddings = pickle.load(f)
+        
+        self._check_embedding_shapes(self.embeddings)
+
+        if self.surrogate_model_kwargs != meta.get("surrogate_model_kwargs"):
+            logging.warning(
+                "Note that current surrogate model kwargs differ from checkpoint. " \
+                "Using provided kwargs"
+            )
+            logging.warning("Previous kwargs: " + str(self.surrogate_model_kwargs))
+            logging.warning("Checkpoint kwargs: " + str(meta.get("surrogate_model_kwargs")))
+        
+        if self.surrogate_model_kwargs["network_type"] == "mlp":
+            any_key = next(iter(self.embeddings))
+            self.surrogate_model_kwargs["input_dim"] = len(self.embeddings[any_key])
+        else:
+            any_key = next(iter(self.embeddings))
+            self.surrogate_model_kwargs["input_dim"] = self.embeddings[any_key].shape[-1]
+        
+        logging.info(f"Embeddings dimension: {self.surrogate_model_kwargs['input_dim']}")
+
+        logging.info("Rebuilding optimization state from logs...")
+        self._rebuild_logs_from_csvs()
+
+        _validate_args(schedule=self.schedule, n_validate=self.n_validate)
+        self.docker.set_target_structure(self.target_structure_path)
+        
+        objectives = self.scores_to_objective.create_objective(
+            self.scores, self.objective_function, **self.objective_function_kwargs
+        )
+        docked_embs = {p: self.embeddings[p] for p in self.docked_peptides}
+        
+        last_iteration = meta["global_iteration"]
+        
+        logging.info("Running hyperparameter optimization...")
+        self._optimize_hyperparameters(last_iteration, docked_embs, objectives)
+        self._initialize_model(self.best_hyperparams)
+
+        logging.info(f"Resumed from iteration {last_iteration} with "
+                    f"{len(self.docked_peptides)} peptides docked")
+        
+        return last_iteration
+
+    
+    def _rebuild_logs_from_csvs(self):
+        scores_path = Path(self.log_dir) / "scores.csv"
+        self.scores = {}
+        with open(scores_path, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                pep = row["peptide"]
+                score_cols = [c for c in reader.fieldnames
+                              if c not in ("timestamp", "iteration", "peptide", "phase")]
+                sc = {
+                    col: float(row[col]) if row[col] not in (None, "") else None
+                    for col in score_cols
+                }
+                self.scores[pep] = sc
+
+        obj_path = Path(self.log_dir) / "objectives.csv"
+        self.all_logged_objectives = set()
+        with open(obj_path, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                self.all_logged_objectives.add(row["peptide"])
+
+        self.docked_peptides = set(self.scores.keys())
+        self.not_docked_peptides = set(self.embeddings.keys()) - self.docked_peptides
+
+
+    def _run_phase_loop(
+        self,
+        schedule: List[Dict[str, Any]],
+        all_logged_objectives: set,
+        docked_peptides: set,
+        not_docked_peptides: set,
+        scores: dict,
+        batch_size: int,
+        n_validate: Optional[Union[int, float]] = None,
+        starting_global_iteration: int = 0,
+    ):
+        """
+        Runs the main optimization loop over the defined phases.
+        """
+        global_iteration = starting_global_iteration
         for phase_index, phase in enumerate(schedule, start=1):
             acquisition = phase["acquisition"]
             iterations = phase["iterations"]
 
-            # (Optional) double-check acquisition name:
-            if acquisition not in self.available_acquistion_functions:
-                raise ValueError(
-                    f"Invalid acquisition function: {acquisition}. "
-                    f"Must be one of {self.available_acquistion_functions}"
-                )
-            
-            for iteration in range(1, iterations+1):
+            for iteration in range(1, iterations + 1):
+                global_iteration += 1
                 logging.info("=" * 60)
-                logging.info(f"Starting iteration {iteration} out of {iterations} of phase {phase_index} with acquisition '{acquisition}'")
+                logging.info(
+                    f"Starting iteration {iteration} (global: {global_iteration}) out of {iterations} of phase {phase_index} with acquisition '{acquisition}'"
+                )
 
                 # Initialize fresh model for each iteration
                 self._initialize_model(self.best_hyperparams)
 
-                # 2.0) Turn scores into a scalarized score dict of peptide: score
+                # Turn scores into a scalarized score dict of peptide: score
                 objectives = self.scores_to_objective.create_objective(
                     scores, self.objective_function, **self.objective_function_kwargs
                 )
-                
+
                 # Log the new objective values
                 new_objective_peptides = set(objectives.keys()) - all_logged_objectives
-                new_objectives = {peptide: objectives[peptide] for peptide in new_objective_peptides}
+                new_objectives = {
+                    peptide: objectives[peptide] for peptide in new_objective_peptides
+                }
 
                 if new_objectives:
-                    self.logger.log_objectives(new_objectives, iteration=iteration, acquisition_name=acquisition)
+                    self.logger.log_objectives(
+                        new_objectives,
+                        iteration=global_iteration,
+                        acquisition_name=acquisition,
+                    )
                     all_logged_objectives.update(new_objectives.keys())
 
-                # 2.1) Train the model on *only the peptides we have scores for*
+                # Train the model on *only the peptides we have scores for*
                 docked_embeddings = {p: self.embeddings[p] for p in docked_peptides}
 
                 # Run hyperparameter optimization every N steps
-                if  (
-                    iteration % self.hpo_kwargs.get("hpo_interval", 10) == 0
-                ):
-                    self._optimize_hyperparameters(iteration, docked_embeddings, objectives)
+                if global_iteration % self.hpo_kwargs.get("hpo_interval", 10) == 0:
+                    self._optimize_hyperparameters(
+                        global_iteration, docked_embeddings, objectives
+                    )
                     self._initialize_model(self.best_hyperparams)
 
-                logging.info(f"Model will be trained (potentially validated) on {len(docked_peptides)} peptides")
+                logging.info(
+                    f"Model will be trained (potentially validated) on {len(docked_peptides)} peptides"
+                )
 
                 # Check if we can split into train/validation
                 split = None
                 if n_validate is not None:
-                    split = self._compute_split_indices(len(docked_peptides), n_validate)
+                    split = self._compute_split_indices(
+                        len(docked_peptides), n_validate
+                    )
 
                 # If we can split, do it; otherwise, train on all
                 if split:
-                    train_emb, train_obj, val_emb, val_obj = self._split_train_validation(
-                        docked_embeddings, objectives, split
+                    train_emb, train_obj, val_emb, val_obj = (
+                        self._split_train_validation(
+                            docked_embeddings, objectives, split
+                        )
                     )
                     loss, metrics = self._train_and_validate(
                         train_emb, train_obj, val_emb, val_obj
@@ -283,39 +465,38 @@ class BoPep:
                     loss, metrics = self._train_on_all(docked_embeddings, objectives)
 
                 # Log the loss and metrics
-                self.logger.log_model_metrics(loss, iteration, metrics)
+                self.logger.log_model_metrics(loss, global_iteration, metrics)
 
-                # 2.2) Predict for *the not-yet-docked* peptides
-                candidate_embeddings = {p: self.embeddings[p] for p in not_docked_peptides}
-                predictions = self.model.predict_dict(candidate_embeddings, device=self.device)
-                # predictions is {peptide: (mean, std)}
+                # Predict for *the not-yet-docked* peptides
+                candidate_embeddings = {
+                    p: self.embeddings[p] for p in not_docked_peptides
+                }
+                predictions = self.model.predict_dict(
+                    candidate_embeddings, device=self.device
+                )  # predictions is {peptide: (mean, std)}
 
                 # Log predictions
-                self.logger.log_predictions(predictions, iteration)
+                self.logger.log_predictions(predictions, global_iteration)
 
-                # 2.3) Compute acquisition
+                # Compute acquisition
                 acquisition_values = self.acquisition_function_obj.compute_acquisition(
                     predictions=predictions,
                     acquisition_function=acquisition,
-                )
-                # acquisition_values is {peptide: acquisition_value}
+                )  # acquisition_values is {peptide: acquisition_value}
 
                 # Log acquisition
                 self.logger.log_acquisition(
                     acquisition_values=acquisition_values,
                     acquisition_name=acquisition,
-                    iteration=iteration,
+                    iteration=global_iteration,
                 )
 
-                # 2.4) Select the next set of peptides to dock
+                # Select the next set of peptides to dock
                 next_peptides = self.selector.select_next_peptides(
                     peptides=not_docked_peptides,
                     embeddings=candidate_embeddings,
                     acquisition_values=acquisition_values,
                     n_select=batch_size,
-                )
-                logging.info(
-                    f"Selected {next_peptides} peptides for docking in iteration {iteration}"
                 )
 
                 # Dock them
@@ -323,33 +504,40 @@ class BoPep:
                 docked_peptides.update(next_peptides)
                 not_docked_peptides.difference_update(next_peptides)
 
-                # 2.5) Score them
+                # Score them
                 new_scores = self._score_batch(docked_dirs=docked_dirs)
                 scores.update(new_scores)
 
                 # Log new scores
-                self.logger.log_scores(new_scores, iteration=iteration, acquisition_name=acquisition)
-                
+                self.logger.log_scores(
+                    new_scores, iteration=global_iteration, acquisition_name=acquisition
+                )
+
                 # Print top performers
                 self._print_top_performers(
                     objectives=objectives,
                 )
-                
+
         # Loop is over
         final_objectives = self.scores_to_objective.create_objective(
             scores, self.objective_function, **self.objective_function_kwargs
         )
-
-        # Log any final new objectives
-        final_new_objective_peptides = set(final_objectives.keys()) - all_logged_objectives
-        final_new_objectives = {peptide: final_objectives[peptide] for peptide in final_new_objective_peptides}
-
+        final_new_objective_peptides = (
+            set(final_objectives.keys()) - all_logged_objectives
+        )
+        final_new_objectives = {
+            peptide: final_objectives[peptide]
+            for peptide in final_new_objective_peptides
+        }
         if final_new_objectives:
-            # Use the last iteration number + 1, or create a "final" entry
-            last_iteration = sum(phase["iterations"] for phase in schedule)
-            self.logger.log_objectives(final_new_objectives, iteration=last_iteration, acquisition_name=acquisition)
+            self.logger.log_objectives(
+                final_new_objectives,
+                iteration=global_iteration + 1,
+                acquisition_name=acquisition,
+            )
 
-        self._save_model(self.log_dir + "/model.pth")
+        # Here we'll want to save the checkpoint and model
+        self._save_checkpoint(global_iteration)
 
     def _score_batch(self, docked_dirs: list):
         """
@@ -357,7 +545,7 @@ class BoPep:
         """
         if self.custom_scorer:
             return self.custom_scorer(docked_dirs)
-        
+
         new_scores = {}
         scores_to_include = self.scoring_kwargs.get("scores_to_include", [])
 
@@ -376,59 +564,6 @@ class BoPep:
 
         return new_scores
 
-    def _generate_embeddings(self, peptides):
-        # Create embeddings for all peptides
-        if self.surrogate_model_kwargs["network_type"] in ["bilstm", "bigru"]:
-            average = False
-        elif self.surrogate_model_kwargs["network_type"] == "mlp":
-            average = True
-
-        embeddings_path = self.embedding_kwargs.get("embeddings_path")
-        embedding_function = self.embedding_kwargs.get("embedding_function")
-
-        if embeddings_path:
-            embeddings = self.embedder.load_embeddings(embeddings_path)
-        else:
-            if embedding_function == "esm":
-                embeddings = self.embedder.embed_esm(
-                    peptides,
-                    average=average,
-                    model_path=self.embedding_kwargs.get("model_path", None),
-                )
-            elif embedding_function == "aaindex":
-                embeddings = self.embedder.embed_aaindex(peptides, average=average)
-            else:
-                raise ValueError(
-                    f"Invalid or missing embedding function: {embedding_function}"
-                )
-            
-
-        if self.embedding_kwargs.get("scale", False):
-            embeddings = self.embedder.scale_embeddings(embeddings)
-
-        if self.embedding_kwargs.get("reduce_embeddings", False):
-            if self.embedding_kwargs["reduce_method"] == "vae":
-                embeddings = self.embedder.reduce_embeddings_autoencoder(
-                    embeddings,
-                    hidden_dim=self.embedding_kwargs.get("hidden_dim", 256),
-                    latent_dim=self.embedding_kwargs.get("feature_dim", 128),
-                )
-            elif self.embedding_kwargs["reduce_method"] == "pca":
-                embeddings = self.embedder.reduce_embeddings_pca(
-                    embeddings,
-                    n_components=self.embedding_kwargs.get("feature_dim", 128),
-                )
-        if not embeddings_path:
-            # Save embeddings
-            self.embedder.save_embeddings(
-                embeddings, self.embeddings_save_path
-            )
-
-        # **Check final shapes**:
-        self._check_embedding_shapes(embeddings)
-
-        logging.info("Embeddings generated.")
-        return embeddings
 
     def _check_embedding_shapes(self, embeddings: Dict[str, Any]):
         """
@@ -452,30 +587,27 @@ class BoPep:
                         f"Peptide '{pep}' has shape {emb.shape}."
                     )
 
-    def _optimize_hyperparameters(self, iteration:int, embeddings: dict, scores: dict):
+    def _optimize_hyperparameters(self, iteration: int, embeddings: dict, scores: dict):
         """
         Use the Hyperparameter Tuner to optimize all params.
         Sets self.best_hyperparams to the best found hyperparameters.
         Stores the Optuna study for future warm-starting.
         """
-        # Get hyperparameter tuning configuration
         hpo_config = self.hpo_kwargs.copy() if self.hpo_kwargs else {}
 
-        # Default hyperparameter tuning configurations
         n_trials = hpo_config.get("n_trials", 20)
         n_splits = hpo_config.get("n_splits", 3)
         random_state = hpo_config.get("random_state", 42)
 
-        # Log that we're starting hyperparameter optimization
         logging.info(
             f"Starting hyperparameter optimization for {self.surrogate_model_kwargs['network_type']} {self.surrogate_model_kwargs['model_type']} model..."
         )
-        
-        # If we have a previous study, let's log that we're using it
-        if self.previous_study is not None:
-            logging.info(f"Using previous study with {len(self.previous_study.trials)} trials")
 
-        # Run hyperparameter tuning with warm-starting from previous study
+        if self.previous_study is not None:
+            logging.info(
+                f"Using previous study with {len(self.previous_study.trials)} trials"
+            )
+
         self.best_hyperparams, self.previous_study = tune_hyperparams(
             model_type=self.surrogate_model_kwargs["model_type"],
             embedding_dict=embeddings,
@@ -489,9 +621,9 @@ class BoPep:
 
         self.logger.log_hyperparameters(
             iteration,
-            self.best_hyperparams, 
-            model_type=self.surrogate_model_kwargs["model_type"], 
-            network_type=self.surrogate_model_kwargs["network_type"]
+            self.best_hyperparams,
+            model_type=self.surrogate_model_kwargs["model_type"],
+            network_type=self.surrogate_model_kwargs["network_type"],
         )
 
         logging.info(
@@ -557,235 +689,28 @@ class BoPep:
         )
         self.model.to(self.device)
 
-    def _check_binding_site_residue_indices(
-        self, binding_site_residue_indices, target_structure_path, assume_zero_indexed=None
-    ):
-        """
-        Checks if starting index is 0.
-
-        If not, asks the user if the binding site residues are expected to be 0-indexed.
-        Corrects for the starting index if wanted.
-
-        Return a visualization of the residues that are selected as binding site residues.
-        """
-        starting_index = check_starting_index_in_pdb(target_structure_path)
-        protein_sequence = extract_sequence_from_pdb(target_structure_path)
-        if binding_site_residue_indices is None:
-            return None
-
-        if starting_index != 0:
-            if assume_zero_indexed is None:
-                print(
-                    f"\n\nStarting index is {starting_index}. Are the provided binding site residues 0-indexed?"
-                )
-                answer = input("y/n: ")
-            else:
-                if assume_zero_indexed is True:
-                    print(
-                        f"\n\nStarting index is {starting_index}. Assuming binding site residues are 0-indexed."
-                    )
-                    answer = "y"
-                else:
-                    print(
-                        f"\n\nStarting index is {starting_index}. Assuming binding site residues are 1-indexed."
-                    )
-                    answer = "n"
-            if answer == "y":
-                binding_site_residue_indices = [
-                    residue - starting_index for residue in binding_site_residue_indices
-                ]
-
-        print("\nBinding Site Residues Visualization:")
-        print("=" * 60)
-        print(f"Full sequence length: {len(protein_sequence)}")
-        print(f"Selected binding site residues: {binding_site_residue_indices}")
-        print("-" * 60)
-
-        binding_site_residue_indices = sorted(binding_site_residue_indices)
-        context_size = 5
-
-        for residue_idx in binding_site_residue_indices:
-            if residue_idx < 0 or residue_idx >= len(protein_sequence):
-                print(f"Warning: Residue index {residue_idx} out of range")
-                continue
-
-            # Calculate start and end positions for context
-            start = max(0, residue_idx - context_size)
-            end = min(len(protein_sequence), residue_idx + context_size + 1)
-
-            positions = list(range(start + starting_index, end + starting_index))
-            vis_seq = list(protein_sequence[start:end])
-
-            # Mark the selected residue
-            rel_pos = residue_idx - start
-            if 0 <= rel_pos < len(vis_seq):
-                vis_seq[rel_pos] = f"[{vis_seq[rel_pos]}]"
-
-            print(
-                f"Residue {residue_idx + starting_index} ({protein_sequence[residue_idx]}):"
-            )
-            print("Position:" + " ".join(f"{pos:3d}" for pos in positions))
-            print("Sequence: " + " ".join(f"{aa:3s}" for aa in vis_seq))
-            print("-" * 60)
-
-        print("=" * 60)
-        print(f"The internally stored binding site residues are: {binding_site_residue_indices}")
-        return binding_site_residue_indices
-
-    def _get_default_surrogate_model_kwargs(self) -> Dict[str, Any]:
-        """Return the default surrogate model configuration."""
-        return {
-            "network_type": "mlp",  # mlp, bilstm, bigru
-            "model_type": "mc_dropout",  # nn_ensemble, mc_dropout, deep_evidential, mve
-            "uncertainty_param": 0.1,  # For mc_dropout, this is dropout rate; for others, it's regularization strength
-        }
-
-    def _validate_surrogate_model_kwargs(self):
-        """Validate the surrogate model configuration."""
-        valid_network_types = ["mlp", "bilstm", "bigru"]
-        valid_model_types = ["nn_ensemble", "mc_dropout", "deep_evidential", "mve"]
-
-        network_type = self.surrogate_model_kwargs.get("network_type")
-        if network_type not in valid_network_types:
-            raise ValueError(
-                f"Invalid network type: {network_type}. "
-                f"Must be one of: {', '.join(valid_network_types)}"
-            )
-
-        model_type = self.surrogate_model_kwargs.get("model_type")
-        if model_type not in valid_model_types:
-            raise ValueError(
-                f"Invalid model type: {model_type}. "
-                f"Must be one of: {', '.join(valid_model_types)}"
-            )
-
-    def _setup(self):
-        """
-        Check if colabfold -help is callable
-        Check if output dir exists
-        """
-        try:
-            subprocess.Popen(
-                ["colabfold_batch", "--help"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-            )
-        except:
-            raise ValueError(
-                "colabfold is not callable through the command: colabfold_batch --help"
-            )
-
-        try:
-            pyrosetta.init("-mute all")
-        except:
-            raise ValueError("Cannot initialize pyrosetta")
-
-    def _validate_args(self, schedule: List[Dict[str, Any]], n_validate: Optional[Union[int, float]]):
-        """
-        Validates optimization args.
-
-        Args:
-            schedule: List of phase configurations
-            n_validate: Number or fraction of peptides to use for validation (or None)
-
-        Raises:
-            ValueError: If the args are invalid
-        """
-        if not schedule:
-            raise ValueError("Schedule cannot be empty")
-
-        for idx, phase in enumerate(schedule):
-            if not isinstance(phase, dict):
-                raise ValueError(f"Phase {idx} must be a dictionary")
-
-            if "acquisition" not in phase:
-                raise ValueError(f"Phase {idx} missing required key 'acquisition'")
-
-            if phase["acquisition"] not in self.available_acquistion_functions:
-                raise ValueError(
-                    f"Invalid acquisition function in phase {idx}: {phase['acquisition']}. "
-                    f"Must be one of: {', '.join(self.available_acquistion_functions)}"
-                )
-
-            if "iterations" not in phase:
-                raise ValueError(f"Phase {idx} missing required key 'iterations'")
-
-            if not isinstance(phase["iterations"], int) or phase["iterations"] <= 0:
-                raise ValueError(f"Phase {idx}: iterations must be a positive integer")
-        
-        if n_validate is not None:
-            if isinstance(n_validate, float) and not (0 < n_validate < 1):
-                raise ValueError(
-                    f"When n_validate is a float, it must be between 0 and 1, got {n_validate}"
-                )
-            elif isinstance(n_validate, int) and n_validate <= 0:
-                raise ValueError(
-                    f"When n_validate is an integer, it must be positive, got {n_validate}"
-                )
-            
-
-    def _save_model(self, save_path: str):
-        """
-        Save the current model to a file with metadata.
-        
-        Args:
-            save_path: Path to save the model
-        """
-        # Create a comprehensive save dictionary
-        save_dict = {
-            'model_state_dict': self.model.state_dict(),
-            'model_config': {
-                'model_type': self.surrogate_model_kwargs['model_type'],
-                'network_type': self.surrogate_model_kwargs['network_type'],
-                'input_dim': self.surrogate_model_kwargs['input_dim'],
-                'hyperparameters': self.best_hyperparams,
-            },
-            'model_class': self.model.__class__.__name__,
-            'embedding_kwargs': self.embedding_kwargs,
-            'surrogate_model_kwargs': self.surrogate_model_kwargs,
-        }
-        
-        torch.save(save_dict, save_path)
-        logging.info(f"Model saved to {save_path}")
-        logging.info(f"Model type: {self.surrogate_model_kwargs['model_type']}")
-        logging.info(f"Network architecture: {self.surrogate_model_kwargs['network_type']}")
-        logging.info(f"Model class: {self.model.__class__.__name__}")
-
-    
-    def _print_top_performers(self, objectives, top_n=5):
-
-        sorted_peptides = sorted(
-            objectives.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:top_n]
-        
-        logging.info(f"Top {top_n} peptides:")
-        logging.info(f"{'Peptide':<20} | {'Objective':<10} ")
-        logging.info("-" * 60)
-        
-        for peptide, obj_value in sorted_peptides:
-        
-            logging.info(f"{peptide:<20} | {obj_value:<10.4f} ")
-
-    def _compute_model_metrics(self, predictions_dict : dict, objectives : dict):
+    def _compute_model_metrics(self, predictions_dict: dict, objectives: dict):
         peptides = list(predictions_dict.keys())
-        actual = np.array([objectives[p]   for p in peptides])
+        actual = np.array([objectives[p] for p in peptides])
         predicted = np.array([predictions_dict[p][0] for p in peptides])
         r2 = r2_score(actual, predicted)
         mae = mean_absolute_error(actual, predicted)
 
         return {"r2": r2, "mae": mae}
-    
-    def _compute_split_indices(self, total_samples: int, n_validate: Union[int,float]) -> Optional[int]:
+
+    def _compute_split_indices(
+        self, total_samples: int, n_validate: Union[int, float]
+    ) -> Optional[int]:
         """Return num_validate or None if split is infeasible."""
         if isinstance(n_validate, float):
             num = int(total_samples * n_validate)
         else:
             num = n_validate
 
-        if num < self.MIN_VALIDATION_SAMPLES or (total_samples - num) < self.MIN_TRAINING_SAMPLES:
+        if (
+            num < self.MIN_VALIDATION_SAMPLES
+            or (total_samples - num) < self.MIN_TRAINING_SAMPLES
+        ):
             logging.warning(
                 f"Cannot split {total_samples} samples into "
                 f"{self.MIN_TRAINING_SAMPLES} train + "
@@ -803,18 +728,18 @@ class BoPep:
             epochs=self.best_hyperparams.get("epochs", 100),
             learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
             batch_size=self.best_hyperparams.get("batch_size", 16),
-            device=self.device
+            device=self.device,
         )
-
         train_pred = self.model.predict_dict(train_emb, device=self.device)
-        val_pred   = self.model.predict_dict(val_emb,   device=self.device)
-
+        val_pred = self.model.predict_dict(val_emb, device=self.device)
         train_m = self._compute_model_metrics(train_pred, train_obj)
-        val_m   = self._compute_model_metrics(val_pred,   val_obj)
+        val_m = self._compute_model_metrics(val_pred, val_obj)
 
         metrics = {
-            "train_r2": train_m["r2"], "train_mae": train_m["mae"],
-            "val_r2":   val_m["r2"],   "val_mae":   val_m["mae"],
+            "train_r2": train_m["r2"],
+            "train_mae": train_m["mae"],
+            "val_r2": val_m["r2"],
+            "val_mae": val_m["mae"],
         }
         logging.info(
             f"Loss {loss:.4f}, train R2 {train_m['r2']:.4f}, "
@@ -831,33 +756,42 @@ class BoPep:
             epochs=self.best_hyperparams.get("epochs", 100),
             learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
             batch_size=self.best_hyperparams.get("batch_size", 16),
-            device=self.device
+            device=self.device,
         )
         preds = self.model.predict_dict(embeddings, device=self.device)
         m = self._compute_model_metrics(preds, objectives)
         metrics = {"r2": m["r2"], "mae": m["mae"]}
         logging.info(f"Loss {loss:.4f}, R2 {m['r2']:.4f}, N={len(embeddings)}")
         return loss, metrics
-    
-    def _split_train_validation(self, docked_embeddings: dict, objectives: dict, num_validate: int):
+
+    def _split_train_validation(
+        self, docked_embeddings: dict, objectives: dict, num_validate: int
+    ):
         """
         Split the available data into training and validation sets.
         """
-        # Get all peptides that have been docked and scored
         peptides = list(objectives.keys())
-        
-        # Randomly select validation peptides
-        np.random.seed(42)  # For reproducibility
         val_indices = np.random.choice(len(peptides), num_validate, replace=False)
         val_peptides = [peptides[i] for i in val_indices]
         train_peptides = [p for p in peptides if p not in val_peptides]
-        
-        # Create training and validation dictionaries
         train_embeddings = {p: docked_embeddings[p] for p in train_peptides}
         train_objectives = {p: objectives[p] for p in train_peptides}
         val_embeddings = {p: docked_embeddings[p] for p in val_peptides}
         val_objectives = {p: objectives[p] for p in val_peptides}
-        
-        logging.info(f"Split data into {len(train_peptides)} training and {len(val_peptides)} validation samples")
-        
+
+        logging.info(
+            f"Split data into {len(train_peptides)} training and {len(val_peptides)} validation samples"
+        )
+
         return train_embeddings, train_objectives, val_embeddings, val_objectives
+
+    def _print_top_performers(self, objectives: dict, top_n: int = 10):
+        sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[
+            :top_n
+        ]
+        logging.info(f"Top {top_n} peptides:")
+        logging.info(f"{'Peptide':<20} | {'Objective':<10} ")
+        logging.info("-" * 60)
+        for peptide, obj_value in sorted_peptides:
+            logging.info(f"{peptide:<20} | {obj_value:<10.4f} ")
+
