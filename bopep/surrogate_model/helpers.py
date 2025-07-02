@@ -9,7 +9,7 @@ class DictHandler:
     """Utility class for handling dictionary inputs and outputs."""
 
     def prepare_data_from_dict(
-        self, embedding_dict: Dict[str, np.ndarray], scores_dict: Dict[str, float]
+        self, embedding_dict: Dict[str, np.ndarray], objective_dict: Dict[str, float]
     ):
         """
         Return (list_of_keys, X_torch, Y_torch) where:
@@ -21,9 +21,9 @@ class DictHandler:
         X_list = []
         Y_list = []
         for p in peptides:
-            if p in scores_dict:
+            if p in objective_dict:
                 X_list.append(embedding_dict[p])
-                Y_list.append(scores_dict[p])
+                Y_list.append(objective_dict[p])
         # Convert to numpy and then to torch
         # If all embeddings have shape (D,) -> final shape (N, D)
         # If all embeddings have shape (L, D) -> final shape (N, L, D)
@@ -56,7 +56,7 @@ class VariableLengthDataset(Dataset):
     """
 
     def __init__(
-        self, embedding_dict: Dict[str, np.ndarray], scores_dict: Dict[str, float]
+        self, embedding_dict: Dict[str, np.ndarray], objective_dict: Dict[str, float]
     ):
         super().__init__()
         self.peptides = list(embedding_dict.keys())
@@ -64,7 +64,7 @@ class VariableLengthDataset(Dataset):
             torch.tensor(embedding_dict[p], dtype=torch.float32) for p in self.peptides
         ]
         self.scores = [
-            torch.tensor(scores_dict[p], dtype=torch.float32) for p in self.peptides
+            torch.tensor(objective_dict[p], dtype=torch.float32) for p in self.peptides
         ]
 
     def __len__(self):
@@ -106,20 +106,17 @@ def variable_length_collate_fn(batch):
 
 class BasePredictionModel(torch.nn.Module):
     """
-    Base class for all prediction models with uncertainty.
-    Supports both MLP and BiLSTM. Now handles variable-length embeddings
-    via padding and optional packing in the forward pass.
-
-    Subclasses must implement the forward_predict(x, lengths) method.
+    Base class for all prediction models with optional validation-based early stopping.
     """
-
     def __init__(self):
         super().__init__()
 
     def fit_dict(
         self,
         embedding_dict: Dict[str, np.ndarray],
-        scores_dict: Dict[str, float],
+        objective_dict: Dict[str, float],
+        val_embedding_dict: Optional[Dict[str, np.ndarray]] = None,
+        val_objective_dict: Optional[Dict[str, float]] = None,
         epochs: int = 100,
         batch_size: int = 32,
         learning_rate: float = 1e-3,
@@ -129,27 +126,128 @@ class BasePredictionModel(torch.nn.Module):
         clip_grad_norm: float = 1.0,
     ) -> float:
         """
-        Train using dictionaries of embeddings and scores.
-        Implements early stopping. 
-        Uses the ADAM optimizer with ReduceLROnPlateau scheduler.
-        Returns the final epoch's average loss.
+        Train using dictionaries of embeddings and scores, with optional validation set.
+
+        If a validation set is provided (val_embedding_dict & val_objective_dict),
+        early stopping and LR scheduling are based on val_loss. Otherwise,
+        training-only early stopping is used on training loss.
         """
-        # Use the model's device if none specified
         if device is None:
             device = next(self.parameters()).device
-            
-        # Auto-determine the appropriate loss function if criterion is None
         if criterion is None:
             criterion = self._get_default_criterion()
-            
-        dataset = VariableLengthDataset(embedding_dict, scores_dict)
-        dataloader = DataLoader(
-            dataset,
+
+        # Build train loader
+        train_ds = VariableLengthDataset(embedding_dict, objective_dict)
+        train_loader = DataLoader(
+            train_ds,
             batch_size=batch_size,
             shuffle=True,
             collate_fn=variable_length_collate_fn,
         )
-        return self._fit_from_dataloader(dataloader, epochs, learning_rate, device, verbose, criterion=criterion, clip_grad_norm=clip_grad_norm)
+
+        # Build optional val loader
+        if val_embedding_dict is not None and val_objective_dict is not None:
+            val_ds = VariableLengthDataset(val_embedding_dict, val_objective_dict)
+            val_loader = DataLoader(
+                val_ds,
+                batch_size=batch_size,
+                shuffle=False,
+                collate_fn=variable_length_collate_fn,
+            )
+        else:
+            val_loader = None
+
+        return self._fit_with_optional_validation(
+            train_loader,
+            val_loader,
+            epochs=epochs,
+            learning_rate=learning_rate,
+            device=device,
+            verbose=verbose,
+            criterion=criterion,
+            clip_grad_norm=clip_grad_norm,
+        )
+
+    def _fit_with_optional_validation(
+        self,
+        train_loader: DataLoader,
+        val_loader: Optional[DataLoader],
+        epochs: int = 100,
+        learning_rate: float = 1e-3,
+        device: Optional[torch.device] = None,
+        verbose: bool = True,
+        criterion=None,
+        clip_grad_norm: Optional[float] = None,
+        patience: int = 10,
+        min_delta: float = 1e-4,
+    ) -> float:
+        if device is None:
+            device = next(self.parameters()).device
+        optimizer = torch.optim.AdamW(
+            self.parameters(), lr=learning_rate, weight_decay=1e-5
+        )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min"
+        )
+        if criterion is None:
+            criterion = self._get_default_criterion()
+
+        best_metric = float('inf')
+        best_state = None
+        counter = 0
+
+        for epoch in range(1, epochs + 1):
+            # --- Training ---
+            self.train()
+            train_loss = 0.0
+            for x, y, lengths in train_loader:
+                x, y = x.to(device), y.to(device)
+                optimizer.zero_grad()
+                loss = self._calculate_loss(x, y, lengths, criterion)
+                loss.backward()
+                if clip_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), clip_grad_norm)
+                optimizer.step()
+                train_loss += loss.item()
+            train_loss /= len(train_loader)
+
+            # --- Validation (optional) ---
+            if val_loader:
+                self.eval()
+                val_loss = 0.0
+                with torch.no_grad():
+                    for x, y, lengths in val_loader:
+                        x, y = x.to(device), y.to(device)
+                        mean_pred, _ = self.forward_predict(x, lengths)
+                        val_loss += criterion(mean_pred, y).item()
+                val_loss /= len(val_loader)
+                metric = val_loss
+            else:
+                metric = train_loss
+
+            scheduler.step(metric)
+            if verbose:
+                msg = f"Epoch {epoch}/{epochs} | train_loss: {train_loss:.4f}"
+                if val_loader:
+                    msg += f" | val_loss: {val_loss:.4f}"
+                print(msg)
+
+            # --- Early stopping ---
+            if metric < best_metric - min_delta:
+                best_metric = metric
+                best_state = {k: v.cpu() for k, v in self.state_dict().items()}
+                counter = 0
+            else:
+                counter += 1
+                if counter >= patience:
+                    if verbose:
+                        print(f"Early stopping at epoch {epoch}")
+                    break
+
+        if best_state is not None:
+            self.load_state_dict(best_state)
+        return best_metric
         
     def _get_default_criterion(self):
         """
@@ -220,81 +318,6 @@ class BasePredictionModel(torch.nn.Module):
             predictions_dict[pep] = (float(mean_array[i]), float(std_array[i]))
 
         return predictions_dict
-
-    def _fit_from_dataloader(
-        self,
-        dataloader: DataLoader,
-        epochs: int = 100,
-        learning_rate: float = 1e-3,
-        device: Optional[torch.device] = None,
-        verbose: bool = True,
-        patience: int = 10,  # Early stopping patience
-        min_delta: float = 0.0001,  # Minimum improvement threshold
-        criterion=None,
-        clip_grad_norm: Optional[float] = None
-    ) -> float:
-        """Internal method to train on a DataLoader. Returns the final epoch's average loss."""
-        # Use the model's device if none specified
-        if device is None:
-            device = next(self.parameters()).device
-            
-        self.train()
-        optimizer = torch.optim.AdamW(
-            self.parameters(), lr=learning_rate, weight_decay=1e-5
-        )
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min")
-        if criterion is None:
-            criterion = self._get_default_criterion()
-
-        # Early stopping variables
-        best_loss = float('inf')
-        best_model_state = None
-        counter = 0  # Count epochs without improvement
-
-        for epoch in range(epochs):
-            epoch_loss = 0.0
-            for batch_x, batch_y, lengths in dataloader:
-                # Move batch data to the correct device
-                batch_x = batch_x.to(device)
-                batch_y = batch_y.to(device)
-                
-                optimizer.zero_grad()
-                # Call model-specific loss calculation
-                loss = self._calculate_loss(batch_x, batch_y, lengths, criterion)
-                loss.backward()
-
-                if clip_grad_norm is not None:
-                    torch.nn.utils.clip_grad_norm_(self.parameters(), clip_grad_norm)
-
-                optimizer.step()
-                epoch_loss += loss.item()
-
-            epoch_loss /= len(dataloader)
-            scheduler.step(epoch_loss)
-            if verbose:
-                print(f"Epoch {epoch+1}/{epochs} | Loss: {epoch_loss:.4f}")
-            
-            # Check if this is the best loss so far
-            if epoch_loss < best_loss - min_delta:
-                best_loss = epoch_loss
-                best_model_state = self.state_dict().copy()
-                counter = 0
-            else:
-                counter += 1
-            
-            # Early stopping check
-            if counter >= patience:
-                if verbose:
-                    print(f"Early stopping triggered after {epoch+1} epochs")
-                if best_model_state is not None:
-                    self.load_state_dict(best_model_state)
-                return best_loss
-
-        # Restore best model if training completed without early stopping
-        if best_model_state is not None:
-            self.load_state_dict(best_model_state)
-        
-        return best_loss
     
     def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
         """

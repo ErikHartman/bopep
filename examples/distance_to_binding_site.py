@@ -1,11 +1,14 @@
 import os
 import glob
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from bopep.scoring.is_peptide_in_binding_site import (
     is_peptide_near_binding_site_by_centroid,
     is_peptide_in_binding_site_pdb_file,
 )
+
+sns.set_context("paper")
 
 binding_site_residue_indices = [22, 23, 24, 42, 43, 44, 45, 46, 47, 48, 49, 
                                 50, 51, 52, 53, 69, 70, 71, 72,
@@ -66,10 +69,15 @@ for i, entry in enumerate(files, start=1):
 
 # plot
 plt.figure(figsize=(4,4))
-plt.scatter(n_contacts, distances, s=6)
-plt.xlabel("Number of Contact Residues")
-plt.ylabel("Centroid-to-Centroid Distance (Å)")
-plt.title("Centroid Distance vs Number of Contacts")
+sns.jointplot(
+    x=n_contacts,
+    y=distances,
+    kind="scatter",
+    marginal_kws=dict(bins=30, fill=True),
+    s=15
+)
+plt.xlabel("Number of contact residues")
+plt.ylabel("Centroid-to-centroid distance (Å)")
 
 
 plt.tight_layout()

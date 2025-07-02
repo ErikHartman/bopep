@@ -15,11 +15,11 @@ def centroid(coords: np.ndarray) -> np.ndarray:
 
 def is_peptide_near_binding_site_by_centroid(
     pdb_file: str,
-    binding_site_residue_indices: list[int],  # now: zero-based RELATIVE indices
+    binding_site_residue_indices: list[int],
     receptor_chain: str = "A",
     peptide_chain: str   = "B",
     cutoff: float        = 10.0,
-) -> bool:
+) -> Tuple[float, bool]:
     """
     Compute centroids of the binding-site atoms and the peptide atoms,
     and return True if their separation is <= cutoff (Å).
@@ -69,7 +69,7 @@ def get_binding_site(
     receptor_chain: str = "A",
     peptide_chain: str = "B",
     threshold: float = 5.0,
-) -> tuple:
+) -> Tuple[list, list, list, list]:
     """
     Identifies interacting residues in the binding site for both receptor and peptide chains.
 
@@ -212,9 +212,7 @@ def n_peptides_in_binding_site_colab_dir(
         _, is_in_binding_site = is_peptide_in_binding_site_pdb_file(
             pdb_file, binding_site_residue_indices, threshold=threshold, required_n_contact_residues=required_n_contact_residues
         )
-        if is_in_binding_site(
-            pdb_file, binding_site_residue_indices, threshold=threshold
-        ):
+        if is_in_binding_site:
             matches_within_threshold += 1
             if "rank_001" in pdb_file:
                 top_pdb_is_in_binding_site = True
@@ -224,7 +222,7 @@ def n_peptides_in_binding_site_colab_dir(
 
 def smooth_peptide_binding_site_score(
     pdb_file: str,
-    binding_site_residue_indices: list[int],  # zero-based, relative indices
+    binding_site_residue_indices: list[int],
     threshold: float = 10.0,
     alpha: float = 0.5,
 ) -> float:
@@ -280,7 +278,9 @@ if __name__ == "__main__":
     bsri = [22, 23, 24, 42, 43, 44, 45, 46, 47, 48, 49, 
             50, 51, 52, 53, 69, 70, 71, 72,
                 73, 74, 75, 76, 77, 81, 82, 83, 84, 85, 86, 87, 
-                88, 89, 90, 104, 105, 106, 107, 108, 109, 110]
+                88, 89, 90, 104, 105, 106, 107, 108, 109, 110] 
+    
+    bsri = [residue - 19 for residue in bsri]  # convert to zero-based indices
     
     print(is_peptide_in_binding_site_pdb_file(docked_pdb, binding_site_residue_indices=bsri, threshold=5.0, required_n_contact_residues=5))
 

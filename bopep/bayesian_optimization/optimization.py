@@ -109,7 +109,7 @@ class BoPep:
                 Each dict should have 'acquisition' and 'iterations' keys.
             batch_size: Number of peptides to dock in each iteration.
             target_structure_path: Path to the target structure PDB file.
-            embeddings: Dictionary of peptide embeddings {peptide: embedding}.
+            embeddings: Dictionary of peptide embeddings {peptide: embedding}. Required for fresh initialization.
             num_initial: Number of initial peptides to dock and score.
             n_validate: Number of peptides to use for validation.
                 If None, no validation is performed.
@@ -196,6 +196,7 @@ class BoPep:
 
 
         self.best_hyperparams = None
+
         if initial_peptides is None:
             initial_peptides = self.selector.select_initial_peptides(
                 embeddings=self.embeddings, num_initial=num_initial, random_state=42
@@ -550,6 +551,10 @@ class BoPep:
 
         new_scores = {}
         scores_to_include = self.scoring_kwargs.get("scores_to_include", [])
+        binding_site_distance_threshold = self.scoring_kwargs.get("binding_site_distance_threshold", 5)
+        required_n_contact_residues = self.scoring_kwargs.get(
+            "required_n_contact_residues", 5
+        )
 
         if not scores_to_include:
             raise ValueError(
@@ -562,6 +567,8 @@ class BoPep:
             input_type="colab_dir",
             binding_site_residue_indices=self.binding_site_residue_indices,
             n_jobs=self.scoring_kwargs.get("n_jobs", 12),
+            binding_site_distance_threshold=binding_site_distance_threshold,
+            required_n_contact_residues=required_n_contact_residues,
         )
 
         return new_scores
@@ -739,7 +746,9 @@ class BoPep:
         """Train on train set, evaluate on both splits."""
         loss = self.model.fit_dict(
             embedding_dict=train_emb,
-            scores_dict=train_obj,
+            objective_dict=train_obj,
+            val_embedding_dict=val_emb,
+            val_objective_dict=val_obj,
             epochs=self.best_hyperparams.get("epochs", 100),
             learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
             batch_size=self.best_hyperparams.get("batch_size", 16),
@@ -767,7 +776,7 @@ class BoPep:
         """Train on the entire dataset (no validation)."""
         loss = self.model.fit_dict(
             embedding_dict=embeddings,
-            scores_dict=objectives,
+            objective_dict=objectives,
             epochs=self.best_hyperparams.get("epochs", 100),
             learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
             batch_size=self.best_hyperparams.get("batch_size", 16),

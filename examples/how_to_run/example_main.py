@@ -6,8 +6,7 @@ It includes configuration for all major components and demonstrates advanced fea
 """
 
 import os
-import pandas as pd
-from bopep import BoPep, benchmark_objective
+from bopep import BoPep, benchmark_objective, Embedder
 
 # ----- Configuration -----
 
@@ -90,8 +89,12 @@ SCORES_TO_INCLUDE = [
 
 # ----- Main Execution -----
 if __name__ == "__main__":
-    print("Starting BoPep optimization...")
     
+
+    embedder = Embedder()
+    embeddings = embedder.embed_esm(PEPTIDES, average=True, model_path="...", batch_size=128) # Example ESM model path
+    reduced_embeddings = embedder.reduce_embeddings_autoencoder(embeddings, latent_dim=128) # Reduce to 128 dimensions using a VAE
+
     # Initialize BoPep with desired configuration
     bo = BoPep(
         surrogate_model_kwargs={
@@ -112,7 +115,7 @@ if __name__ == "__main__":
     
     # Run the optimization process
     bo.optimize(
-        peptides=PEPTIDES,
+        embeddings=reduced_embeddings,
         target_structure_path=TARGET_STRUCTURE_PATH,
         schedule=BO_SCHEDULE,
         initial_peptides=INITIAL_PEPTIDES,

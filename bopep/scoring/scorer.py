@@ -1,5 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
+import traceback
 from typing import Optional
 from bopep.scoring.pep_prot_distance import distance_score_from_pdb
 from bopep.scoring.rosetta_scorer import RosettaScorer
@@ -56,7 +57,7 @@ class Scorer:
         colab_dir: str = None,
         binding_site_residue_indices: list = None,
         peptide_sequence: str = None,
-        required_n_contact_residues: Optional[int] = 2,
+        required_n_contact_residues: Optional[int] = 5,
         binding_site_distance_threshold: Optional[int] = 5.0,
     ) -> dict:
         """
@@ -244,9 +245,11 @@ class Scorer:
                     n_peptides_in_binding_site_colab_dir(
                         colab_dir,
                         binding_site_residue_indices=binding_site_residue_indices,
+                        threshold=binding_site_distance_threshold,
+                        required_n_contact_residues= required_n_contact_residues,
                     )
                 )
-                scores["in_binding_site"] = bool(top_1_in_binding_site)  # boolean
+                scores["in_binding_site"] = top_1_in_binding_site  # boolean
                 scores["fraction_in_binding_site"] = fraction_in_binding_site  # float
 
             elif pdb_file:
@@ -258,6 +261,7 @@ class Scorer:
                         required_n_contact_residues=required_n_contact_residues,
                     )
                 scores["in_binding_site"] = in_binding_site
+                scores["n_contacts"] = n_contacts  # number of contact residues
             
         if "in_binding_site_score" in scores_to_include:
             if not binding_site_residue_indices:
@@ -321,6 +325,8 @@ class Scorer:
         inputs: list,
         input_type: str = "pdb_file",
         binding_site_residue_indices: list = None,
+        binding_site_distance_threshold: float = None,
+        required_n_contact_residues: Optional[int] = None,
         n_jobs: int = None,
     ) -> dict:
         """
@@ -361,6 +367,8 @@ class Scorer:
                     input_val,
                     input_type,
                     binding_site_residue_indices,
+                    required_n_contact_residues,
+                    binding_site_distance_threshold,
                 )
                 for input_val in inputs
             ]
@@ -387,16 +395,19 @@ class Scorer:
                         input_value,
                         input_type,
                         binding_site_residue_indices,
+                        required_n_contact_residues,
+                        binding_site_distance_threshold,
                     )
                     all_scores.update(result)
                 except Exception as e:
                     print(f"Error processing input {input_value}: {e}")
+                    traceback.print_exc()
         print(f"Scored {len(all_scores)} inputs.")
         return all_scores
 
     @staticmethod
     def _process_single_input(
-        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices
+        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices, required_n_contact_residues, binding_site_distance_threshold
     ):
         """
         Process a single input for scoring.
@@ -408,12 +419,16 @@ class Scorer:
                 scores_to_include,
                 pdb_file=input_value,
                 binding_site_residue_indices=binding_site_residue_indices,
+                required_n_contact_residues=required_n_contact_residues,
+                binding_site_distance_threshold=binding_site_distance_threshold,
             )
         elif input_type == "colab_dir":
             return scorer.score(
                 scores_to_include,
                 colab_dir=input_value,
                 binding_site_residue_indices=binding_site_residue_indices,
+                required_n_contact_residues=required_n_contact_residues,
+                binding_site_distance_threshold=binding_site_distance_threshold,
             )
         elif input_type == "peptide_sequence":
             return scorer.score(scores_to_include, peptide_sequence=input_value)
