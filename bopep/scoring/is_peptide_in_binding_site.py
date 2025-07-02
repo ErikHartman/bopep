@@ -1,3 +1,4 @@
+from typing import Tuple
 from Bio.PDB import PDBParser
 import numpy as np
 from scipy.spatial import cKDTree
@@ -61,7 +62,7 @@ def is_peptide_near_binding_site_by_centroid(
     pep_cent = centroid(pep_coords)
     dist     = np.linalg.norm(bs_cent - pep_cent)
 
-    return dist <= cutoff
+    return dist, dist <= cutoff
 
 def get_binding_site(
     pdb_file: str,
@@ -106,7 +107,8 @@ def get_binding_site(
             residue.id[1]
             for residue in receptor_chain.get_residues()
             if residue.id[0] == " "
-        )
+        ) # This will be 1 since AlphaFold PDBs start at 1
+
         min_peptide_residue_id = min(
             residue.id[1]
             for residue in peptide_chain.get_residues()
@@ -116,8 +118,6 @@ def get_binding_site(
         # Get all atoms from both chains
         receptor_atoms = list(receptor_chain.get_atoms())
         peptide_atoms = list(peptide_chain.get_atoms())
-
-        
 
         if not receptor_atoms or not peptide_atoms:
             return [], [], [], []
@@ -131,12 +131,12 @@ def get_binding_site(
         peptide_binding_site_residue_indices = set()
 
         # For each receptor atom, find peptide atoms within threshold
-        for i, atom in enumerate(receptor_atoms):
+        for i, atom in enumerate(receptor_atoms): # This will be 1-indexed
             indices = peptide_tree.query_ball_point(atom.coord, threshold)
             if indices:
                 receptor_binding_site_residue_indices.add(
-                    atom.get_parent().id[1] - min_receptor_residue_id
-                )
+                    atom.get_parent().id[1]
+                ) # E4
                 for idx in indices:
                     peptide_binding_site_residue_indices.add(
                         peptide_atoms[idx].get_parent().id[1] - min_peptide_residue_id
@@ -148,7 +148,8 @@ def get_binding_site(
             for residue in receptor_chain
             if residue.id[1] in receptor_binding_site_residue_indices
             for atom in residue.get_atoms()
-        ]
+        ]            
+
 
         return (
             receptor_binding_site_atoms,
@@ -164,7 +165,7 @@ def get_binding_site(
 
 def is_peptide_in_binding_site_pdb_file(
     pdb_file: str, binding_site_residue_indices: list = None, threshold: float = 5.0, required_n_contact_residues: int = 2
-) -> bool:
+) -> Tuple[int, bool]:
     """
     Determines if the peptide in the given PDB content is within the threshold distance
     to the receptor's binding site.
@@ -179,15 +180,17 @@ def is_peptide_in_binding_site_pdb_file(
         for receptor_index in receptor_binding_site_indices:
             if receptor_index in binding_site_residue_indices:
                 nr_contact_residues += 1
-                if nr_contact_residues >= required_n_contact_residues:
-                    return True
 
-    return False
+    if nr_contact_residues >= required_n_contact_residues:
+        return nr_contact_residues, True
+
+    else:
+        return nr_contact_residues, False
 
 
 def n_peptides_in_binding_site_colab_dir(
-    colab_dir: str, binding_site_residue_indices: list, threshold=5.0
-) -> tuple:
+    colab_dir: str, binding_site_residue_indices: list, threshold=5.0, required_n_contact_residues: int = 2
+) -> Tuple[float, bool]:
     """
     Evaluates if the docked peptide is within a given proximity to the receptor binding site
     across multiple models. Only considers files with pattern 'rank_00X' in their name.
@@ -206,14 +209,17 @@ def n_peptides_in_binding_site_colab_dir(
     ]
 
     for pdb_file in pdb_files:
-        if is_peptide_in_binding_site_pdb_file(
+        _, is_in_binding_site = is_peptide_in_binding_site_pdb_file(
+            pdb_file, binding_site_residue_indices, threshold=threshold, required_n_contact_residues=required_n_contact_residues
+        )
+        if is_in_binding_site(
             pdb_file, binding_site_residue_indices, threshold=threshold
         ):
             matches_within_threshold += 1
             if "rank_001" in pdb_file:
                 top_pdb_is_in_binding_site = True
 
-    return top_pdb_is_in_binding_site, matches_within_threshold / len(pdb_files)
+    return matches_within_threshold / len(pdb_files), top_pdb_is_in_binding_site
 
 
 def smooth_peptide_binding_site_score(
@@ -269,18 +275,18 @@ def smooth_peptide_binding_site_score(
 
 
 if __name__ == "__main__":
-    docked_pdb = "/srv/data1/er8813ha/docking-peptide/output_v2/run_cd14/docked_pdbs/4glf_VHLTPEEKSAVTALWG/4glf_VHLTPEEKSAVTALWG_relaxed_rank_001_alphafold2_multimer_v3_model_2_seed_000.pdb"
+    docked_pdb = "/srv/data1/er8813ha/docking-peptide/output_v2/run_cd14/docked_pdbs/4glf_VHLTPEEKSAVTALWG/4glf_VHLTPEEKSAVTALWG_relaxed_rank_001_alphafold2_multimer_v3_model_2_seed_000.pdb" #"/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/docked_pdbs/4glf_LKNPDDPDMVD/4glf_LKNPDDPDMVD_relaxed_rank_001_alphafold2_multimer_v3_model_3_seed_000.pdb" #
 
-    get_binding_site(
-        docked_pdb,
-        receptor_chain="A",
-        peptide_chain="B",
-        threshold=5.0,
-    )
+    bsri = [22, 23, 24, 42, 43, 44, 45, 46, 47, 48, 49, 
+            50, 51, 52, 53, 69, 70, 71, 72,
+                73, 74, 75, 76, 77, 81, 82, 83, 84, 85, 86, 87, 
+                88, 89, 90, 104, 105, 106, 107, 108, 109, 110]
+    
+    print(is_peptide_in_binding_site_pdb_file(docked_pdb, binding_site_residue_indices=bsri, threshold=5.0, required_n_contact_residues=5))
 
     centroid_in_binding_site = is_peptide_near_binding_site_by_centroid(
         docked_pdb,
-        binding_site_residue_indices=[3,22],
+        binding_site_residue_indices=bsri,
         receptor_chain="A",
         peptide_chain="B",
         cutoff=20.0,
