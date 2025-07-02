@@ -63,7 +63,7 @@ class BoPep:
         """
         _validate_dependencies()
 
-        self.surrogate_model_kwargs = surrogate_model_kwargs
+        self.surrogate_model_kwargs = surrogate_model_kwargs or {}
         self.objective_function = objective_function
         self.objective_function_kwargs = objective_function_kwargs or {}
         self.docker_kwargs = docker_kwargs or {}
@@ -517,7 +517,11 @@ class BoPep:
                 self._print_top_performers(
                     objectives=objectives,
                 )
-
+                if not not_docked_peptides:
+                    logging.info("All peptides docked, stopping early")
+                    break
+                
+        logging.info(f"Optimization completed at global iteration {global_iteration}")
         # Loop is over
         final_objectives = self.scores_to_objective.create_objective(
             scores, self.objective_function, **self.objective_function_kwargs
@@ -532,11 +536,9 @@ class BoPep:
         if final_new_objectives:
             self.logger.log_objectives(
                 final_new_objectives,
-                iteration=global_iteration + 1,
+                iteration=global_iteration,
                 acquisition_name=acquisition,
             )
-
-        # Here we'll want to save the checkpoint and model
         self._save_checkpoint(global_iteration)
 
     def _score_batch(self, docked_dirs: list):
@@ -635,6 +637,19 @@ class BoPep:
         Create model based on hyperparameters and self.surrogate_model_kwargs.
         Sets self.model to the created model.
         """
+
+        if hasattr(self, "model"):
+            try:
+                # move to CPU (optional but helps)
+                self.model.cpu()
+                # delete the reference
+                del self.model
+                # clear any cached GPU memory
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception as e:
+                logging.warning(f"Couldn't clean up previous model: {e}")
+
         model_type = self.surrogate_model_kwargs["model_type"]
         network_type = self.surrogate_model_kwargs["network_type"]
         input_dim = self.surrogate_model_kwargs["input_dim"]

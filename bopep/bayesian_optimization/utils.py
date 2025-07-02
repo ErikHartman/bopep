@@ -250,8 +250,14 @@ def _check_binding_site_residue_indices(
         print("-" * 60)
 
     print("=" * 60)
+    
+
+    # increment binding site residues by 1 since alphafold pdbs start at 1
+    binding_site_residue_indices = [
+        residue + 1 for residue in binding_site_residue_indices
+    ]
     print(
-        f"The internally stored binding site residues are: {binding_site_residue_indices}"
+        f"The internally stored binding site residues are: {binding_site_residue_indices} (1-indexed)"
     )
     return binding_site_residue_indices
 

@@ -8,6 +8,7 @@ from bopep.embedding.dim_red_vae import reduce_dimension_vae
 import os
 import pickle
 
+
 class Embedder:
     def __init__(self):
         pass

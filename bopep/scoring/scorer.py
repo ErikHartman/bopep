@@ -251,14 +251,14 @@ class Scorer:
 
             elif pdb_file:
                 # if a single pdb, we will have a true/false if it is in binding site
-                scores["in_binding_site"] = bool(
-                    is_peptide_in_binding_site_pdb_file(
+                n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
                         pdb_file,
                         binding_site_residue_indices=binding_site_residue_indices,
                         threshold=binding_site_distance_threshold,
                         required_n_contact_residues=required_n_contact_residues,
                     )
-                )  # boolean
+                scores["in_binding_site"] = in_binding_site
+            
         if "in_binding_site_score" in scores_to_include:
             if not binding_site_residue_indices:
                 raise ValueError(
