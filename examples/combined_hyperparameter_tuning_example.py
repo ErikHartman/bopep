@@ -159,7 +159,7 @@ def save_individual_plot(model_name, x_train, y_train, x_test, means, stds):
 
 
 
-def create_and_train_model(model_type, best_params, embedding_dict, scores_dict):
+def create_and_train_model(model_type, best_params, embedding_dict, objective_dict):
     """
     Create and train a model with the best parameters from the tuner.
     """
@@ -202,7 +202,7 @@ def create_and_train_model(model_type, best_params, embedding_dict, scores_dict)
     model.to(device)
     model.fit_dict(
         embedding_dict=embedding_dict,
-        scores_dict=scores_dict,
+        objective_dict=objective_dict,
         epochs=epochs,
         learning_rate=learning_rate,
         device=device,
@@ -231,12 +231,12 @@ def main():
     
     # Create embedding and scores dictionaries for tuning
     embedding_dict = {}
-    scores_dict = {}
+    objective_dict = {}
     for i in range(len(x_train_scaled)):
         key = f"sample_{i}"
         # Store as single feature arrays
         embedding_dict[key] = np.array([x_train_scaled[i]], dtype=np.float32)
-        scores_dict[key] = float(y_train_scaled[i])
+        objective_dict[key] = float(y_train_scaled[i])
     
     # Set up plot
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
@@ -255,7 +255,7 @@ def main():
         best_params, study = tune_hyperparams(
             model_type=model_type,
             embedding_dict=embedding_dict,
-            scores_dict=scores_dict,
+            objective_dict=objective_dict,
             n_trials=10,
             n_splits=3,
             random_state=SEED,
@@ -273,7 +273,7 @@ def main():
             model_type=model_type,
             best_params= best_params, # {"uncertainty_param": fixed_params[model_type], "epochs":500}, #
             embedding_dict=embedding_dict,
-            scores_dict=scores_dict
+            objective_dict=objective_dict
         )
         
         # Plot results

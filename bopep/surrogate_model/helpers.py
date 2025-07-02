@@ -190,8 +190,6 @@ class BasePredictionModel(torch.nn.Module):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min"
         )
-        if criterion is None:
-            criterion = self._get_default_criterion()
 
         best_metric = float('inf')
         best_state = None
@@ -219,12 +217,13 @@ class BasePredictionModel(torch.nn.Module):
                 with torch.no_grad():
                     for x, y, lengths in val_loader:
                         x, y = x.to(device), y.to(device)
-                        mean_pred, _ = self.forward_predict(x, lengths)
-                        val_loss += criterion(mean_pred, y).item()
+                        loss = self._calculate_loss(x, y, lengths, criterion)
+                        val_loss += loss.item()
                 val_loss /= len(val_loader)
                 metric = val_loss
             else:
                 metric = train_loss
+
 
             scheduler.step(metric)
             if verbose:

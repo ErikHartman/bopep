@@ -85,9 +85,10 @@ def train_and_evaluate_model(
     embedding_dict: Dict[str, np.ndarray],
     scores_dict: Dict[str, float],
     test_ratio: float = 0.2,
+    val_ratio: float = 0.2,  # Add validation ratio parameter
 ):
     """
-    Train and evaluate a surrogate model.
+    Train and evaluate a surrogate model with validation set.
 
     Args:
         model_type: Type of uncertainty model ('mc_dropout', 'ensemble', 'evidential')
@@ -95,20 +96,34 @@ def train_and_evaluate_model(
         embedding_dict: Dictionary of peptide embeddings
         scores_dict: Dictionary of peptide scores
         test_ratio: Fraction of data to use for testing
+        val_ratio: Fraction of data to use for validation
     """
-    # Split data into train and test
+    # Split data into train/val/test
     peptides = list(embedding_dict.keys())
     np.random.shuffle(peptides)
 
-    split_idx = int(len(peptides) * (1 - test_ratio))
-    train_peptides = peptides[:split_idx]
-    test_peptides = peptides[split_idx:]
+    # Calculate split indices
+    n_total = len(peptides)
+    n_test = int(n_total * test_ratio)
+    n_val = int(n_total * val_ratio)
+    n_train = n_total - n_test - n_val
 
+    # Split peptides
+    test_peptides = peptides[:n_test]
+    val_peptides = peptides[n_test:n_test + n_val]
+    train_peptides = peptides[n_test + n_val:]
+
+    # Create dictionaries for each split
     train_embedding_dict = {p: embedding_dict[p] for p in train_peptides}
     train_scores_dict = {p: scores_dict[p] for p in train_peptides}
 
+    val_embedding_dict = {p: embedding_dict[p] for p in val_peptides}
+    val_scores_dict = {p: scores_dict[p] for p in val_peptides}
+
     test_embedding_dict = {p: embedding_dict[p] for p in test_peptides}
     test_scores_dict = {p: scores_dict[p] for p in test_peptides}
+
+    logger.info(f"Data split: {n_train} train, {n_val} val, {n_test} test")
 
     # Get input dimension
     sample_embedding = next(iter(embedding_dict.values()))
@@ -137,7 +152,6 @@ def train_and_evaluate_model(
         model = DeepEvidentialRegression(
             network_type=network_type, evidential_regularization=0.1, **common_params
         )
-
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
@@ -146,28 +160,29 @@ def train_and_evaluate_model(
     logger.info(f"Created {model_type.upper()} model with {network_type} network")
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # Set device for training
+    # Train model with validation set
     try:
-        # Train model with device specified
         start_time = time.time()
         train_loss = model.fit_dict(
             embedding_dict=train_embedding_dict,
-            scores_dict=train_scores_dict,
+            objective_dict=train_scores_dict,
+            val_embedding_dict=val_embedding_dict,  # Add validation data
+            val_objective_dict=val_scores_dict,     # Add validation data
             epochs=50,
             batch_size=32,
             learning_rate=0.001,
-            device=device,  # Pass device to fit_dict
+            device=device,
         )
         training_time = time.time() - start_time
         logger.info(
             f"Training completed in {training_time:.2f} seconds with final loss: {train_loss:.4f}"
         )
 
-        # Evaluate model with device specified
+        # Evaluate model on test set
         predictions = model.predict_dict(
             embedding_dict=test_embedding_dict,
             batch_size=32,
-            device=device,  # Pass device to predict_dict
+            device=device,
         )
     except TypeError:
         # Fallback if the model doesn't accept device parameter
@@ -177,7 +192,9 @@ def train_and_evaluate_model(
         start_time = time.time()
         train_loss = model.fit_dict(
             embedding_dict=train_embedding_dict,
-            scores_dict=train_scores_dict,
+            objective_dict=train_scores_dict,
+            val_embedding_dict=val_embedding_dict,  # Add validation data
+            val_objective_dict=val_scores_dict,     # Add validation data
             epochs=50,
             batch_size=32,
             learning_rate=0.001,
@@ -190,7 +207,7 @@ def train_and_evaluate_model(
         # Evaluate model
         predictions = model.predict_dict(test_embedding_dict)
 
-    # Calculate metrics
+    # Calculate metrics on test set
     true_values = np.array([test_scores_dict[p] for p in test_peptides])
     pred_means = np.array([predictions[p][0] for p in test_peptides])
     pred_stds = np.array([predictions[p][1] for p in test_peptides])

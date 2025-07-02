@@ -202,7 +202,7 @@ class HyperparameterTuner:
         self,
         model: "BasePredictionModel",
         train_embed_dict: Dict[str, np.ndarray],
-        train_scores_dict: Dict[str, float],
+        train_objective_dict: Dict[str, float],
         epochs: int,
         learning_rate: float,
         batch_size: int = 64,
@@ -213,7 +213,7 @@ class HyperparameterTuner:
         """
         model.fit_dict(
             embedding_dict=train_embed_dict,
-            scores_dict=train_scores_dict,
+            objective_dict=train_objective_dict,
             epochs=epochs,
             batch_size=batch_size,
             learning_rate=learning_rate,
@@ -272,10 +272,10 @@ class HyperparameterTuner:
         cv_scores = []
         for train_idx, val_idx in kf.split(indices):
             train_embed_dict = {keys[i]: self.embedding_dict[keys[i]] for i in train_idx}
-            train_scores_dict = {keys[i]: self.scores_dict[keys[i]] for i in train_idx}
+            train_objective_dict = {keys[i]: self.objective_dict[keys[i]] for i in train_idx}
 
             val_embed_dict = {keys[i]: self.embedding_dict[keys[i]] for i in val_idx}
-            val_scores_dict = {keys[i]: self.scores_dict[keys[i]] for i in val_idx}
+            val_objective_dict = {keys[i]: self.objective_dict[keys[i]] for i in val_idx}
 
             model = self._create_model(
                 param_value=param_value,
@@ -288,13 +288,13 @@ class HyperparameterTuner:
             self._fit_model(
                 model,
                 train_embed_dict,
-                train_scores_dict,
+                train_objective_dict,
                 epochs,
                 learning_rate,
                 batch_size=batch_size,
             )
 
-            val_dataset = VariableLengthDataset(val_embed_dict, val_scores_dict)
+            val_dataset = VariableLengthDataset(val_embed_dict, val_objective_dict)
             val_loader = DataLoader(
                 val_dataset,
                 batch_size=batch_size,
@@ -326,7 +326,7 @@ class HyperparameterTuner:
     def tune(
         self,
         embedding_dict: Dict[str, np.ndarray],
-        scores_dict: Dict[str, float],
+        objective_dict: Dict[str, float],
         previous_study: Optional[optuna.study.Study] = None,
     ) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
         """
@@ -335,14 +335,14 @@ class HyperparameterTuner:
         
         Args:
             embedding_dict: Dictionary of embeddings
-            scores_dict: Dictionary of scores
+            objective_dict: Dictionary of scores
             previous_study: Optional previous Optuna study to warm-start from
             
         Returns:
             Tuple of (best_params, study) where study can be reused in future calls
         """
         self.embedding_dict = embedding_dict
-        self.scores_dict = scores_dict
+        self.objective_dict = objective_dict
 
         # Create a new study without inheriting old trials
         study = optuna.create_study(direction="minimize")
@@ -372,7 +372,7 @@ class HyperparameterTuner:
 def tune_hyperparams(
     model_type: Literal["mve", "deep_evidential", "nn_ensemble", "mc_dropout"],
     embedding_dict: Dict[str, np.ndarray],
-    scores_dict: Dict[str, float],
+    objective_dict: Dict[str, float],
     network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
     n_splits: int = 3,
     n_trials: int = 20,
@@ -414,6 +414,6 @@ def tune_hyperparams(
         target_fxn=target_fxn,
     )
 
-    best_params, study = tuner.tune(embedding_dict, scores_dict, previous_study)
+    best_params, study = tuner.tune(embedding_dict, objective_dict, previous_study)
     return best_params, study
 

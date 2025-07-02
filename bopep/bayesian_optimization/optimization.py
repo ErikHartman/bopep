@@ -596,7 +596,7 @@ class BoPep:
                         f"Peptide '{pep}' has shape {emb.shape}."
                     )
 
-    def _optimize_hyperparameters(self, iteration: int, embeddings: dict, scores: dict):
+    def _optimize_hyperparameters(self, iteration: int, embeddings: dict, objectives: dict):
         """
         Use the Hyperparameter Tuner to optimize all params.
         Sets self.best_hyperparams to the best found hyperparameters.
@@ -620,7 +620,7 @@ class BoPep:
         self.best_hyperparams, self.previous_study = tune_hyperparams(
             model_type=self.surrogate_model_kwargs["model_type"],
             embedding_dict=embeddings,
-            scores_dict=scores,
+            objective_dict=objectives,
             network_type=self.surrogate_model_kwargs["network_type"],
             n_trials=n_trials,
             n_splits=n_splits,
