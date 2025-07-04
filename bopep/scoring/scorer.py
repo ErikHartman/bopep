@@ -241,16 +241,17 @@ class Scorer:
                 )
             if colab_dir:
                 # If colab_dir, we will get the fraction that are in the binding site ([0 to 1]) and a true false
-                top_1_in_binding_site, fraction_in_binding_site = (
+                fraction_in_binding_site, top_pdb_in_binding_site, n_contacts = (
                     n_peptides_in_binding_site_colab_dir(
                         colab_dir,
-                        binding_site_residue_indices=binding_site_residue_indices,
+                        binding_site_residue_indices = binding_site_residue_indices,
                         threshold=binding_site_distance_threshold,
-                        required_n_contact_residues= required_n_contact_residues,
+                        required_n_contact_residues = required_n_contact_residues,
                     )
                 )
-                scores["in_binding_site"] = top_1_in_binding_site  # boolean
-                scores["fraction_in_binding_site"] = fraction_in_binding_site  # float
+                scores["in_binding_site"] = top_pdb_in_binding_site
+                scores["fraction_in_binding_site"] = fraction_in_binding_site
+                scores["n_contacts"] = n_contacts  # number of contact residues
 
             elif pdb_file:
                 # if a single pdb, we will have a true/false if it is in binding site

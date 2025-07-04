@@ -8,16 +8,8 @@ Distance-based loss function for protein-peptide interactions.
 
 def distance_score_from_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B", threshold=8.0):
     """
-    Convenience function that:
-      1) Parses the PDB to get coordinates/bfactors
-      2) Computes the distance-based score
-      3) Normalizes by plDDT
-
-    :param pdb_file_path: Path to the PDB file
-    :param receptor_chain: The chain ID(s) for the receptor
-    :param peptide_chain: The chain ID(s) for the peptide
-    :param threshold: Distance threshold in ångström for considering interface alpha carbons
-    :return: Distance-based score (float)
+    1) Parses the PDB to get coordinates/bfactors
+    2) Computes the distance-based score
     """
     receptor_coords, peptide_coords = parse_pdb(
         pdb_file_path, receptor_chain=receptor_chain, peptide_chain=peptide_chain
