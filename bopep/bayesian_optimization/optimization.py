@@ -98,6 +98,7 @@ class BoPep:
         n_validate: Optional[Union[float, int]] = None,
         binding_site_residue_indices: Optional[List[int]] = None,
         initial_peptides: Optional[List[str]] = None,
+        initial_method: str = "kmeans",
         assume_zero_indexed: Optional[bool] = None,
         checkpoint_path: Optional[str] = None,
     ):
@@ -124,7 +125,7 @@ class BoPep:
 
         self.checkpoint_path = checkpoint_path
         self.logger = Logger(log_dir=self.log_dir, overwrite_logs=self.overwrite_logs, continue_from_checkpoint=continue_from_checkpoint)
-
+        self.initial_method = initial_method
         self.embeddings = embeddings
         self.target_structure_path = target_structure_path
         self.schedule = schedule
@@ -199,7 +200,7 @@ class BoPep:
 
         if initial_peptides is None:
             initial_peptides = self.selector.select_initial_peptides(
-                embeddings=self.embeddings, num_initial=num_initial, random_state=42
+                embeddings=self.embeddings, num_initial=num_initial, random_state=42, method=self.initial_method
             )
 
         logging.info("Docking initial peptides")
