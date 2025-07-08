@@ -179,7 +179,7 @@ class BasePredictionModel(torch.nn.Module):
         verbose: bool = True,
         criterion=None,
         clip_grad_norm: Optional[float] = None,
-        patience: int = 10,
+        patience: int = 20,
         min_delta: float = 1e-4,
     ) -> float:
         if device is None:
@@ -226,8 +226,9 @@ class BasePredictionModel(torch.nn.Module):
 
 
             scheduler.step(metric)
+            temp_lr = scheduler.get_last_lr()[0]
             if verbose:
-                msg = f"Epoch {epoch}/{epochs} | train_loss: {train_loss:.4f}"
+                msg = f"Epoch {epoch}/{epochs} | train_loss: {train_loss:.4f} | lr: {temp_lr:.6f}"
                 if val_loader:
                     msg += f" | val_loss: {val_loss:.4f}"
                 print(msg)

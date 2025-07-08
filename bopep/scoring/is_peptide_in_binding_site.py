@@ -190,7 +190,7 @@ def is_peptide_in_binding_site_pdb_file(
 
 def n_peptides_in_binding_site_colab_dir(
     colab_dir: str, binding_site_residue_indices: list, threshold=5.0, required_n_contact_residues: int = 2
-) -> Tuple[float, bool]:
+) -> Tuple[float, bool, int]:
     """
     Evaluates if the docked peptide is within a given proximity to the receptor binding site
     across multiple models. Only considers files with pattern 'rank_00X' in their name.
@@ -207,17 +207,18 @@ def n_peptides_in_binding_site_colab_dir(
         for file in colab_files
         if re.search(r"unrelaxed_rank_00\d+.*\.pdb$", file, re.IGNORECASE)
     ]
-
+    n_contacts = 0
     for pdb_file in pdb_files:
-        _, is_in_binding_site = is_peptide_in_binding_site_pdb_file(
+        n_contacts_temp, is_in_binding_site = is_peptide_in_binding_site_pdb_file(
             pdb_file, binding_site_residue_indices, threshold=threshold, required_n_contact_residues=required_n_contact_residues
         )
         if is_in_binding_site:
             matches_within_threshold += 1
             if "rank_001" in pdb_file:
                 top_pdb_is_in_binding_site = True
+                n_contacts = n_contacts_temp
 
-    return matches_within_threshold / len(pdb_files), top_pdb_is_in_binding_site
+    return matches_within_threshold / len(pdb_files), top_pdb_is_in_binding_site, n_contacts
 
 
 def smooth_peptide_binding_site_score(
