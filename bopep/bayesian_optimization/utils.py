@@ -24,17 +24,12 @@ def check_starting_index_in_pdb(pdb_file: str) -> int:
     try:
         with open(pdb_file, 'r') as f:
             for line in f:
-                # Look for ATOM records which define coordinates for standard residues
                 if line.startswith("ATOM  "):
-                    # Extract residue number from columns 23-26 (0-indexed)
                     residue_number = line[22:26].strip()
-                    
-                    # Try to parse as integer
                     try:
                         return int(residue_number)
                     except ValueError:
                         continue         
-        # If we get here, we didn't find any valid ATOM records with residue numbers
         return None
         
     except FileNotFoundError:
@@ -191,8 +186,23 @@ def _check_binding_site_residue_indices(
     starting_index = check_starting_index_in_pdb(target_structure_path)
     print("PDB chain starts at residue", starting_index)
     protein_sequence = extract_sequence_from_pdb(target_structure_path)
+    
     if binding_site_residue_indices is None:
         return None
+
+    # Handle both list and dict formats
+    is_dict_format = isinstance(binding_site_residue_indices, dict)
+    
+    if is_dict_format:
+        print(f"Found peptide-specific binding sites for {len(binding_site_residue_indices)} peptides")
+        # Get all unique residue indices for validation and visualization
+        all_residues = set()
+        for residue_list in binding_site_residue_indices.values():
+            all_residues.update(residue_list)
+        residues_to_check = sorted(list(all_residues))
+    else:
+        print("Using same binding site for all peptides")
+        residues_to_check = binding_site_residue_indices
 
     if starting_index != 0:
         if assume_zero_indexed is None:
@@ -211,21 +221,36 @@ def _check_binding_site_residue_indices(
                     f"\n\nStarting index is {starting_index}. Assuming binding site residues are 1-indexed."
                 )
                 answer = "n"
+        
         if answer == "y":
-            binding_site_residue_indices = [
-                residue - starting_index for residue in binding_site_residue_indices
-            ]
+            if is_dict_format:
+                # Adjust all residue lists in the dict
+                binding_site_residue_indices = {
+                    peptide: [residue - starting_index for residue in residue_list]
+                    for peptide, residue_list in binding_site_residue_indices.items()
+                }
+                residues_to_check = [residue - starting_index for residue in residues_to_check]
+            else:
+                binding_site_residue_indices = [
+                    residue - starting_index for residue in binding_site_residue_indices
+                ]
+                residues_to_check = binding_site_residue_indices
 
     print("\nBinding Site Residues Visualization:")
     print("=" * 60)
     print(f"Full sequence length: {len(protein_sequence)}")
-    print(f"Selected binding site residues: {binding_site_residue_indices}")
+    if isinstance(binding_site_residue_indices, dict):
+        print(f"Peptide-specific binding sites:")
+        for peptide, residues in binding_site_residue_indices.items():
+            print(f"  {peptide}: {residues}")
+    else:
+        print(f"Selected binding site residues: {binding_site_residue_indices}")
     print("-" * 60)
 
-    binding_site_residue_indices = sorted(binding_site_residue_indices)
+    residues_to_check = sorted(residues_to_check)
     context_size = 5
 
-    for residue_idx in binding_site_residue_indices:
+    for residue_idx in residues_to_check:
         if residue_idx < 0 or residue_idx >= len(protein_sequence):
             print(f"Warning: Residue index {residue_idx} out of range")
             continue
@@ -253,12 +278,21 @@ def _check_binding_site_residue_indices(
     
 
     # increment binding site residues by 1 since alphafold pdbs start at 1
-    binding_site_residue_indices = [
-        residue + 1 for residue in binding_site_residue_indices
-    ]
-    print(
-        f"The internally stored binding site residues are: {binding_site_residue_indices} (1-indexed)"
-    )
+    if isinstance(binding_site_residue_indices, dict):
+        binding_site_residue_indices = {
+            peptide: [residue + 1 for residue in residue_list]
+            for peptide, residue_list in binding_site_residue_indices.items()
+        }
+        print("The internally stored peptide-specific binding site residues are (1-indexed):")
+        for peptide, residues in binding_site_residue_indices.items():
+            print(f"  {peptide}: {residues}")
+    else:
+        binding_site_residue_indices = [
+            residue + 1 for residue in binding_site_residue_indices
+        ]
+        print(
+            f"The internally stored binding site residues are: {binding_site_residue_indices} (1-indexed)"
+        )
     return binding_site_residue_indices
 
 if __name__ == "__main__":

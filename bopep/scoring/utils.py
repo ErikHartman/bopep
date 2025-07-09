@@ -4,6 +4,21 @@ import os
 import json
 import re
 
+def find_relaxed_pdb_file(colab_dir):
+    """
+    Finds the relaxed rank_001 PDB file in the colab directory.
+    
+    :param colab_dir: Path to the colab directory containing PDB files.
+    
+    :return: Path to the first matching PDB file or None if not found.
+    """
+    pdb_pattern = re.compile(r".*_relaxed_rank_001_.*\.pdb")
+    for root, _, files in os.walk(colab_dir):
+        for file in files:
+            if pdb_pattern.search(file):
+                return os.path.join(root, file)
+    return None
+
 
 def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
     """

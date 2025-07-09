@@ -2,63 +2,48 @@ import numpy as np
 from Bio.SVDSuperimposer import SVDSuperimposer
 from bopep.scoring.utils import parse_pdb
 
+def rmsd(coords1, coords2):
+    return np.sqrt(np.mean(np.sum((coords1 - coords2) ** 2, axis=1)))
 
-def count_agreeing_pdbs(
-    pdb_files, receptor_chain="A", peptide_chain="B", rmsd_threshold: float = 3.0
+def align_and_compute_rmsd(
+    ref_pdb_file, pdb_file, alignment_chain="A", peptide_chain="B"
 ):
     """
     Given multiple PDBs, align each structure's receptor (chain A by default)
-    to the receptor of the *first* PDB, then check if their peptide (chain B by default)
-    is in the 'same site' as the reference's peptide by measuring peptide RMSD.
+    and compute a distance matrix of peptide RMSDs between all pairs.
 
-    :param pdb_files: list of paths to PDB files
-    :param receptor_chain: chain ID for the receptor (defaults to 'A')
-    :param peptide_chain: chain ID for the peptide (defaults to 'B')
-    :param rmsd_threshold: maximum RMSD (Å) for considering them the same binding site
-    :return: (int) number of PDBs whose peptides bind the same site as the reference
+    Each structure's receptor is aligned to the first PDB's receptor, then
+    peptide RMSD is computed between all pairs of aligned structures.
     """
-    if not pdb_files:
-        print("No PDB files provided.")
-        return 0
-
-    ref_pdb = pdb_files[0]
-    (ref_rec_coords, _, ref_pep_coords, _) = parse_pdb(
-        ref_pdb, receptor_chain, peptide_chain
+    (ref_rec_coords, ref_pep_coords) = parse_pdb(
+        ref_pdb_file, alignment_chain, peptide_chain
     )
-    ref_rec_coords = np.array(ref_rec_coords)  # shape (N, 3)
-    ref_pep_coords = np.array(ref_pep_coords)  # shape (M, 3)
+    ref_rec_coords = np.array(ref_rec_coords)
+    ref_pep_coords = np.array(ref_pep_coords)
 
-    def rmsd(coords1, coords2):
-        return np.sqrt(np.mean(np.sum((coords1 - coords2) ** 2, axis=1)))
-
-    agreeing_count = 0
+    aligned_peptide_coords = [ref_pep_coords]
+    
     sup = SVDSuperimposer()
 
-    for pdb_file in pdb_files:
-        # Parse
-        (new_rec_coords, _, new_pep_coords, _) = parse_pdb(
-            pdb_file, receptor_chain, peptide_chain
-        )
-        new_rec_coords = np.array(new_rec_coords)
-        new_pep_coords = np.array(new_pep_coords)
 
-        sup.set(ref_rec_coords, new_rec_coords)
-        sup.run()
-        rot, tran = sup.get_rotran()
+    (new_rec_coords, new_pep_coords) = parse_pdb(
+        pdb_file, alignment_chain, peptide_chain
+    )
+    new_rec_coords = np.array(new_rec_coords)
+    new_pep_coords = np.array(new_pep_coords)
+    sup.set(ref_rec_coords, new_rec_coords)
+    sup.run()
+    rot, tran = sup.get_rotran()
 
-        # Apply transform to new peptide coords
-        new_pep_coords_aligned = np.dot(new_pep_coords, rot) + tran
+    new_pep_coords_aligned = np.dot(new_pep_coords, rot) + tran
+    aligned_peptide_coords.append(new_pep_coords_aligned)
 
-        # Compute peptide RMSD vs. reference
-        current_rmsd = rmsd(ref_pep_coords, new_pep_coords_aligned)
-
-        if current_rmsd <= rmsd_threshold:
-            agreeing_count += 1
-
-    return agreeing_count
+    distance = rmsd(ref_pep_coords, new_pep_coords_aligned)
+    return distance
 
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
-    agreeing_count = count_agreeing_pdbs([pdb_file_path, pdb_file_path])
-    print(f"Nr overlapping models: {pdb_file_path}: {agreeing_count}")
+    distance_matrix = align_and_compute_rmsd(ref_pdb_file=pdb_file_path, pdb_file=pdb_file_path)
+    print(f"Distance matrix for {pdb_file_path}:")
+    print(distance_matrix)

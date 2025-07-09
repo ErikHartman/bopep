@@ -10,6 +10,7 @@ from bopep.scoring.is_peptide_in_binding_site import (
     n_peptides_in_binding_site_colab_dir,
     smooth_peptide_binding_site_score,
 )
+from bopep.scoring.model_overlap import align_and_compute_rmsd
 from bopep.scoring.peptide_properties import PeptideProperties
 from bopep.docking.utils import extract_sequence_from_pdb
 import os
@@ -47,6 +48,7 @@ class Scorer:
             "peptide_pae",
             "iptm",
             "in_binding_site_score",
+            "template_rmsd"
         ]
         pass
 
@@ -59,6 +61,9 @@ class Scorer:
         peptide_sequence: str = None,
         required_n_contact_residues: Optional[int] = 5,
         binding_site_distance_threshold: Optional[int] = 5.0,
+        template_pdb: Optional[str] = None,
+        alignment_chain: str = "A",
+        peptide_chain: str = "B",
     ) -> dict:
         """
         Calculate and return selected scores for a peptide.
@@ -108,6 +113,7 @@ class Scorer:
             - "uHrel": Relative hydrophobic moment (measure of amphipathicity)
             - "peptide_plddt": pLDDT score from ColabFold (requires colab_dir)
             - "peptide_pae": Predicted Aligned Error (PAE) from ColabFold (requires colab_dir)
+            - "template_rmsd": RMSD to a template PDB (if provided, requires template_pdb)
 
         pdb_file : str, optional
             Path to a PDB file for structure-based scores)
@@ -277,6 +283,18 @@ class Scorer:
             )
             scores["in_binding_site_score"] = in_binding_site_score
 
+        if "template_rmsd" in scores_to_include:
+            if not template_pdb:
+                raise ValueError(
+                    "WARNING: template_pdb is required for template_rmsd score"
+                )
+            if not pdb_file:
+                raise ValueError(
+                    "WARNING: pdb_file or colab_dir is required for template_rmsd score"
+                )
+            rmsd = align_and_compute_rmsd(ref_pdb_file=template_pdb, pdb_file=pdb_file, alignment_chain=alignment_chain, peptide_chain=peptide_chain)
+            scores["template_rmsd"] = rmsd
+
         # Peptide property scores can be calculated with either peptide_sequence or pdb_file
         if "peptide_properties" in scores_to_include:
             peptide_properties_dict = peptide_properties.get_all_properties()
@@ -328,6 +346,7 @@ class Scorer:
         binding_site_residue_indices: list = None,
         binding_site_distance_threshold: float = None,
         required_n_contact_residues: Optional[int] = None,
+        template_pdbs: dict = None,
         n_jobs: int = None,
     ) -> dict:
         """
@@ -343,6 +362,9 @@ class Scorer:
             Type of input: "pdb_file", "colab_dir", or "peptide_sequence"
         binding_site_residue_indices : list, optional
             List of residue indices defining the binding site
+        template_pdbs : dict, optional
+            Dictionary mapping peptide sequences to template PDB file paths for RMSD calculation.
+            Only used if "template_rmsd" is in scores_to_include.
         n_jobs : int, optional
             Number of parallel jobs to run. Default is None (use all available cores)
 
@@ -370,6 +392,7 @@ class Scorer:
                     binding_site_residue_indices,
                     required_n_contact_residues,
                     binding_site_distance_threshold,
+                    template_pdbs,
                 )
                 for input_val in inputs
             ]
@@ -398,6 +421,7 @@ class Scorer:
                         binding_site_residue_indices,
                         required_n_contact_residues,
                         binding_site_distance_threshold,
+                        template_pdbs,
                     )
                     all_scores.update(result)
                 except Exception as e:
@@ -408,13 +432,43 @@ class Scorer:
 
     @staticmethod
     def _process_single_input(
-        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices, required_n_contact_residues, binding_site_distance_threshold
+        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices, required_n_contact_residues, binding_site_distance_threshold, template_pdbs
     ):
         """
         Process a single input for scoring.
 
         This is a static method to allow pickling for multiprocessing.
         """
+        # Extract template_pdb if template_rmsd scoring is requested
+        template_pdb = None
+        if "template_rmsd" in scores_to_include and template_pdbs:
+            try:
+                if input_type == "colab_dir":
+                    pdb_pattern = re.compile(r".*_relaxed_rank_001_.*\.pdb")
+                    pdb_files = [f for f in os.listdir(input_value) if pdb_pattern.search(f)]
+                    if pdb_files:
+                        relaxed_pdb = os.path.join(input_value, pdb_files[0])
+                        peptide_sequence = extract_sequence_from_pdb(relaxed_pdb, chain_id="B")
+                    else:
+                        print(f"WARNING: No relaxed rank_001 PDB found in {input_value}")
+                        peptide_sequence = None
+                elif input_type == "pdb_file":
+                    peptide_sequence = extract_sequence_from_pdb(input_value, chain_id="B")
+                else:  
+                    raise ValueError(
+                        f"WARNING: Unsupported input_type: {input_type}. Must be 'pdb_file' or 'colab_dir' when using template_rmsd scoring."
+                    )
+                
+                # Lookup template for this peptide
+                if peptide_sequence:
+                    template_pdb = template_pdbs.get(peptide_sequence)
+                    if template_pdb and not os.path.exists(template_pdb):
+                        print(f"WARNING: Template PDB file not found: {template_pdb}")
+                        template_pdb = None
+                        
+            except Exception as e:
+                print(f"WARNING: Error extracting peptide sequence for template lookup: {e}")
+
         if input_type == "pdb_file":
             return scorer.score(
                 scores_to_include,
@@ -422,6 +476,7 @@ class Scorer:
                 binding_site_residue_indices=binding_site_residue_indices,
                 required_n_contact_residues=required_n_contact_residues,
                 binding_site_distance_threshold=binding_site_distance_threshold,
+                template_pdb=template_pdb,
             )
         elif input_type == "colab_dir":
             return scorer.score(
@@ -430,17 +485,20 @@ class Scorer:
                 binding_site_residue_indices=binding_site_residue_indices,
                 required_n_contact_residues=required_n_contact_residues,
                 binding_site_distance_threshold=binding_site_distance_threshold,
+                template_pdb=template_pdb,
             )
         elif input_type == "peptide_sequence":
-            return scorer.score(scores_to_include, peptide_sequence=input_value)
+            return scorer.score(
+                scores_to_include, 
+                peptide_sequence=input_value,
+            )
 
-    def print_scores(self):
-        for score in self.available_scores:
-            print(score)
+    def get_available_scores(self):
+        return self.available_scores
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
-    colab_dir_path = "/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/docked_pdbs/4glf_LKNPDDPDMVD"#"/srv/data1/general/immunopeptides_data/databases/benchmark_data/pdbs_erik/docked_peptides/1ydi_VGWEQLLTTIARTINEVENQILTR"
+    colab_dir_path = "/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/docked_pdbs/4glf_LKNPDDPDMVD" #"/srv/data1/general/immunopeptides_data/databases/benchmark_data/pdbs_erik/docked_peptides/1ydi_VGWEQLLTTIARTINEVENQILTR"
     scorer = Scorer()
 
     # Single score example
