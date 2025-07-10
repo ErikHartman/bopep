@@ -182,3 +182,28 @@ def _rebuild_logs_from_csvs(self, checkpoint_path: Optional[Path] = None):
     self.docked_peptides = set(self.scores.keys())
     self.not_docked_peptides = set(self.embeddings.keys()) - self.docked_peptides
 
+
+def _validate_checkpoint(checkpoint_path: Path):
+    """Validate checkpoint integrity."""
+    required_files = [
+        "checkpoint_metadata.json",
+        "embeddings.pkl",
+        "model.pt",
+        "results/scores.csv",
+        "results/objectives.csv"
+    ]
+    optional_files = [
+        "results/model_losses.csv",
+        "results/predictions.csv.gz",
+        "results/acquisition.csv.gz",
+        "results/hyperparameters.csv"
+    ]
+    
+    missing = [f for f in required_files if not (checkpoint_path / f).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Checkpoint incomplete. Missing required files: {missing}"
+        )
+    missing_optional = [f for f in optional_files if not (checkpoint_path / f).exists()]
+    if missing_optional:
+        logging.warning(f"Checkpoint missing optional files: {missing_optional}")

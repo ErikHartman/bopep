@@ -1,2 +1,0 @@
-timestamp,iteration,model_type,network_type,avg_score,batch_size,epochs,hidden_dim,hidden_dims,learning_rate,network_type,num_layers,uncertainty_param
-2025-07-10 14:33:17,0,deep_evidential,mlp,0.2405667006969452,32,192,,"[80, 54, 130]",0.0005625145293840871,mlp,3,0.8169510449608925
