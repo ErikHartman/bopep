@@ -2,8 +2,7 @@ import csv
 import json
 from pathlib import Path
 import pickle
-import datetime
-import shutil
+
 from typing import Callable, List, Optional, Dict, Any, Union
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
@@ -16,13 +15,14 @@ from bopep.surrogate_model import (
 )
 from bopep.logging.logger import Logger
 from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
-from bopep.bayesian_optimization.utils import (_check_binding_site_residue_indices, _save_model, _validate_checkpoint, _validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
+from bopep.bayesian_optimization.utils import (_check_binding_site_residue_indices, _validate_checkpoint, _validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
+from bopep.bayesian_optimization.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs
+from bopep.bayesian_optimization.train_validate_utils import _compute_model_metrics, _compute_split_indices, _train_and_validate, _split_train_validation, _train_on_all
 from bopep.bayesian_optimization.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
 import torch
 import logging
-import numpy as np
-from sklearn.metrics import r2_score, mean_absolute_error
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -90,6 +90,21 @@ class BoPep:
         self.MIN_VALIDATION_SAMPLES = min_validation_samples
         self.MIN_TRAINING_SAMPLES = min_training_samples
         self.checkpoint_interval = checkpoint_interval
+        
+        # checkpointing functions
+        self._next_checkpoint_dir = _next_checkpoint_dir.__get__(self, BoPep)
+        self._save_checkpoint = _save_checkpoint.__get__(self, BoPep)
+        self._copy_logs_to_checkpoint = _copy_logs_to_checkpoint.__get__(self, BoPep)
+        self._setup_checkpoint_dir = _setup_checkpoint_dir.__get__(self, BoPep)
+        self._rebuild_logs_from_csvs = _rebuild_logs_from_csvs.__get__(self, BoPep)
+
+        # training and validation functions
+        self._compute_model_metrics = _compute_model_metrics.__get__(self, BoPep)
+        self._compute_split_indices = _compute_split_indices.__get__(self, BoPep)
+        self._train_and_validate = _train_and_validate.__get__(self, BoPep)
+        self._split_train_validation = _split_train_validation.__get__(self, BoPep)
+        self._train_on_all = _train_on_all.__get__(self, BoPep)
+
 
     def optimize(
         self,
@@ -235,109 +250,6 @@ class BoPep:
         logging.info("Creating initial checkpoint")
         self._save_checkpoint(0, force_embeddings=True)
 
-    def _next_checkpoint_dir(self) -> Path:
-        """Find the next available checkpoint_{i} directory under self.log_dir."""
-        base = Path(self.log_dir)
-        existing = [d for d in base.iterdir() if d.is_dir() and d.name.startswith("checkpoint_")]
-        # Extract suffix numbers
-        idxs = []
-        for d in existing:
-            try:
-                idxs.append(int(d.name.split("_", 1)[1]))
-            except (IndexError, ValueError):
-                continue
-        next_idx = max(idxs) + 1 if idxs else 0
-        return base / f"checkpoint_{next_idx}"
-
-    def _save_checkpoint(self, global_iteration: int, force_embeddings: bool = False):
-        """
-        Save checkpoint with incremental updates.
-        
-        Args:
-            global_iteration: Current iteration number
-            force_embeddings: If True, force saving embeddings even if already saved
-        """
-        checkpoint_dir = self.checkpoint_dir
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save model and metadata (always updated)
-        _save_model(str(checkpoint_dir / "model.pt"), model=self.model, surrogate_model_kwargs=self.surrogate_model_kwargs, best_hyperparams=self.best_hyperparams)
-        meta_json_path = checkpoint_dir / "metadata.json"
-        
-        meta = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "global_iteration": global_iteration,
-            "surrogate_model_kwargs": self.surrogate_model_kwargs,
-            "target_structure_path": self.target_structure_path,
-            "binding_site_residue_indices": self.binding_site_residue_indices,
-            "docker_kwargs": self.docker_kwargs,
-            "hpo_kwargs": self.hpo_kwargs,
-            "objective_function_kwargs": self.objective_function_kwargs,
-            "scoring_kwargs": self.scoring_kwargs,
-            "num_docked_peptides": len(self.docked_peptides),
-            "num_remaining_peptides": len(self.not_docked_peptides),
-        }
-
-        if self.checkpoint_path:
-            meta["checkpoint_path"] = self.checkpoint_path
-        
-        with open(meta_json_path, 'w') as f:
-            json.dump(meta, f, indent=2, default=str)
-        
-        # Save embeddings only if not saved yet or forced
-        embeddings_path = checkpoint_dir / "embeddings.pkl"
-        if not self.embeddings_saved or force_embeddings:
-            if hasattr(self, 'checkpoint_path') and self.checkpoint_path and not force_embeddings:
-                # Copy embeddings from source checkpoint instead of rewriting
-                source_embeddings = Path(self.checkpoint_path) / "embeddings.pkl"
-                if source_embeddings.exists():
-                    shutil.copy2(source_embeddings, embeddings_path)
-                    logging.debug("Copied embeddings from source checkpoint")
-                else:
-                    # Fallback to saving current embeddings
-                    with open(embeddings_path, "wb") as f:
-                        pickle.dump(self.embeddings, f)
-                    logging.debug("Saved embeddings (fallback)")
-            else:
-                # Fresh run - save embeddings
-                with open(embeddings_path, "wb") as f:
-                    pickle.dump(self.embeddings, f)
-                logging.debug("Saved embeddings")
-            
-            self.embeddings_saved = True
-
-        # Always update log files
-        self._copy_logs_to_checkpoint(checkpoint_dir)
-        logging.info("=" * 60)
-        logging.info(f"Saved checkpoint at iteration {global_iteration} to {checkpoint_dir}")
-        logging.info(f"Checkpoint metadata saved to {meta_json_path}")
-        logging.info("=" * 60)
-
-    def _copy_logs_to_checkpoint(self, checkpoint_dir: Path):
-        """Copy all log files to the checkpoint directory."""
-        
-        results_dir = checkpoint_dir / "results"
-        results_dir.mkdir(parents=True, exist_ok=True)
-
-        log_files = [
-            "scores.csv",
-            "objectives.csv", 
-            "model_losses.csv",
-            "predictions.csv.gz",
-            "acquisition.csv.gz",
-            "hyperparameters.csv"
-        ]
-        
-        logs_copied = 0
-        for log_file in log_files:
-            source_path = Path(self.log_dir) / log_file
-            if source_path.exists():
-                dest_path = results_dir / log_file
-                shutil.copy2(source_path, dest_path)
-                logs_copied += 1
-                logging.debug(f"Copied {log_file} to checkpoint")
-        
-        logging.info(f"Copied {logs_copied} log files to checkpoint")
 
     def _continue_init(self) -> int:
         checkpoint_path = Path(self.checkpoint_path)
@@ -401,47 +313,6 @@ class BoPep:
                     f"{len(self.docked_peptides)} peptides docked")
         
         return last_iteration
-
-    
-    def _rebuild_logs_from_csvs(self, checkpoint_path: Optional[Path] = None):
-        """
-        Rebuild the optimization state from CSV log files.
-        
-        Args:
-            checkpoint_path: If provided, read logs from checkpoint/results/ directory
-                           Otherwise read from current log_dir
-        """
-        if checkpoint_path:
-            # Read from checkpoint results directory
-            log_base = checkpoint_path / "results"
-        else:
-            # Read from current log directory
-            log_base = Path(self.log_dir)
-            
-        scores_path = log_base / "scores.csv"
-        self.scores = {}
-        with open(scores_path, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                pep = row["peptide"]
-                score_cols = [c for c in reader.fieldnames
-                              if c not in ("timestamp", "iteration", "peptide", "phase")]
-                sc = {
-                    col: float(row[col]) if row[col] not in (None, "") else None
-                    for col in score_cols
-                }
-                self.scores[pep] = sc
-
-        obj_path = log_base / "objectives.csv"
-        self.all_logged_objectives = set()
-        with open(obj_path, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                self.all_logged_objectives.add(row["peptide"])
-
-        self.docked_peptides = set(self.scores.keys())
-        self.not_docked_peptides = set(self.embeddings.keys()) - self.docked_peptides
-
 
     def _run_phase_loop(
         self,
@@ -805,104 +676,6 @@ class BoPep:
         )
         self.model.to(self.device)
 
-    def _compute_model_metrics(self, predictions_dict: dict, objectives: dict):
-        peptides = list(predictions_dict.keys())
-        actual = np.array([objectives[p] for p in peptides])
-        predicted = np.array([predictions_dict[p][0] for p in peptides])
-        r2 = r2_score(actual, predicted)
-        mae = mean_absolute_error(actual, predicted)
-
-        return {"r2": r2, "mae": mae}
-
-    def _compute_split_indices(
-        self, total_samples: int, n_validate: Union[int, float]
-    ) -> Optional[int]:
-        """Return num_validate or None if split is infeasible."""
-        if isinstance(n_validate, float):
-            num = int(total_samples * n_validate)
-        else:
-            num = n_validate
-
-        if (
-            num < self.MIN_VALIDATION_SAMPLES
-            or (total_samples - num) < self.MIN_TRAINING_SAMPLES
-        ):
-            logging.warning(
-                f"Cannot split {total_samples} samples into "
-                f"{self.MIN_TRAINING_SAMPLES} train + "
-                f"{self.MIN_VALIDATION_SAMPLES} val; training on all."
-            )
-            return None
-
-        return num
-
-    def _train_and_validate(self, train_emb, train_obj, val_emb, val_obj):
-        """Train on train set, evaluate on both splits."""
-        loss = self.model.fit_dict(
-            embedding_dict=train_emb,
-            objective_dict=train_obj,
-            val_embedding_dict=val_emb,
-            val_objective_dict=val_obj,
-            epochs=self.best_hyperparams.get("epochs", 100),
-            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
-            batch_size=self.best_hyperparams.get("batch_size", 16),
-            device=self.device,
-        )
-        train_pred = self.model.predict_dict(train_emb, device=self.device)
-        val_pred = self.model.predict_dict(val_emb, device=self.device)
-        train_m = self._compute_model_metrics(train_pred, train_obj)
-        val_m = self._compute_model_metrics(val_pred, val_obj)
-
-        metrics = {
-            "train_r2": train_m["r2"],
-            "train_mae": train_m["mae"],
-            "val_r2": val_m["r2"],
-            "val_mae": val_m["mae"],
-        }
-        logging.info(
-            f"Loss {loss:.4f}, train R2 {train_m['r2']:.4f}, "
-            f"val R2 {val_m['r2']:.4f} "
-            f"(N_train={len(train_emb)}, N_val={len(val_emb)})"
-        )
-        return loss, metrics
-
-    def _train_on_all(self, embeddings, objectives):
-        """Train on the entire dataset (no validation)."""
-        loss = self.model.fit_dict(
-            embedding_dict=embeddings,
-            objective_dict=objectives,
-            epochs=self.best_hyperparams.get("epochs", 100),
-            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
-            batch_size=self.best_hyperparams.get("batch_size", 16),
-            device=self.device,
-        )
-        preds = self.model.predict_dict(embeddings, device=self.device)
-        m = self._compute_model_metrics(preds, objectives)
-        metrics = {"r2": m["r2"], "mae": m["mae"]}
-        logging.info(f"Loss {loss:.4f}, R2 {m['r2']:.4f}, N={len(embeddings)}")
-        return loss, metrics
-
-    def _split_train_validation(
-        self, docked_embeddings: dict, objectives: dict, num_validate: int
-    ):
-        """
-        Split the available data into training and validation sets.
-        """
-        peptides = list(objectives.keys())
-        val_indices = np.random.choice(len(peptides), num_validate, replace=False)
-        val_peptides = [peptides[i] for i in val_indices]
-        train_peptides = [p for p in peptides if p not in val_peptides]
-        train_embeddings = {p: docked_embeddings[p] for p in train_peptides}
-        train_objectives = {p: objectives[p] for p in train_peptides}
-        val_embeddings = {p: docked_embeddings[p] for p in val_peptides}
-        val_objectives = {p: objectives[p] for p in val_peptides}
-
-        logging.info(
-            f"Split data into {len(train_peptides)} training and {len(val_peptides)} validation samples"
-        )
-
-        return train_embeddings, train_objectives, val_embeddings, val_objectives
-
     def _print_top_performers(self, objectives: dict, top_n: int = 10):
         sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[
             :top_n
@@ -912,35 +685,4 @@ class BoPep:
         logging.info("-" * 60)
         for peptide, obj_value in sorted_peptides:
             logging.info(f"{peptide:<20} | {obj_value:<10.4f} ")
-
-    def _setup_checkpoint_dir(self, continue_from_checkpoint: bool):
-        """
-        Setup the checkpoint directory for this run.
-        
-        For fresh runs: Use checkpoint_0
-        For continued runs: Increment the checkpoint number (e.g., checkpoint_0 -> checkpoint_1)
-        """
-        base = Path(self.log_dir)
-        
-        if not continue_from_checkpoint:
-            self.checkpoint_dir = base / "checkpoint_0"
-            self.embeddings_saved = False
-        else:
-            checkpoint_path = Path(self.checkpoint_path)
-            checkpoint_name = checkpoint_path.name
-            
-            if checkpoint_name.startswith("checkpoint_"):
-                try:
-                    current_num = int(checkpoint_name.split("_", 1)[1])
-                    next_num = current_num + 1
-                    self.checkpoint_dir = base / f"checkpoint_{next_num}"
-                except (IndexError, ValueError):
-                    self.checkpoint_dir = self._next_checkpoint_dir()
-            else:
-                self.checkpoint_dir = self._next_checkpoint_dir()
-            self.embeddings_saved = False 
-        
-        logging.info(f"Checkpoints for this run will be saved to: {self.checkpoint_dir}")
-
-
 
