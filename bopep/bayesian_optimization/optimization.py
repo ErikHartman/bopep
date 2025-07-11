@@ -2,8 +2,7 @@ import csv
 import json
 from pathlib import Path
 import pickle
-import datetime
-import shutil
+
 from typing import Callable, List, Optional, Dict, Any, Union
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
@@ -16,13 +15,15 @@ from bopep.surrogate_model import (
 )
 from bopep.logging.logger import Logger
 from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
-from bopep.bayesian_optimization.utils import (_check_binding_site_residue_indices, _save_model, _validate_checkpoint, _validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
+from bopep.bayesian_optimization.utils import (_validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
+from bopep.bayesian_optimization.pdb_utils import _check_binding_site_residue_indices
+from bopep.bayesian_optimization.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
+from bopep.bayesian_optimization.train_validate_utils import _compute_model_metrics, _compute_split_indices, _train_and_validate, _split_train_validation, _train_on_all
 from bopep.bayesian_optimization.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
 import torch
 import logging
-import numpy as np
-from sklearn.metrics import r2_score, mean_absolute_error
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -44,6 +45,7 @@ class BoPep:
         custom_scorer: Optional[Callable] = None,
         min_validation_samples: int = 3,
         min_training_samples: int = 10,
+        checkpoint_interval: int = 5,
     ):
         """
         Initialize the BoPep optimizer with various configuration options.
@@ -60,6 +62,7 @@ class BoPep:
             custom_scorer: Optional function that takes docking directories and
                     returns score dictionaries. If provided, this will be used
                     instead of the default scorer.
+            checkpoint_interval: Number of iterations between automatic checkpoints (default: 5)
         """
         _validate_dependencies()
 
@@ -87,6 +90,22 @@ class BoPep:
 
         self.MIN_VALIDATION_SAMPLES = min_validation_samples
         self.MIN_TRAINING_SAMPLES = min_training_samples
+        self.checkpoint_interval = checkpoint_interval
+        
+        # checkpointing functions
+        self._next_checkpoint_dir = _next_checkpoint_dir.__get__(self, BoPep)
+        self._save_checkpoint = _save_checkpoint.__get__(self, BoPep)
+        self._copy_logs_to_checkpoint = _copy_logs_to_checkpoint.__get__(self, BoPep)
+        self._setup_checkpoint_dir = _setup_checkpoint_dir.__get__(self, BoPep)
+        self._rebuild_logs_from_csvs = _rebuild_logs_from_csvs.__get__(self, BoPep)
+
+        # training and validation functions
+        self._compute_model_metrics = _compute_model_metrics.__get__(self, BoPep)
+        self._compute_split_indices = _compute_split_indices.__get__(self, BoPep)
+        self._train_and_validate = _train_and_validate.__get__(self, BoPep)
+        self._split_train_validation = _split_train_validation.__get__(self, BoPep)
+        self._train_on_all = _train_on_all.__get__(self, BoPep)
+
 
     def optimize(
         self,
@@ -96,11 +115,12 @@ class BoPep:
         embeddings: Optional[Dict[str, Any]] = None,
         num_initial: Optional[int] = 10,
         n_validate: Optional[Union[float, int]] = None,
-        binding_site_residue_indices: Optional[List[int]] = None,
+        binding_site_residue_indices: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         initial_peptides: Optional[List[str]] = None,
         initial_method: str = "kmeans",
         assume_zero_indexed: Optional[bool] = None,
         checkpoint_path: Optional[str] = None,
+        template_pdbs: Optional[Dict[str, str]] = None,
     ):
         """
         Runs Bayesian optimization on peptide sequences.
@@ -114,16 +134,19 @@ class BoPep:
             num_initial: Number of initial peptides to dock and score.
             n_validate: Number of peptides to use for validation.
                 If None, no validation is performed.
-            binding_site_residue_indices: List of residue indices defining the binding site.
+            binding_site_residue_indices: List of residue indices defining the binding site,
+                or dict mapping peptides to their specific binding site residue indices.
             initial_peptides: Optional list of initial peptides to dock.
             assume_zero_indexed: If True, assumes residue indices are zero-indexed.
             checkpoint_path: Path to a checkpoint directory to continue from. If none is provided,
                 a fresh optimization will be started.
+            template_pdbs: Optional dictionary mapping peptide sequences to template PDB paths.
 
         """
         continue_from_checkpoint = False if checkpoint_path is None else True
-
+        self.template_pdbs = template_pdbs
         self.checkpoint_path = checkpoint_path
+        self._setup_checkpoint_dir(continue_from_checkpoint)
         self.logger = Logger(log_dir=self.log_dir, overwrite_logs=self.overwrite_logs, continue_from_checkpoint=continue_from_checkpoint)
         self.initial_method = initial_method
         self.embeddings = embeddings
@@ -223,80 +246,11 @@ class BoPep:
             0, {p: self.embeddings[p] for p in self.docked_peptides}, objectives
         )
         self._initialize_model(self.best_hyperparams)
-
-    def _next_checkpoint_dir(self) -> Path:
-        """Find the next available checkpoint_{i} directory under self.log_dir."""
-        base = Path(self.log_dir)
-        existing = [d for d in base.iterdir() if d.is_dir() and d.name.startswith("checkpoint_")]
-        # Extract suffix numbers
-        idxs = []
-        for d in existing:
-            try:
-                idxs.append(int(d.name.split("_", 1)[1]))
-            except (IndexError, ValueError):
-                continue
-        next_idx = max(idxs) + 1 if idxs else 0
-        return base / f"checkpoint_{next_idx}"
-
-    def _save_checkpoint(self, global_iteration: int):
-        checkpoint_dir = self._next_checkpoint_dir()
-        checkpoint_dir.mkdir(parents=True, exist_ok=False)
-        _save_model(str(checkpoint_dir / "model.pt"), model=self.model, surrogate_model_kwargs=self.surrogate_model_kwargs, best_hyperparams=self.best_hyperparams)
-        meta_json_path = checkpoint_dir / "checkpoint_metadata.json"
         
-        meta = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "global_iteration": global_iteration,
-            "surrogate_model_kwargs": self.surrogate_model_kwargs,
-            "target_structure_path": self.target_structure_path,
-            "binding_site_residue_indices": self.binding_site_residue_indices,
-            "docker_kwargs": self.docker_kwargs,
-            "hpo_kwargs": self.hpo_kwargs,
-            "objective_function_kwargs": self.objective_function_kwargs,
-            "scoring_kwargs": self.scoring_kwargs,
-            "num_docked_peptides": len(self.docked_peptides),
-            "num_remaining_peptides": len(self.not_docked_peptides),
-        }
+        # Save initial checkpoint
+        logging.info("Creating initial checkpoint")
+        self._save_checkpoint(0, force_embeddings=True)
 
-        if self.checkpoint_path:
-            meta["checkpoint_path"] = self.checkpoint_path
-        
-        with open(meta_json_path, 'w') as f:
-            json.dump(meta, f, indent=2, default=str)
-        
-        with open(checkpoint_dir / "embeddings.pkl", "wb") as f:
-            pickle.dump(self.embeddings, f)
-
-        self._copy_logs_to_checkpoint(checkpoint_dir)
-
-        logging.info(f"Saved checkpoint at iteration {global_iteration}")
-        logging.info(f"Checkpoint metadata saved to {meta_json_path}")
-
-    def _copy_logs_to_checkpoint(self, checkpoint_dir: Path):
-        """Copy all log files to the checkpoint directory."""
-        
-        results_dir = checkpoint_dir / "results"
-        results_dir.mkdir(parents=True, exist_ok=True)
-
-        log_files = [
-            "scores.csv",
-            "objectives.csv", 
-            "model_losses.csv",
-            "predictions.csv.gz",
-            "acquisition.csv.gz",
-            "hyperparameters.csv"
-        ]
-        
-        logs_copied = 0
-        for log_file in log_files:
-            source_path = Path(self.log_dir) / log_file
-            if source_path.exists():
-                dest_path = results_dir / log_file
-                shutil.copy2(source_path, dest_path)
-                logs_copied += 1
-                logging.debug(f"Copied {log_file} to checkpoint")
-        
-        logging.info(f"Copied {logs_copied} log files to checkpoint")
 
     def _continue_init(self) -> int:
         checkpoint_path = Path(self.checkpoint_path)
@@ -305,7 +259,7 @@ class BoPep:
         _validate_checkpoint(checkpoint_path=checkpoint_path)
         
         embeddings_path = checkpoint_path / "embeddings.pkl"
-        meta_path = checkpoint_path / "checkpoint_metadata.json"
+        meta_path = checkpoint_path / "metadata.json"
         
         with open(meta_path, 'r') as f:
             meta = json.load(f)
@@ -336,7 +290,7 @@ class BoPep:
         logging.info(f"Embeddings dimension: {self.surrogate_model_kwargs['input_dim']}")
 
         logging.info("Rebuilding optimization state from logs...")
-        self._rebuild_logs_from_csvs()
+        self._rebuild_logs_from_csvs(checkpoint_path)
 
         _validate_args(schedule=self.schedule, n_validate=self.n_validate)
         self.docker.set_target_structure(self.target_structure_path)
@@ -352,37 +306,14 @@ class BoPep:
         self._optimize_hyperparameters(last_iteration, docked_embs, objectives)
         self._initialize_model(self.best_hyperparams)
 
+        # Save initial checkpoint for continued run
+        logging.info("Creating initial checkpoint for continued run")
+        self._save_checkpoint(last_iteration)
+
         logging.info(f"Resumed from iteration {last_iteration} with "
                     f"{len(self.docked_peptides)} peptides docked")
         
         return last_iteration
-
-    
-    def _rebuild_logs_from_csvs(self):
-        scores_path = Path(self.log_dir) / "scores.csv"
-        self.scores = {}
-        with open(scores_path, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                pep = row["peptide"]
-                score_cols = [c for c in reader.fieldnames
-                              if c not in ("timestamp", "iteration", "peptide", "phase")]
-                sc = {
-                    col: float(row[col]) if row[col] not in (None, "") else None
-                    for col in score_cols
-                }
-                self.scores[pep] = sc
-
-        obj_path = Path(self.log_dir) / "objectives.csv"
-        self.all_logged_objectives = set()
-        with open(obj_path, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                self.all_logged_objectives.add(row["peptide"])
-
-        self.docked_peptides = set(self.scores.keys())
-        self.not_docked_peptides = set(self.embeddings.keys()) - self.docked_peptides
-
 
     def _run_phase_loop(
         self,
@@ -519,6 +450,12 @@ class BoPep:
                 self._print_top_performers(
                     objectives=objectives,
                 )
+                
+                # Save checkpoint every N iterations
+                if global_iteration % self.checkpoint_interval == 0:
+                    logging.info(f"Creating regular checkpoint (every {self.checkpoint_interval} iterations)")
+                    self._save_checkpoint(global_iteration)
+                
                 if not not_docked_peptides:
                     logging.info("All peptides docked, stopping early")
                     break
@@ -541,7 +478,8 @@ class BoPep:
                 iteration=global_iteration,
                 acquisition_name=acquisition,
             )
-        self._save_checkpoint(global_iteration)
+        # Final checkpoint save - ensure embeddings are included
+        self._save_checkpoint(global_iteration, force_embeddings=True)
 
     def _score_batch(self, docked_dirs: list):
         """
@@ -550,7 +488,6 @@ class BoPep:
         if self.custom_scorer:
             return self.custom_scorer(docked_dirs)
 
-        new_scores = {}
         scores_to_include = self.scoring_kwargs.get("scores_to_include", [])
         binding_site_distance_threshold = self.scoring_kwargs.get("binding_site_distance_threshold", 5)
         required_n_contact_residues = self.scoring_kwargs.get(
@@ -562,15 +499,46 @@ class BoPep:
                 "No scores to include for scoring. Please specify valid scores in 'scores_to_include'."
             )
 
-        new_scores = self.scorer.score_batch(
-            scores_to_include=scores_to_include,
-            inputs=docked_dirs,
-            input_type="colab_dir",
-            binding_site_residue_indices=self.binding_site_residue_indices,
-            n_jobs=self.scoring_kwargs.get("n_jobs", 12),
-            binding_site_distance_threshold=binding_site_distance_threshold,
-            required_n_contact_residues=required_n_contact_residues,
-        )
+        if isinstance(self.binding_site_residue_indices, dict):
+            peptides_in_batch = []
+            for dir_path in docked_dirs:
+                dir_name = Path(dir_path).name
+                if '_' in dir_name:
+                    peptide = dir_name.split('_')[-1]
+                else:
+                    peptide = dir_name
+                peptides_in_batch.append(peptide)
+
+            new_scores = {}
+            for dir_path, peptide in zip(docked_dirs, peptides_in_batch):
+                if peptide in self.binding_site_residue_indices:
+                    peptide_binding_sites = self.binding_site_residue_indices[peptide]
+                else:
+                    logging.warning(f"No binding site defined for peptide {peptide}, skipping scoring")
+                    continue
+                
+                peptide_scores = self.scorer.score_batch(
+                    scores_to_include=scores_to_include,
+                    inputs=[dir_path],
+                    input_type="colab_dir",
+                    binding_site_residue_indices=peptide_binding_sites,
+                    n_jobs=1,
+                    binding_site_distance_threshold=binding_site_distance_threshold,
+                    required_n_contact_residues=required_n_contact_residues,
+                    template_pdbs=self.template_pdbs
+                )
+                new_scores.update(peptide_scores)
+        else:
+            new_scores = self.scorer.score_batch(
+                scores_to_include=scores_to_include,
+                inputs=docked_dirs,
+                input_type="colab_dir",
+                binding_site_residue_indices=self.binding_site_residue_indices,
+                n_jobs=self.scoring_kwargs.get("n_jobs", 12),
+                binding_site_distance_threshold=binding_site_distance_threshold,
+                required_n_contact_residues=required_n_contact_residues,
+                template_pdbs=self.template_pdbs,
+            )
 
         return new_scores
 
@@ -648,11 +616,8 @@ class BoPep:
 
         if hasattr(self, "model"):
             try:
-                # move to CPU (optional but helps)
                 self.model.cpu()
-                # delete the reference
                 del self.model
-                # clear any cached GPU memory
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except Exception as e:
@@ -711,104 +676,6 @@ class BoPep:
             f"Initialized {model_type} model with {network_type} network architecture"
         )
         self.model.to(self.device)
-
-    def _compute_model_metrics(self, predictions_dict: dict, objectives: dict):
-        peptides = list(predictions_dict.keys())
-        actual = np.array([objectives[p] for p in peptides])
-        predicted = np.array([predictions_dict[p][0] for p in peptides])
-        r2 = r2_score(actual, predicted)
-        mae = mean_absolute_error(actual, predicted)
-
-        return {"r2": r2, "mae": mae}
-
-    def _compute_split_indices(
-        self, total_samples: int, n_validate: Union[int, float]
-    ) -> Optional[int]:
-        """Return num_validate or None if split is infeasible."""
-        if isinstance(n_validate, float):
-            num = int(total_samples * n_validate)
-        else:
-            num = n_validate
-
-        if (
-            num < self.MIN_VALIDATION_SAMPLES
-            or (total_samples - num) < self.MIN_TRAINING_SAMPLES
-        ):
-            logging.warning(
-                f"Cannot split {total_samples} samples into "
-                f"{self.MIN_TRAINING_SAMPLES} train + "
-                f"{self.MIN_VALIDATION_SAMPLES} val; training on all."
-            )
-            return None
-
-        return num
-
-    def _train_and_validate(self, train_emb, train_obj, val_emb, val_obj):
-        """Train on train set, evaluate on both splits."""
-        loss = self.model.fit_dict(
-            embedding_dict=train_emb,
-            objective_dict=train_obj,
-            val_embedding_dict=val_emb,
-            val_objective_dict=val_obj,
-            epochs=self.best_hyperparams.get("epochs", 100),
-            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
-            batch_size=self.best_hyperparams.get("batch_size", 16),
-            device=self.device,
-        )
-        train_pred = self.model.predict_dict(train_emb, device=self.device)
-        val_pred = self.model.predict_dict(val_emb, device=self.device)
-        train_m = self._compute_model_metrics(train_pred, train_obj)
-        val_m = self._compute_model_metrics(val_pred, val_obj)
-
-        metrics = {
-            "train_r2": train_m["r2"],
-            "train_mae": train_m["mae"],
-            "val_r2": val_m["r2"],
-            "val_mae": val_m["mae"],
-        }
-        logging.info(
-            f"Loss {loss:.4f}, train R2 {train_m['r2']:.4f}, "
-            f"val R2 {val_m['r2']:.4f} "
-            f"(N_train={len(train_emb)}, N_val={len(val_emb)})"
-        )
-        return loss, metrics
-
-    def _train_on_all(self, embeddings, objectives):
-        """Train on the entire dataset (no validation)."""
-        loss = self.model.fit_dict(
-            embedding_dict=embeddings,
-            objective_dict=objectives,
-            epochs=self.best_hyperparams.get("epochs", 100),
-            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
-            batch_size=self.best_hyperparams.get("batch_size", 16),
-            device=self.device,
-        )
-        preds = self.model.predict_dict(embeddings, device=self.device)
-        m = self._compute_model_metrics(preds, objectives)
-        metrics = {"r2": m["r2"], "mae": m["mae"]}
-        logging.info(f"Loss {loss:.4f}, R2 {m['r2']:.4f}, N={len(embeddings)}")
-        return loss, metrics
-
-    def _split_train_validation(
-        self, docked_embeddings: dict, objectives: dict, num_validate: int
-    ):
-        """
-        Split the available data into training and validation sets.
-        """
-        peptides = list(objectives.keys())
-        val_indices = np.random.choice(len(peptides), num_validate, replace=False)
-        val_peptides = [peptides[i] for i in val_indices]
-        train_peptides = [p for p in peptides if p not in val_peptides]
-        train_embeddings = {p: docked_embeddings[p] for p in train_peptides}
-        train_objectives = {p: objectives[p] for p in train_peptides}
-        val_embeddings = {p: docked_embeddings[p] for p in val_peptides}
-        val_objectives = {p: objectives[p] for p in val_peptides}
-
-        logging.info(
-            f"Split data into {len(train_peptides)} training and {len(val_peptides)} validation samples"
-        )
-
-        return train_embeddings, train_objectives, val_embeddings, val_objectives
 
     def _print_top_performers(self, objectives: dict, top_n: int = 10):
         sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[
