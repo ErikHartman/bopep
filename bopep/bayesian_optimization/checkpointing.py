@@ -186,7 +186,7 @@ def _rebuild_logs_from_csvs(self, checkpoint_path: Optional[Path] = None):
 def _validate_checkpoint(checkpoint_path: Path):
     """Validate checkpoint integrity."""
     required_files = [
-        "checkpoint_metadata.json",
+        "metadata.json",
         "embeddings.pkl",
         "model.pt",
         "results/scores.csv",

@@ -8,6 +8,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+slurm.sh
+
 /tests/optimize_test
 
 # C extensions

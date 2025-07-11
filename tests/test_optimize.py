@@ -230,6 +230,7 @@ def test_bopep_with_precomputed_data(
             schedule=schedule,
             embeddings=filtered_embeddings,
             binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
+            assume_zero_indexed=True,
             n_validate=50
         )
 
@@ -269,6 +270,7 @@ def test_bopep_with_precomputed_data(
             binding_site_residue_indices=[23, 42, 44, 49, 69, 72, 74, 82, 89, 105],
             n_validate=50,
             checkpoint_path=os.path.join(output_dir, "checkpoint_0"),
+            assume_zero_indexed=True,
         )
 
         logging.info(f"Test completed, output saved to {output_dir}")
@@ -462,6 +464,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
             embeddings=embeddings,
             binding_site_residue_indices=combined_sites,  # List format - same for all
             n_validate=None,  # Skip validation for simple test
+            assume_zero_indexed=True,
             initial_peptides=test_peptides[:3]  # Use first 3 peptides as initial
         )
         
@@ -475,7 +478,8 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
             embeddings=embeddings,
             binding_site_residue_indices=peptide_specific_binding_sites,  # Dict format
             n_validate=None,  # Skip validation for simple test
-            initial_peptides=test_peptides[:3]  # Use first 3 peptides as initial
+            initial_peptides=test_peptides[:3],  # Use first 3 peptides as initial
+            assume_zero_indexed = True
         )
         
         logging.info("Both approaches completed successfully!")
