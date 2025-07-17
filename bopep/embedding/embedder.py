@@ -1,3 +1,4 @@
+from typing import Optional
 from bopep.embedding.embed_esm import embed_esm
 from bopep.embedding.embed_aaindex import embed_aaindex
 from bopep.embedding.utils import filter_peptides
@@ -13,10 +14,10 @@ class Embedder:
     def __init__(self):
         pass
 
-    def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True) -> dict:
+    def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True, device = Optional[str]) -> dict:
         if filter:
             peptides = filter_peptides(peptides)
-        embeddings = embed_esm(peptides, model_path, average, batch_size)
+        embeddings = embed_esm(peptides, model_path, average, batch_size, device=device)
         return embeddings
 
     def embed_aaindex(self, peptides: list, average: bool, filter:bool = True) -> dict:
