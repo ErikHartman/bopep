@@ -22,28 +22,28 @@ class RFDiffusion:
     
     def __init__(
         self,
+        rfdiffusion_path: str,
         output_dir: Optional[str] = None,
         pdb_path: Optional[str] = None,
-        rfdiffusion_path: Optional[str] = None,
         models_path: Optional[str] = None,
         python_env_path: Optional[str] = None,
         checkpoint_path: Optional[str] = None
     ):
         """
         Initialize the RFDiffusion class.
-        
+
         Parameters
         ----------
+        rfdiffusion_path : str
+            Path to RFdiffusion installation directory. (Mandatory)
         output_dir : str, optional
             Directory for output files. If None, uses OUTPUT_DIR from environment or current directory.
         pdb_path : str, optional
             Path to the input PDB file. If None, uses default PLO1_PATH.
-        rfdiffusion_path : str, optional
-            Path to RFdiffusion installation directory.
         models_path : str, optional
             Path to RFdiffusion models directory.
         python_env_path : str, optional
-            Path to Python environment for RFdiffusion.
+            Path to Python environment for RFdiffusion. If None, uses the expected Python executable in RFdiffusion.
         checkpoint_path : str, optional
             Path to the checkpoint file to use.
         """
@@ -53,23 +53,27 @@ class RFDiffusion:
             format='%(levelname)s: %(message)s', 
             stream=sys.stderr
         )
-        
+
         # Load environment variables
         load_dotenv()
-        
+
+        # Validate mandatory argument
+        if not rfdiffusion_path:
+            raise ValueError("rfdiffusion_path is a mandatory argument and must be provided.")
+
         # Set up paths
         self.output_dir = Path(output_dir or os.getenv("OUTPUT_DIR", "."))
         self.designs_dir = self.output_dir / "designs"
         self.logs_dir = self.output_dir / "logs"
         self.samples_csv = self.output_dir / "samples" / "peptide_samples.csv"
-        
+
         # RFdiffusion configuration paths
-        self.pdb_path = Path(pdb_path or "/home/alencar/home/borf/src/PDB/plo1.pdb")
-        self.rfdiffusion_path = rfdiffusion_path or "/home/alencar/RFdiffusion"
+        self.pdb_path = Path(pdb_path) if pdb_path else None
+        self.rfdiffusion_path = rfdiffusion_path
         self.models_path = models_path or f"{self.rfdiffusion_path}/models"
         self.python_env_path = python_env_path or f"{self.rfdiffusion_path}/env/rf_env/bin/python"
         self.checkpoint_path = checkpoint_path or f"{self.models_path}/Complex_beta_ckpt.pt"
-        
+
         # Create necessary directories
         self.output_dir.mkdir(exist_ok=True, parents=True)
         self.designs_dir.mkdir(exist_ok=True, parents=True)

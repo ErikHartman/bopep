@@ -41,7 +41,7 @@ class MPNNFastRelax:
         designs_dir: Optional[str] = None,
         protein_mpnn_path: Optional[str] = None,
         mpnn_chains: str = "A",
-        test_mode: bool = False
+        mpnn_env: str = sys.executable,
     ):
         """
         Initialize the MPNNFastRelax class.
@@ -56,8 +56,8 @@ class MPNNFastRelax:
             Path to ProteinMPNN installation.
         mpnn_chains : str, default "A"
             Chains to design with ProteinMPNN.
-        test_mode : bool, default False
-            If True, adds '_test' suffix to output directories.
+        mpnn_env : str, default sys.executable
+            Path to the Python environment for running ProteinMPNN. If None, uses the current Python executable.
         """
         # Setup logging
         logging.basicConfig(
@@ -80,6 +80,7 @@ class MPNNFastRelax:
         # ProteinMPNN configuration
         self.protein_mpnn_path = Path(protein_mpnn_path or os.getenv("PROTEIN_MPNN_PATH"))
         self.mpnn_chains = mpnn_chains
+        self.mpnn_env = mpnn_env
         
         # Initialize PyRosetta and FastRelax
         self._initialize_pyrosetta()
@@ -104,8 +105,8 @@ class MPNNFastRelax:
             from pyrosetta.rosetta import protocols
             
             init("-beta_nov16 -in:file:silent_struct_type binary -use_terminal_residues true -mute all")
-            
-            # Get XML file path (assuming it's in the same directory as this module)
+
+            # Fetch the custom FastRelax XML            
             script_dir = os.path.dirname(os.path.abspath(__file__))
             xml_path = os.path.join(script_dir, "rosetta/RosettaFastRelaxUtil.xml")
             
@@ -215,7 +216,7 @@ class MPNNFastRelax:
         
         env = os.environ.copy()
         cmd = [
-            "/home/alencar/.conda/envs/mpnn_env/bin/python",
+            self.mpnn_env,
             str(self.protein_mpnn_path / "protein_mpnn_run.py"),
             "--pdb_path", pdb,
             "--pdb_path_chains", self.mpnn_chains,
@@ -761,6 +762,7 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.1, help="ProteinMPNN sampling temperature")
     parser.add_argument("--relax-cycles", type=int, default=1, help="Number of cycles for MPNN + FastRelax")
     parser.add_argument("--limited-run", type=int, default=0, help="Limit number of PDBs to process")
+    parser.add_argument("--mpnn-env", help="Python environment/executable for ProteinMPNN")
     parser.add_argument("--test", action="store_true", help="Add '_test' suffix to output paths")
     
     args = parser.parse_args()
@@ -770,7 +772,7 @@ def main():
         mpnn_fastrelax = MPNNFastRelax(
             output_dir=args.output_dir,
             designs_dir=args.designs_dir,
-            test_mode=args.test
+            mpnn_env=args.mpnn_env
         )
         
         # Run pipeline

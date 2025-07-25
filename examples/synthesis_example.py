@@ -146,22 +146,92 @@ def example_manual_processing():
     print(f"Processed subset: {successful} successful, {failed} failed")
 
 
-if __name__ == "__main__":
-    print("RFDiffusion Class Examples")
-    print("=" * 50)
+
+# === Synthesiser Orchestrator Example ===
+"""
+Example script demonstrating how to use the Synthesiser orchestrator from the bopep package.
+"""
+
+from bopep import Synthesiser
+
+def run_full_pipeline_with_synthesiser():
+    """
+    Run all steps of the process using the Synthesiser orchestrator.
+    """
+    print("\n=== Full Pipeline with Synthesiser ===")
     
+    # Initialize the Synthesiser orchestrator
+    synthesiser = Synthesiser(
+        output_dir="pipeline_output",
+        # You would set these to your actual paths:
+        # rfdiffusion_path="/path/to/RFdiffusion",
+        # protein_mpnn_path="/path/to/ProteinMPNN", 
+        # pdb_path="/path/to/your/protein.pdb"
+    )
+    
+    # Check configuration
+    print("Configuration status:")
+    synthesiser.print_configuration()
+    
+    # Create sample data
+    samples_csv = synthesiser.create_sample_data("pipeline_output")
+    
+    # Option 1: Run complete pipeline in one call
+    print("\nRunning complete pipeline...")
     try:
-        # Run examples
+        results = synthesiser.run_complete_pipeline(
+            samples_csv=samples_csv,
+            rf_dry_run=True,  # Safe dry-run mode for demo
+            temperature=0.1,
+            relax_cycles=1,
+            threads=4,
+            limited_run=5  # Process only 5 designs for testing
+        )
+        print(f"Pipeline results: {results}")
+    except Exception as e:
+        print(f"Pipeline error (expected without proper setup): {e}")
+    
+    # Option 2: Run individual steps
+    print("\nRunning individual steps...")
+    try:
+        # Step 1: RFDiffusion only
+        rf_results = synthesiser.run_rfdiffusion_only(
+            samples_csv=samples_csv,
+            dry_run=True
+        )
+        print(f"RFDiffusion results: {rf_results}")
+        
+        # Step 2: MPNN + FastRelax (would run if designs existed)
+        print("MPNN + FastRelax would run here if designs existed")
+        
+    except Exception as e:
+        print(f"Individual steps error (expected): {e}")
+    
+    print("\n=== Synthesiser pipeline demonstration completed! ===")
+
+if __name__ == "__main__":
+    print("RFDiffusion & MPNNFastRelax Class Examples")
+    print("=" * 50)
+    try:
+        # Run original RFDiffusion examples
         example_basic_usage()
         example_custom_configuration()
         example_manual_processing()
-        
-        print("\n=== Examples completed successfully! ===")
-        print("\nTo use RFDiffusion in your own code:")
-        print("from bopep import RFDiffusion")
+        # Run integrated full pipeline example
+        run_full_pipeline_with_synthesiser()
+        # Run new Synthesiser orchestrator example
+        run_full_pipeline_with_synthesiser()
+        print("\n=== All examples completed successfully! ===")
+        print("\nTo use RFDiffusion and MPNNFastRelax individually:")
+        print("from bopep import RFDiffusion, MPNNFastRelax")
         print("rf_diffusion = RFDiffusion(output_dir='my_output')")
         print("results = rf_diffusion.run(samples_csv='my_samples.csv')")
-        
+        print("mpnn_fastrelax = MPNNFastRelax(output_dir='my_output', designs_dir='my_designs')")
+        print("results = mpnn_fastrelax.run()")
+        print("\nTo use the Synthesiser orchestrator:")
+        print("from bopep import Synthesiser")
+        print("synthesiser = Synthesiser(output_dir='my_output')")
+        print("results = synthesiser.run_complete_pipeline()")
     except Exception as e:
         print(f"Error running examples: {e}")
-        print("Note: This is expected if RFdiffusion is not installed or paths are not configured.")
+        print("Note: This is expected if dependencies are not installed or paths are not configured.")
