@@ -1,6 +1,5 @@
 import random
 from typing import List, Dict, Any, Optional, Callable
-from bopep import _AMINO_ACIDS
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
 from bopep.scoring.scorer import Scorer
@@ -14,7 +13,7 @@ from bopep.surrogate_model import (
 from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.bayesian_optimization.utils import _validate_surrogate_model_kwargs
 import torch
-
+_AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 class BoGA:
     """
@@ -264,8 +263,11 @@ class BoGA:
         # Dock and score initial
         scores = self._dock_and_score(init_seqs)
 
+        # Convert initial scores to objectives
+        objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
+
         # Initial hyperparameter tuning
-        self._optimize_hyperparameters(init_reduced, scores)
+        self._optimize_hyperparameters(init_reduced, objectives)
 
         for gen in range(1, self.generations + 1):
             # Init fresh model
@@ -274,15 +276,17 @@ class BoGA:
             seqs = list(scores.keys())
             reduced_embs = self._embed(seqs)
 
+            # Convert scores to objectives
+            objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
+
             # Train surrogate or model only based on interval
             if gen % self.hpo_interval == 0:
-                self._optimize_hyperparameters(reduced_embs, self.objectives_temp)
+                self._optimize_hyperparameters(reduced_embs, objectives)
 
-            self.objectives_temp = self.scores_to_objective(scores, self.objective_function, self.objective_function_kwargs)
-            self.model.fit_dict(reduced_embs, self.objectives_temp, device=self.device)
+            self.model.fit_dict(reduced_embs, objectives, device=self.device)
 
-            # Generate new pool via mutation of top M
-            parents = self._select_top(scores, self.m_select)
+            # Generate new pool via mutation of top M (use objectives for selection)
+            parents = self._select_top(objectives, self.m_select)
             pool = self._mutate_pool(parents)
 
             # Embed and reduce pool
@@ -296,4 +300,6 @@ class BoGA:
             new_scores = self._dock_and_score(candidates)
             scores.update(new_scores)
 
-        return scores
+        # Return final objectives instead of raw scores
+        final_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
+        return final_objectives

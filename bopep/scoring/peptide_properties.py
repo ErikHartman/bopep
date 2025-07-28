@@ -1,7 +1,7 @@
 from bopep.docking.utils import extract_sequence_from_pdb
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import numpy as np
-from bopep import _AMINO_ACIDS
+_AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 class PeptideProperties:
 

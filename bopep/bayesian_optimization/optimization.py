@@ -3,7 +3,6 @@ from pathlib import Path
 import pickle
 
 from typing import Callable, List, Optional, Dict, Any, Union
-from bopep import _AMINO_ACIDS
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
 from bopep.surrogate_model import (
@@ -24,7 +23,7 @@ from bopep.scoring.scores_to_objective import ScoresToObjective
 import torch
 import logging
 
-
+_AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
