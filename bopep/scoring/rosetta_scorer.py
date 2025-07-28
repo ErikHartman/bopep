@@ -1,7 +1,3 @@
-import pyrosetta
-from pyrosetta.io import pose_from_pdb
-from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
-
 class RosettaScorer:
     def __init__(self, pdb_file):
         self.pdb_file = pdb_file
@@ -14,16 +10,27 @@ class RosettaScorer:
     def _initialize(self):
         if not self.initialized:
             try:
-                pyrosetta.get_fa_scorefxn()
-            except Exception:
-                pyrosetta.init("-mute all")
-            self.scorefxn = pyrosetta.get_fa_scorefxn()
-            self.pose = pose_from_pdb(self.pdb_file)
-            self.rosetta_score = self.scorefxn(self.pose)
-            self.ia = InterfaceAnalyzerMover()
-            self.ia.set_compute_packstat(True)
-            self.ia.apply(self.pose)
-            self.initialized = True
+                import pyrosetta
+                from pyrosetta.io import pose_from_pdb
+                from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
+                
+                self.pyrosetta = pyrosetta
+                self.pose_from_pdb = pose_from_pdb
+                self.InterfaceAnalyzerMover = InterfaceAnalyzerMover
+                
+                try:
+                    pyrosetta.get_fa_scorefxn()
+                except Exception:
+                    pyrosetta.init("-mute all")
+                self.scorefxn = pyrosetta.get_fa_scorefxn()
+                self.pose = pose_from_pdb(self.pdb_file)
+                self.rosetta_score = self.scorefxn(self.pose)
+                self.ia = InterfaceAnalyzerMover()
+                self.ia.set_compute_packstat(True)
+                self.ia.apply(self.pose)
+                self.initialized = True
+            except ImportError as e:
+                raise ImportError(f"PyRosetta is required for RosettaScorer but not installed: {e}")
 
     def get_rosetta_score(self):
         if not self.initialized:
