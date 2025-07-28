@@ -3,6 +3,7 @@ from pathlib import Path
 import pickle
 
 from typing import Callable, List, Optional, Dict, Any, Union
+from bopep import _AMINO_ACIDS
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
 from bopep.surrogate_model import (
@@ -189,6 +190,9 @@ class BoPep:
         Initializes the BoPep optimizer for a fresh search
         """
         peptides = list(self.embeddings.keys())
+        for peptide in peptides:
+            if not all(aa in _AMINO_ACIDS for aa in peptide):
+                raise ValueError(f"Invalid amino acids in peptide sequence: {peptide}. Allowed amino acids are: {_AMINO_ACIDS}")
         self.docked_peptides = set()
         self.not_docked_peptides = set(peptides)
         self.scores = dict()

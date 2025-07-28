@@ -1,6 +1,6 @@
 import random
 from typing import List, Dict, Any, Optional, Callable
-
+from bopep import _AMINO_ACIDS
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
 from bopep.scoring.scorer import Scorer
@@ -15,9 +15,6 @@ from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.bayesian_optimization.utils import _validate_surrogate_model_kwargs
 import torch
 
-
-# Standard amino acids
-_AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 class BoGA:
     """
@@ -60,7 +57,7 @@ class BoGA:
         sequence_length: int,
         n_init: int = 100,
         m_select: int = 50,
-        n_pool: int = 5_000,
+        k_pool: int = 5_000,
         generations: int = 100,
         surrogate_model_kwargs: Optional[Dict[str, Any]] = None,
         objective_function: Optional[Callable] = None,
@@ -90,7 +87,7 @@ class BoGA:
         self.sequence_length = sequence_length
         self.n_init = n_init
         self.m_select = m_select
-        self.n_pool = n_pool
+        self.k_pool = k_pool
         self.generations = generations
         self.objective_function = objective_function
         self.objective_function_kwargs = objective_function_kwargs or {}
@@ -128,7 +125,7 @@ class BoGA:
     def _generate_initial_sequences(self) -> List[str]:
         return [self._random_sequence() for _ in range(self.n_init)]
 
-    def _embed_and_reduce(self, peptides: List[str]) -> Dict[str, Any]:
+    def _embed(self, peptides: List[str]) -> Dict[str, Any]:
         """
         Embed peptides (ESM or AAIndex), scale, and apply PCA reduction. Returns
         reduced embeddings directly.
@@ -173,7 +170,7 @@ class BoGA:
             template_pdbs=self.scoring_kwargs.get('template_pdbs')
         )
 
-    def _train_surrogate(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
+    def _optimize_hyperparameters(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
         """
         Hyperparameter tuning and model training.
         Called only when generation % hpo_interval == 0.
@@ -188,10 +185,8 @@ class BoGA:
             random_state=self.surrogate_model_kwargs.get('random_state', 42),
             previous_study=self.previous_study
         )
-        self._initialize_model(self.best_hyperparams)
-        self.model.fit_dict(embeddings, objectives, device=self.device)
 
-    def _train_model_only(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
+    def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
         """
         Train with existing hyperparameters without tuning.
         """
@@ -259,39 +254,39 @@ class BoGA:
         return ''.join(seq_list)
 
     def _mutate_pool(self, parents: List[str]) -> List[str]:
-        return [self._mutate_sequence(random.choice(parents)) for _ in range(self.n_pool)]
+        return [self._mutate_sequence(random.choice(parents)) for _ in range(self.k_pool)]
 
     def run(self) -> Dict[str, float]:
         # Initial population and embedding/reduction
         init_seqs = self._generate_initial_sequences()
-        init_reduced = self._embed_and_reduce(init_seqs)
+        init_reduced = self._embed(init_seqs)
 
         # Dock and score initial
         scores = self._dock_and_score(init_seqs)
 
-        # Initial hyperparameter tuning + training
-        self._train_surrogate(init_reduced, scores)
+        # Initial hyperparameter tuning
+        self._optimize_hyperparameters(init_reduced, scores)
 
         for gen in range(1, self.generations + 1):
-            if not scores:
-                raise RuntimeError('No scores available for training')
-
+            # Init fresh model
+            self._initialize_model(self.best_hyperparams) 
             # Embed and reduce current peptides
             seqs = list(scores.keys())
-            reduced_embs = self._embed_and_reduce(seqs)
+            reduced_embs = self._embed(seqs)
 
             # Train surrogate or model only based on interval
             if gen % self.hpo_interval == 0:
-                self._train_surrogate(reduced_embs, scores)
-            else:
-                self._train_model_only(reduced_embs, scores)
+                self._optimize_hyperparameters(reduced_embs, self.objectives_temp)
+
+            self.objectives_temp = self.scores_to_objective(scores, self.objective_function, self.objective_function_kwargs)
+            self.model.fit_dict(reduced_embs, self.objectives_temp, device=self.device)
 
             # Generate new pool via mutation of top M
             parents = self._select_top(scores, self.m_select)
             pool = self._mutate_pool(parents)
 
             # Embed and reduce pool
-            pool_embs = self._embed_and_reduce(pool)
+            pool_embs = self._embed(pool)
 
             # Predict and select top
             preds = self.model.predict_dict(pool_embs, device=self.device)

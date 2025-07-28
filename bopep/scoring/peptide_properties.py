@@ -1,7 +1,7 @@
 from bopep.docking.utils import extract_sequence_from_pdb
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import numpy as np
-
+from bopep import _AMINO_ACIDS
 
 class PeptideProperties:
 
@@ -12,6 +12,9 @@ class PeptideProperties:
             self.peptide_sequence = peptide_sequence
         else:
             raise ValueError("Either a PDB file or a peptide sequence must be provided.")
+        
+        if not all(aa in _AMINO_ACIDS for aa in self.peptide_sequence):
+            raise ValueError(f"Invalid amino acids in peptide sequence: {self.peptide_sequence}. Allowed amino acids are: {_AMINO_ACIDS}")
         
         self.pa = ProteinAnalysis(self.peptide_sequence)
 
