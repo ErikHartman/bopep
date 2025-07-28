@@ -1,50 +1,17 @@
-import os
 from tqdm import tqdm
 import torch
 import esm
-from pathlib import Path
 from typing import Optional
 
 
 def embed_esm(
     peptide_sequences,
-    model_path="esm2_t33_650M_UR50D.pt",
+    model :torch.nn.Module,
+    alphabet: esm.Alphabet,
     average: bool = True,
     batch_size: int = 128,
     device: Optional[str] = None,
 ):
-    # Determine the device
-    if device:
-        device = device
-    elif torch.cuda.is_available():
-        device = "cuda"
-        print("ESM will use CUDA.")
-    elif torch.backends.mps.is_available():  # Apple Silicon
-        device = "mps"
-        print("ESM will use MPS (Apple Silicon GPU).")
-    else:
-        device = "cpu"
-        print("GPU not available. ESM will use CPU.")
-
-    # Load the model
-    if model_path:
-        model_path = os.path.abspath(model_path)
-        if os.path.exists(model_path):
-            model_location = Path(model_path)
-            model_name = model_location.stem
-            model_data = torch.load(model_path, map_location="cpu", weights_only=False)
-            model, alphabet = esm.pretrained.load_model_and_alphabet_core(
-                model_name, model_data
-            )
-        else:
-            raise FileNotFoundError(f"Specified model path does not exist: {model_path}")
-    else:
-        model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
-
-    # Move model to chosen device
-    model = model.to(device)
-    print(f"ESM moved to {device}.")
-
     batch_converter = alphabet.get_batch_converter()
     model.eval()  # Set the model to evaluation mode
 

@@ -8,16 +8,50 @@ from sklearn.preprocessing import StandardScaler
 from bopep.embedding.dim_red_vae import reduce_dimension_vae
 import os
 import pickle
-
+import esm
+import torch
+from pathlib import Path
 
 class Embedder:
     def __init__(self):
-        pass
+        self.esm_model = None
+        self.alphabet = None
 
     def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True, device = Optional[str]) -> dict:
         if filter:
             peptides = filter_peptides(peptides)
-        embeddings = embed_esm(peptides, model_path, average, batch_size, device=device)
+
+        if device:
+            device = device
+        elif torch.cuda.is_available():
+            device = "cuda"
+            print("ESM will use CUDA.")
+        elif torch.backends.mps.is_available():  # Apple Silicon
+            device = "mps"
+            print("ESM will use MPS (Apple Silicon GPU).")
+        else:
+            device = "cpu"
+            print("GPU not available. ESM will use CPU.")
+
+        if self.esm_model is None or self.alphabet is None:
+            if model_path:
+                model_path = os.path.abspath(model_path)
+                if os.path.exists(model_path):
+                    model_location = Path(model_path)
+                    model_name = model_location.stem
+                    model_data = torch.load(model_path, map_location="cpu", weights_only=False)
+                    self.esm_model , self.alphabet = esm.pretrained.load_model_and_alphabet_core(
+                        model_name, model_data
+                    )
+                else:
+                    raise FileNotFoundError(f"Specified model path does not exist: {model_path}")
+            else:
+                self.esm_model , self.alphabet = esm.pretrained.esm2_t33_650M_UR50D()
+
+            self.esm_model = self.esm_model .to(device)
+            print(f"ESM moved to {device}.")
+
+        embeddings = embed_esm(peptides, self.esm_model, self.alphabet, average, batch_size, device=device)
         return embeddings
 
     def embed_aaindex(self, peptides: list, average: bool, filter:bool = True) -> dict:
