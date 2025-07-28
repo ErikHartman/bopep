@@ -62,7 +62,7 @@ class RFDiffusion:
             raise ValueError("rfdiffusion_path is a mandatory argument and must be provided.")
 
         # Set up paths
-        self.output_dir = Path(output_dir or os.getenv("OUTPUT_DIR", "."))
+        self.output_dir = Path(output_dir)
         self.designs_dir = self.output_dir / "designs"
         self.logs_dir = self.output_dir / "logs"
         self.samples_csv = self.output_dir / "samples" / "peptide_samples.csv"

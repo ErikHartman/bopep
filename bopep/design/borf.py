@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 import pandas as pd
-from dotenv import load_dotenv
 
 from bopep.synthesis.diffusion import RFDiffusion
 from bopep.synthesis.mpnn_fastrelax import MPNNFastRelax
@@ -56,7 +55,6 @@ class Synthesizer:
         checkpoint_path: Optional[str] = None,
         mpnn_chains: str = "A",
         mpnn_env: Optional[str] = None,
-        test_mode: bool = False
     ):
         """
         Initialize the Synthesizer orchestrator.
@@ -81,8 +79,6 @@ class Synthesizer:
             Chains to design with ProteinMPNN.
         mpnn_env : str, optional
             Python environment/executable for ProteinMPNN. If None, uses sys.executable.
-        test_mode : bool, default False
-            If True, runs in test mode with limited functionality.
         """
         # Setup logging
         logging.basicConfig(
@@ -92,26 +88,23 @@ class Synthesizer:
         )
         
         # Load environment variables
-        load_dotenv()
         
         # Set up base paths
-        self.output_dir = Path(output_dir or os.getenv("OUTPUT_DIR", "."))
-        self.test_mode = test_mode
+        self.output_dir = Path(output_dir)
         
         # Store configuration
         if pdb_path is None:
             raise ValueError("pdb_path is a mandatory argument and must be provided.")
         self.config = {
             'output_dir': str(self.output_dir),
-            'rfdiffusion_path': rfdiffusion_path or os.getenv("RFDIFFUSION_PATH"),
-            'protein_mpnn_path': protein_mpnn_path or os.getenv("PROTEIN_MPNN_PATH"),
+            'rfdiffusion_path': rfdiffusion_path,
+            'protein_mpnn_path': protein_mpnn_path,
             'pdb_path': pdb_path,
             'models_path': models_path,
             'python_env_path': python_env_path,
             'checkpoint_path': checkpoint_path,
             'mpnn_chains': mpnn_chains,
             'mpnn_env': mpnn_env or sys.executable,
-            'test_mode': test_mode
         }
         
         # Initialize components (lazy loading)
@@ -540,7 +533,6 @@ def main():
             rfdiffusion_path=args.rfdiffusion_path,
             protein_mpnn_path=args.protein_mpnn_path,
             pdb_path=args.pdb_path,
-            test_mode=args.test_mode
         )
         
         # Print configuration if requested

@@ -65,13 +65,9 @@ class MPNNFastRelax:
             format='%(levelname)s: %(message)s', 
             stream=sys.stderr
         )
-        
-        # Load environment variables
-        load_dotenv()
-        
+
         # Set up paths
-        base_output_dir = Path(output_dir or os.getenv("OUTPUT_DIR"))
-        self.local_output_dir = Path(os.getenv("LOCAL_OUTPUT_DIR"))
+        base_output_dir = Path(output_dir)
         
         self.output_dir = base_output_dir
         self.designs_dir = Path(designs_dir or base_output_dir / "designs")
@@ -91,7 +87,6 @@ class MPNNFastRelax:
         # Create necessary directories
         self.output_dir.mkdir(exist_ok=True, parents=True)
         self.sequence_output_dir.mkdir(exist_ok=True, parents=True)
-        self.local_output_dir.mkdir(exist_ok=True, parents=True)
     
     def _initialize_pyrosetta(self):
         """Initialize PyRosetta and FastRelax mover."""
