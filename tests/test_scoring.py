@@ -1,7 +1,5 @@
 from unittest.mock import patch
-
 import pytest
-
 from bopep.scoring.scorer import Scorer
 from bopep.scoring.peptide_properties import PeptideProperties
 from bopep.scoring.scores_to_objective import ScoresToObjective

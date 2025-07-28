@@ -8,9 +8,7 @@ from bopep.surrogate_model import (
     NeuralNetworkEnsemble,
     DeepEvidentialRegression
 )
-from bopep.surrogate_model.hyperparameter_tuner import HyperparameterTuner
 from bopep.surrogate_model.helpers import pad_sequence
-
 from bopep.surrogate_model.base_models import RNNetwork, MLPNetwork
 
 # Set random seeds for reproducibility

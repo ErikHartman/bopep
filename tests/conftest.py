@@ -3,10 +3,8 @@ Test configuration and fixtures for BOPEP tests.
 """
 import pytest
 import tempfile
-import os
 import numpy as np
 import torch
-from pathlib import Path
 
 
 @pytest.fixture

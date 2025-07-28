@@ -1,9 +1,4 @@
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-import numpy as np
 import tempfile
-import os
-
 from bopep.genetic_algorithm.generate import BoGA
 
 
