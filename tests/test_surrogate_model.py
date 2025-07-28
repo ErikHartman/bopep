@@ -11,7 +11,6 @@ from bopep.surrogate_model import (
 from bopep.surrogate_model.helpers import pad_sequence
 from bopep.surrogate_model.base_models import RNNetwork, MLPNetwork
 
-# Set random seeds for reproducibility
 SEED = 42
 torch.manual_seed(SEED)
 np.random.seed(SEED)

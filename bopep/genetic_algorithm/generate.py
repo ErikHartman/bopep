@@ -17,6 +17,12 @@ _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 class BoGA:
     """
+    TODO: 
+    - Add validation of binding site indices
+    - Abstract out sequence generation logic
+    - Add more detailed logging
+    - Abstract out things from BoPep and use here.
+
     Genetic algorithm for peptide binder discovery using surrogate modeling.
 
     In BoGA, we specify a target and binding site. 
@@ -53,7 +59,8 @@ class BoGA:
     def __init__(
         self,
         target_structure_path: str,
-        sequence_length: int,
+        max_sequence_length: int,
+        min_sequence_length: int = 6,
         n_init: int = 100,
         m_select: int = 50,
         k_pool: int = 5_000,
@@ -83,7 +90,8 @@ class BoGA:
 
         # Store GA parameters
         self.target_structure_path = target_structure_path
-        self.sequence_length = sequence_length
+        self.max_sequence_length = max_sequence_length
+        self.min_sequence_length = min_sequence_length
         self.n_init = n_init
         self.m_select = m_select
         self.k_pool = k_pool
@@ -119,7 +127,7 @@ class BoGA:
             random.seed(random_seed)
 
     def _random_sequence(self) -> str:
-        return ''.join(random.choice(_AMINO_ACIDS) for _ in range(self.sequence_length))
+        return ''.join(random.choice(_AMINO_ACIDS) for _ in range(random.randint(self.min_sequence_length, self.max_sequence_length)))
 
     def _generate_initial_sequences(self) -> List[str]:
         return [self._random_sequence() for _ in range(self.n_init)]
@@ -246,14 +254,47 @@ class BoGA:
         return [seq for seq, _ in sorted(data.items(), key=lambda x: x[1], reverse=True)[:k]]
 
     def _mutate_sequence(self, seq: str) -> str:
+        """
+        Apply substitution, insertion, or deletion to the sequence based on mutation_rate.
+        """
         seq_list = list(seq)
-        for i in range(len(seq_list)):
-            if random.random() < self.mutation_rate:
-                seq_list[i] = random.choice(_AMINO_ACIDS)
-        return ''.join(seq_list)
+        new_seq = []
+        for aa in seq_list:
+            r = random.random()
+            if r < self.mutation_rate:
+                # Choose mutation type
+                op = random.choice(['sub', 'del', 'ins'])
+                if op == 'sub':
+                    # substitution
+                    new_seq.append(random.choice(_AMINO_ACIDS))
+                elif op == 'del':
+                    # deletion: skip this residue
+                    continue
+                else:
+                    # insertion: insert a random AA before current
+                    new_seq.append(random.choice(_AMINO_ACIDS))
+                    new_seq.append(aa)
+            else:
+                new_seq.append(aa)
+        # Additionally, random insertion at end
+        if random.random() < self.mutation_rate:
+            new_seq.append(random.choice(_AMINO_ACIDS))
+        # Truncate or pad to desired max_sequence_length
+        if len(new_seq) > self.max_sequence_length:
+            return ''.join(new_seq[:self.max_sequence_length])
+        else:
+            # pad by random AAs if too short
+            while len(new_seq) < self.min_sequence_length:
+                new_seq.append(random.choice(_AMINO_ACIDS))
+            return ''.join(new_seq)
 
     def _mutate_pool(self, parents: List[str]) -> List[str]:
-        return [self._mutate_sequence(random.choice(parents)) for _ in range(self.k_pool)]
+        """Generate new pool by mutating selected parent sequences."""
+        pool = []
+        for _ in range(self.n_pool):
+            parent = random.choice(parents)
+            pool.append(self._mutate_sequence(parent))
+        return pool
 
     def run(self) -> Dict[str, float]:
         # Initial population and embedding/reduction
