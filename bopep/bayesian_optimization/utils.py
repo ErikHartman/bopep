@@ -1,7 +1,6 @@
 import logging
 import subprocess
 from typing import Any, Dict, List, Optional, Union
-import pyrosetta
 import torch
 
 from bopep.bayesian_optimization.acquisition_functions import available_acquistion_functions
@@ -68,8 +67,11 @@ def _validate_dependencies():
         )
 
     try:
+        import pyrosetta
         pyrosetta.init("-mute all")
-    except:
+    except ImportError:
+        raise ValueError("PyRosetta is not installed. Please install PyRosetta to use scoring features.")
+    except Exception:
         raise ValueError("Cannot initialize pyrosetta")
 
 def _validate_args(
