@@ -62,8 +62,6 @@ class Scorer:
         required_n_contact_residues: Optional[int] = 5,
         binding_site_distance_threshold: Optional[int] = 5.0,
         template_pdb: Optional[str] = None,
-        alignment_chain: str = "A",
-        peptide_chain: str = "B",
     ) -> dict:
         """
         Calculate and return selected scores for a peptide.
