@@ -292,7 +292,7 @@ class Scorer:
                 raise ValueError(
                     "WARNING: pdb_file or colab_dir is required for template_rmsd score"
                 )
-            rmsd = align_and_compute_rmsd(ref_pdb_file=template_pdb, pdb_file=pdb_file, alignment_chain=alignment_chain, peptide_chain=peptide_chain)
+            rmsd = align_and_compute_rmsd(ref_pdb_file=template_pdb, pdb_file=pdb_file)
             scores["template_rmsd"] = rmsd
 
         # Peptide property scores can be calculated with either peptide_sequence or pdb_file
