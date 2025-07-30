@@ -2,7 +2,7 @@
 """
 Synthesis module for running the complete protein design pipeline.
 
-This module provides the Synthesizer class which runs the following workflow:
+This module provides the borf class which runs the following workflow:
 1. RFDiffusion for structure generation
 2. ProteinMPNN + FastRelax for sequence design and optimization
 """
@@ -13,14 +13,13 @@ import logging
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-
 import pandas as pd
 
-from bopep.synthesis.diffusion import RFDiffusion
-from bopep.synthesis.mpnn_fastrelax import MPNNFastRelax
+from bopep.design.diffusion import RFDiffusion
+from bopep.design.mpnn_fastrelax import MPNNFastRelax
 
 
-class Synthesizer:
+class Borf:
     """
     A comprehensive orchestrator for protein-peptide design synthesis.
     
@@ -31,17 +30,17 @@ class Synthesizer:
     Examples
     --------
     >>> # Basic usage
-    >>> synthesizer = Synthesizer(output_dir="my_synthesis")
-    >>> results = synthesizer.run(samples_csv="peptide_samples.csv")
-    
+    >>> borf = Borf(output_dir="my_synthesis")
+    >>> results = borf.run(samples_csv="peptide_samples.csv")
+
     >>> # Custom configuration
-    >>> synthesizer = Synthesizer(
+    >>> borf = Borf(
     ...     output_dir="custom_output",
     ...     rfdiffusion_path="/path/to/RFdiffusion",
     ...     protein_mpnn_path="/path/to/ProteinMPNN",
     ...     pdb_path="/path/to/target.pdb"
     ... )
-    >>> results = synthesizer.run_complete_pipeline()
+    >>> results = borf.run_complete_pipeline()
     """
     
     def __init__(
@@ -51,13 +50,13 @@ class Synthesizer:
         protein_mpnn_path: Optional[str] = None,
         pdb_path: str = None,
         models_path: Optional[str] = None,
-        python_env_path: Optional[str] = None,
+        rfd_env_path: Optional[str] = None,
         checkpoint_path: Optional[str] = None,
         mpnn_chains: str = "A",
         mpnn_env: Optional[str] = None,
     ):
         """
-        Initialize the Synthesizer orchestrator.
+        Initialize the Borf orchestrator.
         
         Parameters
         ----------
@@ -71,7 +70,7 @@ class Synthesizer:
             Path to target protein PDB file. (Mandatory)
         models_path : str, optional
             Path to RFDiffusion models directory.
-        python_env_path : str, optional
+        rfd_env_path : str, optional
             Path to Python environment for RFDiffusion.
         checkpoint_path : str, optional
             Path to RFDiffusion checkpoint file.
@@ -101,7 +100,7 @@ class Synthesizer:
             'protein_mpnn_path': protein_mpnn_path,
             'pdb_path': pdb_path,
             'models_path': models_path,
-            'python_env_path': python_env_path,
+            'rfd_env_path': rfd_env_path,
             'checkpoint_path': checkpoint_path,
             'mpnn_chains': mpnn_chains,
             'mpnn_env': mpnn_env or sys.executable,
@@ -113,9 +112,9 @@ class Synthesizer:
         
         # Create base output directory
         self.output_dir.mkdir(exist_ok=True, parents=True)
-        
-        logging.info(f"Synthesizer initialized with output directory: {self.output_dir}")
-        
+
+        logging.info(f"Borf initialized with output directory: {self.output_dir}")
+
     @property
     def rfdiffusion(self) -> RFDiffusion:
         """Lazy initialization of RFDiffusion component."""
@@ -128,7 +127,7 @@ class Synthesizer:
                 output_dir=str(self.output_dir),
                 pdb_path=self.config['pdb_path'],
                 models_path=self.config['models_path'],
-                python_env_path=self.config['python_env_path'],
+                python_env_path=self.config['rfd_env_path'],
                 checkpoint_path=self.config['checkpoint_path']
             )
         return self._rfdiffusion
@@ -184,7 +183,7 @@ class Synthesizer:
     
     def print_configuration(self):
         """Print the current configuration and validation status."""
-        print("=== Synthesizer Configuration ===")
+        print("=== Borf Configuration ===")
         for key, value in self.config.items():
             if value is None:
                 value = "Not set"
@@ -494,7 +493,7 @@ class Synthesizer:
 
 
 def main():
-    """Command-line interface for Synthesizer."""
+    """Command-line interface for Borf."""
     import argparse
     
     parser = argparse.ArgumentParser(
@@ -527,8 +526,8 @@ def main():
     args = parser.parse_args()
     
     try:
-        # Initialize Synthesizer
-        synthesizer = Synthesizer(
+        # Initialize Borf
+        borf = Borf(
             output_dir=args.output_dir,
             rfdiffusion_path=args.rfdiffusion_path,
             protein_mpnn_path=args.protein_mpnn_path,
@@ -537,11 +536,11 @@ def main():
         
         # Print configuration if requested
         if args.config:
-            synthesizer.print_configuration()
+            borf.print_configuration()
             return
         
         # Run pipeline
-        results = synthesizer.run(
+        results = borf.run(
             samples_csv=args.samples_csv,
             pipeline_steps=args.steps,
             rf_dry_run=args.rf_dry_run,

@@ -7,10 +7,7 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
-
 import pandas as pd
-from dotenv import load_dotenv
-
 
 class RFDiffusion:
     """
@@ -53,9 +50,6 @@ class RFDiffusion:
             format='%(levelname)s: %(message)s', 
             stream=sys.stderr
         )
-
-        # Load environment variables
-        load_dotenv()
 
         # Validate mandatory argument
         if not rfdiffusion_path:
@@ -198,29 +192,26 @@ class RFDiffusion:
                 return False, sample_id, gpu_id
     
     @staticmethod
-    def worker(tasks: List[Tuple[Any, int, bool]]) -> List[Tuple[bool, str, int]]:
+    def worker(tasks: List[Tuple[Any, int, bool, dict]]) -> List[Tuple[bool, str, int]]:
         """
         Worker function for processing multiple tasks on a single GPU.
-        
-        Parameters
-        ----------
-        tasks : List[Tuple[Any, int, bool]]
-            List of tasks to process.
-        
-        Returns
-        -------
-        List[Tuple[bool, str, int]]
-            List of results from processing tasks.
+        Each task tuple must now include a config dict for RFDiffusion instantiation.
         """
-        # Note: This is a static method because it needs to be pickeable for multiprocessing
-        # We need to create a new instance inside the worker
         results = []
         if tasks:
-            # Extract configuration from the first task to recreate the instance
-            # This is a limitation of the multiprocessing approach
-            diffusion_instance = RFDiffusion()  # Use default configuration
+            # Extract config from the first task
+            _, _, _, config = tasks[0]
+            diffusion_instance = RFDiffusion(
+                rfdiffusion_path=config['rfdiffusion_path'],
+                output_dir=config.get('output_dir'),
+                pdb_path=config.get('pdb_path'),
+                models_path=config.get('models_path'),
+                python_env_path=config.get('python_env_path'),
+                checkpoint_path=config.get('checkpoint_path')
+            )
             for args in tasks:
-                results.append(diffusion_instance.run_rfdiffusion_single(args))
+                sample, gpu_id, dry_run, _ = args
+                results.append(diffusion_instance.run_rfdiffusion_single((sample, gpu_id, dry_run)))
         return results
     
     def process_samples(
@@ -280,9 +271,18 @@ class RFDiffusion:
         
         # Group tasks by GPU
         gpu_tasks = {gpu: [] for gpu in gpus}
+        # Prepare config dict for worker
+        config = {
+            'rfdiffusion_path': self.rfdiffusion_path,
+            'output_dir': str(self.output_dir) if self.output_dir else None,
+            'pdb_path': str(self.pdb_path) if self.pdb_path else None,
+            'models_path': self.models_path,
+            'python_env_path': self.python_env_path,
+            'checkpoint_path': self.checkpoint_path
+        }
         for i, (_, row) in enumerate(samples_df.iterrows()):
             gpu_id = gpus[i % len(gpus)]
-            gpu_tasks[gpu_id].append((row, gpu_id, dry_run))
+            gpu_tasks[gpu_id].append((row, gpu_id, dry_run, config))
         
         successful_runs = 0
         failed_runs = 0
@@ -291,8 +291,7 @@ class RFDiffusion:
             futures = []
             for gpu_id in gpus:
                 if gpu_tasks[gpu_id]:  # Only submit if there are tasks
-                    futures.append(executor.submit(self.worker, gpu_tasks[gpu_id]))
-            
+                    futures.append(executor.submit(RFDiffusion.worker, gpu_tasks[gpu_id]))
             for future in concurrent.futures.as_completed(futures):
                 try:
                     results = future.result()
@@ -304,7 +303,6 @@ class RFDiffusion:
                 except Exception as e:
                     logging.error(f"Error in worker process: {e}")
                     failed_runs += 1
-        
         return successful_runs, failed_runs
     
     def run(

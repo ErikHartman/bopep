@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
 
 import pandas as pd
-from dotenv import load_dotenv
 from Bio import PDB
 from Bio.PDB import PDBParser
 from Bio.SeqUtils import seq1
