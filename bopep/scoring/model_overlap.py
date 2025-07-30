@@ -6,7 +6,7 @@ def rmsd(coords1, coords2):
     return np.sqrt(np.mean(np.sum((coords1 - coords2) ** 2, axis=1)))
 
 def align_and_compute_rmsd(
-    ref_pdb_file, pdb_file
+    ref_pdb_file, pdb_file, peptide_sequence,
 ):
     """
     Given multiple PDBs, align each structure's receptor (chain A by default)
@@ -20,7 +20,6 @@ def align_and_compute_rmsd(
     new_chain_seqs = get_chain_sequences(pdb_file)
     if len(ref_chain_seqs) != 2:
         raise ValueError("Reference PDB must have exactly two chains.")
-    new_pep_seq = new_chain_seqs.get("B", "")
     ref_keys = list(ref_chain_seqs.keys())
 
     # Assign peptide/receptor chains by sequence match
@@ -30,7 +29,7 @@ def align_and_compute_rmsd(
         (ref_keys[1], ref_keys[0])
     ]
     for pep_id, rec_id in pairs:
-        if ref_chain_seqs[pep_id] == new_pep_seq:
+        if ref_chain_seqs[pep_id] == peptide_sequence:
             ref_pep_chain_id, ref_pep_seq = pep_id, ref_chain_seqs[pep_id]
             ref_rec_chain_id, ref_rec_seq = rec_id, ref_chain_seqs[rec_id]
             break
@@ -52,6 +51,11 @@ def align_and_compute_rmsd(
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
-    distance_matrix = align_and_compute_rmsd(ref_pdb_file=pdb_file_path, pdb_file=pdb_file_path)
+
+    seq_dict = get_chain_sequences(pdb_file_path)
+
+    print(seq_dict["B"], seq_dict["A"])
+    
+    distance_matrix = align_and_compute_rmsd(ref_pdb_file=pdb_file_path, pdb_file=pdb_file_path, peptide_sequence=seq_dict["B"])
     print(f"Distance matrix for {pdb_file_path}:")
     print(distance_matrix)
