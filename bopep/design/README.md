@@ -15,4 +15,4 @@ Before using this module, ensure you have:
 
 ## Basic Usage
 
-See `/bopep/examples/synthesis_example.py` for a complete usage example.
+See and run `/bopep/examples/design_example.py` for a complete usage example.
