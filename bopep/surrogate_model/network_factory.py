@@ -1,4 +1,4 @@
-from typing import Dict, Literal, Any, Optional
+from typing import Dict, Literal, Any
 
 from bopep.surrogate_model.base_models import (
     BaseNetwork,

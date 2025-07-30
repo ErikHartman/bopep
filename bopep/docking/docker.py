@@ -186,7 +186,7 @@ class Docker:
 
     def _log_config(self):
         """Log the current configuration of the Docker instance."""
-        logging.info(f"Docker configuration:")
+        logging.info("Docker configuration:")
         logging.info(f"Target structure: {self.target_structure_path}")
         logging.info(f"Output directory: {self.output_dir}")
         logging.info(f"Number of models: {self.num_models}")

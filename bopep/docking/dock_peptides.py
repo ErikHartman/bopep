@@ -1,10 +1,9 @@
 import os
 import shutil
 import subprocess
-from functools import partial
 from multiprocessing import get_context
 from typing import List, Optional
-from bopep.docking.utils import clean_up_files, docking_folder_exists
+from bopep.docking.utils import clean_up_files
 import logging
 
 logging.basicConfig(

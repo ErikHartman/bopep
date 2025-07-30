@@ -16,11 +16,11 @@ class TestDocker:
         assert docker.num_models == 5
         assert docker.num_recycles == 10
         assert docker.recycle_early_stop_tolerance == 0.01
-        assert docker.amber == True
+        assert docker.amber
         assert docker.num_relax == 1
         assert docker.output_dir == "/tmp"
         assert docker.gpu_ids == [0]
-        assert docker.overwrite_results == False
+        assert not docker.overwrite_results
 
     def test_init_custom(self):
         """Test Docker initialization with custom parameters"""
@@ -36,10 +36,10 @@ class TestDocker:
         
         assert docker.num_models == 3
         assert docker.num_recycles == 5
-        assert docker.amber == False
+        assert not docker.amber
         assert docker.output_dir == "/custom"
         assert docker.gpu_ids == [0, 1]
-        assert docker.overwrite_results == True
+        assert docker.overwrite_results
 
     def test_init_missing_output_dir(self):
         """Test Docker initialization fails without output_dir"""
@@ -90,5 +90,5 @@ class TestDockingUtils:
             
             result, path = docking_folder_exists(temp_dir, target_name, peptide)
             
-            assert result == False
+            assert not result
             assert temp_dir in path

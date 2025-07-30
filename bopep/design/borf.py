@@ -491,8 +491,8 @@ def main():
             limited_run=args.limited_run
         )
         
-        print(f"\n=== Results ===")
-        print(f"Pipeline completed successfully!")
+        print("\n=== Results ===")
+        print("Pipeline completed successfully!")
         if 'pipeline_success' in results:
             print(f"Total time: {results['elapsed_time']:.2f}s")
             print(f"Final output: {results.get('final_output_csv', 'N/A')}")

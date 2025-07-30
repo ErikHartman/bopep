@@ -218,7 +218,7 @@ def compare_all_hyperparameters(embedding_dict, scores_dict, test_x):
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     os.makedirs("examples/figures", exist_ok=True)
     plt.savefig("examples/figures/hyperparameter_comparison.png", dpi=300)
-    print(f"Figure saved as 'examples/figures/hyperparameter_comparison.png'")
+    print("Figure saved as 'examples/figures/hyperparameter_comparison.png'")
     plt.show()
 
 def train_and_plot_model(model, model_name, embedding_dict_scaled, scores_dict_scaled, 

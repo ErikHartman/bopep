@@ -206,11 +206,11 @@ class Embedder:
         
         # Print information about the reduction
         if is_sequence_embedding:
-            print(f"VAE reduction:")
+            print("VAE reduction:")
             print(f"Original embedding dimension: {first_emb.shape[1]}")
             print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[1]}")
         else:
-            print(f"VAE reduction:")
+            print("VAE reduction:")
             print(f"Original embedding dimension: {first_emb.shape[0]}")
             print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[0]}")
             
