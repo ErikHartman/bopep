@@ -395,12 +395,6 @@ class Borf:
             dry_run=rf_dry_run,
             skip_existing=rf_skip_existing
         )
-        
-        # Only proceed with MPNN if RFDiffusion was successful
-        if rf_results['successful_runs'] == 0 and not rf_dry_run:
-            logging.error("No successful RFDiffusion runs. Cannot proceed with MPNN + FastRelax.")
-            raise RuntimeError("RFDiffusion step failed completely")
-        
         # Step 2: ProteinMPNN + FastRelax
         logging.info("Step 2: Running ProteinMPNN + FastRelax...")
         mpnn_results = self.run_mpnn_fastrelax_only(

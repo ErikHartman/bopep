@@ -16,7 +16,9 @@ def run_minimal_complete_pipeline():
     output_dir = OUTPUT_DIR
     rfdiffusion_path = "/srv/data1/general/RFdiffusion"      # <-- set this to your RFdiffusion install
     protein_mpnn_path = "/srv/data1/general/ProteinMPNN"     # <-- set this to your ProteinMPNN install
-    pdb_path = os.path.join(os.path.dirname(__file__), "..", "data", "1ssc.pdb")
+    pdb_path = os.path.join(os.path.dirname(__file__), "..", "data", "plo1.pdb")
+
+    # Che
 
     borf = Borf(
         output_dir=output_dir,
@@ -24,7 +26,7 @@ def run_minimal_complete_pipeline():
         protein_mpnn_path=protein_mpnn_path,
         pdb_path=pdb_path,
         rfd_env_path="/srv/data1/general/RFdiffusion/env/rf_env/bin/python",
-        mpnn_env="/srv/data1/general/ProteinMPNN/env/mpnn_env/bin/python" 
+        mpnn_env="/srv/data1/ma7631si/proteinMPNN/mpnn_env/bin/python"
     )
 
     samples_csv = borf.create_sample_data(os.path.join(OUTPUT_DIR, "peptide_samples.csv"))
