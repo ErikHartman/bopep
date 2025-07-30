@@ -40,7 +40,7 @@ class Borf:
     ...     protein_mpnn_path="/path/to/ProteinMPNN",
     ...     pdb_path="/path/to/target.pdb"
     ... )
-    >>> results = borf.run_complete_pipeline()
+    >>> results = borf.run()
     """
     
     def __init__(
@@ -94,6 +94,12 @@ class Borf:
         # Store configuration
         if pdb_path is None:
             raise ValueError("pdb_path is a mandatory argument and must be provided.")
+
+        if not Path(rfdiffusion_path).exists():
+            raise ValueError(f"RFDiffusion path does not exist: {rfdiffusion_path}. Please install RFDiffusion and set the correct path.")
+        if not Path(mpnn_env).exists():
+            raise ValueError(f"MPNN environment path does not exist: {mpnn_env}. Please install ProteinMPNN and set the correct path.")
+
         self.config = {
             'output_dir': str(self.output_dir),
             'rfdiffusion_path': rfdiffusion_path,
@@ -103,7 +109,7 @@ class Borf:
             'rfd_env_path': rfd_env_path,
             'checkpoint_path': checkpoint_path,
             'mpnn_chains': mpnn_chains,
-            'mpnn_env': mpnn_env or sys.executable,
+            'mpnn_env': mpnn_env,
         }
         
         # Initialize components (lazy loading)
@@ -336,8 +342,8 @@ class Borf:
         
         logging.info(f"MPNN + FastRelax completed: {results['processed_pdbs']} PDBs processed")
         return results
-    
-    def run_complete_pipeline(
+
+    def run(
         self,
         samples_csv: Optional[str] = None,
         # RFDiffusion parameters
@@ -426,65 +432,6 @@ class Borf:
         
         return combined_results
     
-    def run(
-        self,
-        samples_csv: Optional[str] = None,
-        pipeline_steps: List[str] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Main method to run the synthesis pipeline with flexible step selection.
-        
-        Parameters
-        ----------
-        samples_csv : str, optional
-            Path to samples CSV file.
-        pipeline_steps : List[str], optional
-            Steps to run. Options: ['rfdiffusion', 'mpnn_fastrelax', 'complete'].
-            If None, runs complete pipeline.
-        **kwargs
-            Additional parameters passed to specific pipeline methods.
-        
-        Returns
-        -------
-        Dict[str, Any]
-            Results from the requested pipeline steps.
-        """
-        if pipeline_steps is None:
-            pipeline_steps = ['complete']
-        
-        if 'complete' in pipeline_steps:
-            return self.run_complete_pipeline(samples_csv=samples_csv, **kwargs)
-        
-        results = {}
-        
-        if 'rfdiffusion' in pipeline_steps:
-            results['rfdiffusion'] = self.run_rfdiffusion_only(samples_csv=samples_csv, **kwargs)
-        
-        if 'mpnn_fastrelax' in pipeline_steps:
-            results['mpnn_fastrelax'] = self.run_mpnn_fastrelax_only(**kwargs)
-        
-        return results
-    
-    def get_available_steps(self) -> List[str]:
-        """Get list of available pipeline steps."""
-        return ['rfdiffusion', 'mpnn_fastrelax', 'complete']
-    
-    def cleanup_intermediate_files(self, keep_logs: bool = True):
-        """
-        Clean up intermediate files to save space.
-        
-        Parameters
-        ----------
-        keep_logs : bool, default True
-            If True, keep log files for debugging.
-        """
-        logging.info("Cleaning up intermediate files...")
-        
-        # Add cleanup logic here if needed
-        # For now, just log the action
-        logging.info("Cleanup completed")
-
 
 def main():
     """Command-line interface for Borf."""

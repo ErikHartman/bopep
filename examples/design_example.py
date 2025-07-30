@@ -26,11 +26,11 @@ def run_minimal_complete_pipeline():
         protein_mpnn_path=protein_mpnn_path,
         pdb_path=pdb_path,
         rfd_env_path="/srv/data1/general/RFdiffusion/env/rf_env/bin/python",
-        mpnn_env="/srv/data1/ma7631si/proteinMPNN/mpnn_env/bin/python"
+        mpnn_env="/srv/data1/general/proteinMPNN/mpnn_env/bin/python"
     )
 
     samples_csv = borf.create_sample_data(os.path.join(OUTPUT_DIR, "peptide_samples.csv"))
-    results = borf.run_complete_pipeline(
+    results = borf.run(
         samples_csv=samples_csv,
         temperature=0.1,
         relax_cycles=1,

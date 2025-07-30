@@ -403,7 +403,7 @@ class MPNNFastRelax:
             init("-beta_nov16 -in:file:silent_struct_type binary -use_terminal_residues true -mute all basic.io.database core.scoring")
             
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            xml = os.path.join(script_dir, "RosettaFastRelaxUtil.xml")
+            xml = os.path.join(script_dir, "rosetta/RosettaFastRelaxUtil.xml")
             
             if os.path.exists(xml):
                 objs = protocols.rosetta_scripts.XmlObjects.create_from_file(xml)
@@ -614,7 +614,7 @@ class MPNNFastRelax:
                 pdb_path = None
                 if (sample_id_match and sample_id_match.group(1).isdigit() and 
                     str(cycle).isdigit()):
-                    pdb_cycle_idx = int(cycle) - 1
+                    pdb_cycle_idx = int(cycle)
                     pdb_path = str(
                         self.sequence_output_dir / "pdbs" / 
                         f"sample_{sample_id_match.group(1)}" / 
