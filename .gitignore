@@ -80,6 +80,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# VS Code
+*.code-workspace
+
 # PyBuilder
 .pybuilder/
 target/

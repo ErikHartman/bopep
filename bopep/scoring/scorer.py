@@ -62,8 +62,6 @@ class Scorer:
         required_n_contact_residues: Optional[int] = 5,
         binding_site_distance_threshold: Optional[int] = 5.0,
         template_pdb: Optional[str] = None,
-        alignment_chain: str = "A",
-        peptide_chain: str = "B",
     ) -> dict:
         """
         Calculate and return selected scores for a peptide.
@@ -292,7 +290,7 @@ class Scorer:
                 raise ValueError(
                     "WARNING: pdb_file or colab_dir is required for template_rmsd score"
                 )
-            rmsd = align_and_compute_rmsd(ref_pdb_file=template_pdb, pdb_file=pdb_file, alignment_chain=alignment_chain, peptide_chain=peptide_chain)
+            rmsd = align_and_compute_rmsd(ref_pdb_file=template_pdb, pdb_file=pdb_file)
             scores["template_rmsd"] = rmsd
 
         # Peptide property scores can be calculated with either peptide_sequence or pdb_file

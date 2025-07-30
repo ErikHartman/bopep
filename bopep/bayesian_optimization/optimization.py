@@ -534,7 +534,7 @@ class BoPep:
                 inputs=docked_dirs,
                 input_type="colab_dir",
                 binding_site_residue_indices=self.binding_site_residue_indices,
-                n_jobs=self.scoring_kwargs.get("n_jobs", 12),
+                n_jobs=self.scoring_kwargs.get("n_jobs", 1), # Default to 1 job unless specified (not safe otherwise)
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 required_n_contact_residues=required_n_contact_residues,
                 template_pdbs=self.template_pdbs,
