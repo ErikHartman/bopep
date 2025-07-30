@@ -22,6 +22,9 @@ class BoGA:
     - Abstract out sequence generation logic
     - Add more detailed logging
     - Abstract out things from BoPep and use here.
+        - Eg binding site validataion
+        - Hparam opt
+    
 
     Genetic algorithm for peptide binder discovery using surrogate modeling.
 
