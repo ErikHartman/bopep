@@ -32,9 +32,7 @@ def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
 
     :return: (
         receptor_coords: list of (x, y, z),
-        receptor_bfactors: list of float,
         peptide_coords: list of (x, y, z),
-        peptide_bfactors: list of float
     )
     """
     parser = PDBParser(QUIET=True)
@@ -55,7 +53,6 @@ def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
                 if atom_type != "CA":
                     continue    
                 x, y, z = atom.coord
-                bfactor = atom.bfactor
                 if chain_id == receptor_chain:
                     receptor_coords.append((x, y, z))
                 elif chain_id == peptide_chain:

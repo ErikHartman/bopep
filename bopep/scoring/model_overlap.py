@@ -30,7 +30,7 @@ def align_and_compute_rmsd(
     ]
     for pep_id, rec_id in pairs:
         if ref_chain_seqs[pep_id] == peptide_sequence:
-            ref_pep_chain_id, ref_pep_seq = pep_id, ref_chain_seqs[pep_id]
+            ref_pep_chain_id =  pep_id
             ref_rec_chain_id, ref_rec_seq = rec_id, ref_chain_seqs[rec_id]
             break
     else:

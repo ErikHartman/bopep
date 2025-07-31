@@ -101,7 +101,7 @@ def _check_binding_site_residue_indices(
     print("=" * 60)
     print(f"Full sequence length: {len(protein_sequence)}")
     if isinstance(binding_site_residue_indices, dict):
-        print(f"Peptide-specific binding sites:")
+        print("Peptide-specific binding sites:")
         for peptide, residues in binding_site_residue_indices.items():
             print(f"  {peptide}: {residues}")
     else:

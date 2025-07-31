@@ -3,10 +3,6 @@ import numpy as np
 from tqdm import tqdm
 import importlib.resources as pkg_resources
 
-import csv
-import numpy as np
-from tqdm import tqdm
-import importlib.resources as pkg_resources
 
 
 def get_aaindex_path():

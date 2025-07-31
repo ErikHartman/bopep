@@ -14,18 +14,6 @@ from Bio.PDB import PDBParser
 from Bio.SeqUtils import seq1
 import concurrent.futures
 
-try:
-    from pyrosetta import *
-    from pyrosetta.rosetta import *
-    from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
-    from pyrosetta.rosetta.core.pose import Pose
-    import pyrosetta.rosetta as rosetta
-    PYROSETTA_AVAILABLE = True
-except ImportError:
-    logging.warning("PyRosetta not available. Some functionality will be limited.")
-    PYROSETTA_AVAILABLE = False
-
-
 class MPNNFastRelax:
     """
     A class for running ProteinMPNN + FastRelax pipeline on RFDiffusion designs.
@@ -89,10 +77,6 @@ class MPNNFastRelax:
     
     def _initialize_pyrosetta(self):
         """Initialize PyRosetta and FastRelax mover."""
-        if not PYROSETTA_AVAILABLE:
-            logging.warning("PyRosetta not available. FastRelax functionality disabled.")
-            self.fast_relax = None
-            return
             
         try:
             from pyrosetta import init
@@ -290,8 +274,8 @@ class MPNNFastRelax:
         """
         try:
             with fa_path.open() as fh:
-                lines = [l.strip() for l in fh if l.strip()]
-            
+                lines = [line.strip() for line in fh if line.strip()]
+
             seqs = []
             for i, line in enumerate(lines):
                 if line.startswith(">") and i + 1 < len(lines):
@@ -322,9 +306,9 @@ class MPNNFastRelax:
         """
         try:
             with fa_path.open() as fh:
-                lines = [l.strip() for l in fh if l.strip()]
-            
-            header_lines = [l for l in lines if l.startswith(">")]
+                lines = [line.strip() for line in fh if line.strip()]
+
+            header_lines = [line for line in lines if line.startswith(">")]
             if len(header_lines) < 2:
                 return None, None, None
             
@@ -357,10 +341,6 @@ class MPNNFastRelax:
         float
             Interface dG value.
         """
-        if not PYROSETTA_AVAILABLE:
-            logging.error("PyRosetta not available for interface_dG calculation")
-            return 0.0
-            
         try:
             from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
             ia = InterfaceAnalyzerMover()
@@ -387,10 +367,6 @@ class MPNNFastRelax:
             Results from threading and relaxation.
         """
         (pdb, seq, threaded_pdb_path, relaxed_pdb_path, cycle, sample_id) = args
-        
-        if not PYROSETTA_AVAILABLE:
-            logging.error("PyRosetta not available for thread_and_relax_job")
-            return [None, os.path.basename(relaxed_pdb_path), cycle, sample_id]
         
         try:
             # Import PyRosetta functions in worker process

@@ -97,6 +97,7 @@ class TestMonteCarloDropout:
             dropout_rate=0.1,
             network_type="mlp"
         )
+        assert isinstance(mc_model, MonteCarloDropout)
 
     def test_fit_dict_mlp(self):
         # Generate fixed-length data for MLP
@@ -121,6 +122,7 @@ class TestMonteCarloDropout:
         )
 
         assert isinstance(loss, float)
+        assert isinstance(mc_model, MonteCarloDropout)
 
     def test_predict_dict_mlp(self):
         # Generate fixed-length data for MLP
@@ -192,6 +194,8 @@ class TestMonteCarloDropout:
                 device=device
             )
             assert True
+            assert isinstance(predictions, dict)
+            assert isinstance(mc_model, MonteCarloDropout)
         except Exception as e:
             pytest.fail(f"BiLSTM training/prediction failed with error: {e}")
 
@@ -250,6 +254,7 @@ class TestDeepEvidentialRegression:
             hidden_dims=[64, 32],
             network_type="mlp"
         )
+        assert isinstance(der_model, DeepEvidentialRegression)
 
     def test_evidential_loss(self):
         # Simple test to ensure loss function doesn't crash

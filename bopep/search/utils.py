@@ -61,9 +61,13 @@ def _validate_dependencies():
             stderr=subprocess.STDOUT,
             universal_newlines=True,
         )
-    except:
+    except FileNotFoundError:
         raise ValueError(
             "colabfold is not callable through the command: colabfold_batch --help"
+        )
+    except Exception as e:
+        raise ValueError(
+            f"Error occurred while checking colabfold: {e}"
         )
 
     try:
