@@ -1,4 +1,3 @@
-import csv
 import json
 from pathlib import Path
 import pickle
@@ -107,7 +106,7 @@ class BoPep:
         self._train_on_all = _train_on_all.__get__(self, BoPep)
 
 
-    def optimize(
+    def run(
         self,
         schedule: List[Dict[str, Any]],
         batch_size: int,

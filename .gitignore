@@ -1,5 +1,5 @@
 # Bopep files
-
+.hydra
 /data/output/*
 */design_output
 *.egg-info

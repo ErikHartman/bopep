@@ -12,8 +12,7 @@ import sys
 import logging
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, List
-import pandas as pd
+from typing import Optional, Dict, Any
 
 from bopep.design.diffusion import RFDiffusion
 from bopep.design.mpnn_fastrelax import MPNNFastRelax
@@ -120,229 +119,7 @@ class Borf:
         self.output_dir.mkdir(exist_ok=True, parents=True)
 
         logging.info(f"Borf initialized with output directory: {self.output_dir}")
-
-    @property
-    def rfdiffusion(self) -> RFDiffusion:
-        """Lazy initialization of RFDiffusion component."""
-        if self._rfdiffusion is None:
-            if not self.config['rfdiffusion_path']:
-                raise ValueError("RFDiffusion path not specified. Set rfdiffusion_path or RFDIFFUSION_PATH environment variable.")
-            
-            self._rfdiffusion = RFDiffusion(
-                rfdiffusion_path=self.config['rfdiffusion_path'],
-                output_dir=str(self.output_dir),
-                pdb_path=self.config['pdb_path'],
-                models_path=self.config['models_path'],
-                python_env_path=self.config['rfd_env_path'],
-                checkpoint_path=self.config['checkpoint_path']
-            )
-        return self._rfdiffusion
     
-    @property
-    def mpnn_fastrelax(self) -> MPNNFastRelax:
-        """Lazy initialization of MPNNFastRelax component."""
-        if self._mpnn_fastrelax is None:
-            self._mpnn_fastrelax = MPNNFastRelax(
-                output_dir=str(self.output_dir),
-                designs_dir=str(self.output_dir / "designs"),
-                protein_mpnn_path=self.config['protein_mpnn_path'],
-                mpnn_chains=self.config['mpnn_chains'],
-                mpnn_env=self.config['mpnn_env']
-            )
-        return self._mpnn_fastrelax
-    
-    def validate_configuration(self) -> Dict[str, bool]:
-        """
-        Validate the configuration and check for required dependencies.
-        
-        Returns
-        -------
-        Dict[str, bool]
-            Dictionary indicating which components are properly configured.
-        """
-        validation = {
-            'rfdiffusion_configured': bool(self.config['rfdiffusion_path']),
-            'protein_mpnn_configured': bool(self.config['protein_mpnn_path']),
-            'pdb_file_exists': bool(self.config['pdb_path'] and Path(self.config['pdb_path']).exists()),
-            'output_dir_writable': self.output_dir.exists() and os.access(self.output_dir, os.W_OK)
-        }
-        
-        # Check RFDiffusion installation
-        if validation['rfdiffusion_configured']:
-            rf_path = Path(self.config['rfdiffusion_path'])
-            validation['rfdiffusion_exists'] = rf_path.exists()
-            validation['rfdiffusion_script_exists'] = (rf_path / "scripts" / "run_inference.py").exists()
-        else:
-            validation['rfdiffusion_exists'] = False
-            validation['rfdiffusion_script_exists'] = False
-        
-        # Check ProteinMPNN installation
-        if validation['protein_mpnn_configured']:
-            mpnn_path = Path(self.config['protein_mpnn_path'])
-            validation['protein_mpnn_exists'] = mpnn_path.exists()
-            validation['protein_mpnn_script_exists'] = (mpnn_path / "protein_mpnn_run.py").exists()
-        else:
-            validation['protein_mpnn_exists'] = False
-            validation['protein_mpnn_script_exists'] = False
-        
-        return validation
-    
-    def print_configuration(self):
-        """Print the current configuration and validation status."""
-        print("=== Borf Configuration ===")
-        for key, value in self.config.items():
-            if value is None:
-                value = "Not set"
-            print(f"{key:20}: {value}")
-        
-        print("\n=== Configuration Validation ===")
-        validation = self.validate_configuration()
-        for key, status in validation.items():
-            status_str = "✓ OK" if status else "✗ FAILED"
-            print(f"{key:25}: {status_str}")
-    
-    def create_sample_data(
-        self, 
-        output_path: Optional[str] = None,
-        sample_data: Optional[List[Dict]] = None
-    ) -> str:
-        """
-        Create sample peptide data for the pipeline.
-        
-        Parameters
-        ----------
-        output_path : str, optional
-            Path to save the samples CSV. If None, uses default location.
-        sample_data : List[Dict], optional
-            Custom sample data. If None, creates default examples.
-        
-        Returns
-        -------
-        str
-            Path to the created samples CSV file.
-        """
-        if output_path is None:
-            samples_dir = self.output_dir / "samples"
-            samples_dir.mkdir(exist_ok=True, parents=True)
-            output_path = samples_dir / "peptide_samples.csv"
-        
-        if sample_data is None:
-            # Create default sample data
-            sample_data = [
-                {
-                    'sample_id': 1,
-                    'length': 10,
-                    'hotspots': 'A400,A403,A407'
-                },
-                {
-                    'sample_id': 2,
-                    'length': 12,
-                    'hotspots': 'A402,A405,A408'
-                },
-                {
-                    'sample_id': 3,
-                    'length': 8,
-                    'hotspots': 'A401,A404,A406'
-                },
-                {
-                    'sample_id': 4,
-                    'length': 15,
-                    'hotspots': 'A399,A402,A405,A408'
-                },
-                {
-                    'sample_id': 5,
-                    'length': 11,
-                    'hotspots': 'A400,A403,A407,A410'
-                }
-            ]
-        
-        df = pd.DataFrame(sample_data)
-        df.to_csv(output_path, index=False)
-        
-        logging.info(f"Created sample data with {len(sample_data)} samples at: {output_path}")
-        return str(output_path)
-    
-    def run_rfdiffusion_only(
-        self,
-        samples_csv: Optional[str] = None,
-        dry_run: bool = False,
-        skip_existing: bool = True
-    ) -> Dict[str, Any]:
-        """
-        Run only the RFDiffusion step of the pipeline.
-        
-        Parameters
-        ----------
-        samples_csv : str, optional
-            Path to samples CSV file. If None, creates default samples.
-        dry_run : bool, default False
-            If True, print commands without executing them.
-        skip_existing : bool, default True
-            If True, skip samples that have already been processed.
-        
-        Returns
-        -------
-        Dict[str, Any]
-            Results from RFDiffusion run.
-        """
-        if samples_csv is None:
-            samples_csv = self.create_sample_data()
-        
-        logging.info("Running RFDiffusion step...")
-        results = self.rfdiffusion.run(
-            samples_csv=samples_csv,
-            dry_run=dry_run,
-            skip_existing=skip_existing
-        )
-        
-        logging.info(f"RFDiffusion completed: {results['successful_runs']} successful, {results['failed_runs']} failed")
-        return results
-    
-    def run_mpnn_fastrelax_only(
-        self,
-        designs_dir: Optional[str] = None,
-        temperature: float = 0.1,
-        relax_cycles: int = 1,
-        threads: int = 4,
-        limited_run: int = 0,
-        output_csv: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Run only the ProteinMPNN + FastRelax step of the pipeline.
-        
-        Parameters
-        ----------
-        designs_dir : str, optional
-            Directory containing RFDiffusion design PDB files.
-        temperature : float, default 0.1
-            ProteinMPNN sampling temperature.
-        relax_cycles : int, default 1
-            Number of MPNN + FastRelax cycles.
-        threads : int, default 4
-            Number of parallel threads.
-        limited_run : int, default 0
-            Limit number of PDBs (0 = no limit).
-        output_csv : str, optional
-            Output CSV path.
-        
-        Returns
-        -------
-        Dict[str, Any]
-            Results from MPNN + FastRelax run.
-        """
-        logging.info("Running ProteinMPNN + FastRelax step...")
-        results = self.mpnn_fastrelax.run(
-            designs_dir=designs_dir,
-            temperature=temperature,
-            relax_cycles=relax_cycles,
-            threads=threads,
-            limited_run=limited_run,
-            output_csv=output_csv
-        )
-        
-        logging.info(f"MPNN + FastRelax completed: {results['processed_pdbs']} PDBs processed")
-        return results
-
     def run(
         self,
         samples_csv: Optional[str] = None,
@@ -387,23 +164,23 @@ class Borf:
         start_time = time.time()
         
         # Validate configuration
-        validation = self.validate_configuration()
+        validation = self._validate_configuration()
         if not all([validation['rfdiffusion_configured'], validation['protein_mpnn_configured']]):
-            raise ValueError("Pipeline not properly configured. Use print_configuration() to check status.")
+            raise ValueError("Pipeline not properly configured. Use _print_configuration() to check status.")
         
         if samples_csv is None:
             samples_csv = self.create_sample_data()
         
         # Step 1: RFDiffusion
         logging.info("Step 1: Running RFDiffusion...")
-        rf_results = self.run_rfdiffusion_only(
+        rf_results = self._run_rfdiffusion_only(
             samples_csv=samples_csv,
             dry_run=rf_dry_run,
             skip_existing=rf_skip_existing
         )
         # Step 2: ProteinMPNN + FastRelax
         logging.info("Step 2: Running ProteinMPNN + FastRelax...")
-        mpnn_results = self.run_mpnn_fastrelax_only(
+        mpnn_results = self._run_mpnn_fastrelax_only(
             designs_dir=str(self.output_dir / "designs"),
             temperature=temperature,
             relax_cycles=relax_cycles,
@@ -431,6 +208,135 @@ class Borf:
         logging.info(f"Final output: {combined_results['final_output_csv']}")
         
         return combined_results
+
+    @property
+    def rfdiffusion(self) -> RFDiffusion:
+        """Lazy initialization of RFDiffusion component."""
+        if self._rfdiffusion is None:
+            if not self.config['rfdiffusion_path']:
+                raise ValueError("RFDiffusion path not specified. Set rfdiffusion_path or RFDIFFUSION_PATH environment variable.")
+            
+            self._rfdiffusion = RFDiffusion(
+                rfdiffusion_path=self.config['rfdiffusion_path'],
+                output_dir=str(self.output_dir),
+                pdb_path=self.config['pdb_path'],
+                models_path=self.config['models_path'],
+                python_env_path=self.config['rfd_env_path'],
+                checkpoint_path=self.config['checkpoint_path']
+            )
+        return self._rfdiffusion
+    
+    @property
+    def mpnn_fastrelax(self) -> MPNNFastRelax:
+        """Lazy initialization of MPNNFastRelax component."""
+        if self._mpnn_fastrelax is None:
+            self._mpnn_fastrelax = MPNNFastRelax(
+                output_dir=str(self.output_dir),
+                designs_dir=str(self.output_dir / "designs"),
+                protein_mpnn_path=self.config['protein_mpnn_path'],
+                mpnn_chains=self.config['mpnn_chains'],
+                mpnn_env=self.config['mpnn_env']
+            )
+        return self._mpnn_fastrelax
+    
+    def _validate_configuration(self) -> Dict[str, bool]:
+        """
+        Validate the configuration and check for required dependencies.
+        
+        Returns
+        -------
+        Dict[str, bool]
+            Dictionary indicating which components are properly configured.
+        """
+        validation = {
+            'rfdiffusion_configured': bool(self.config['rfdiffusion_path']),
+            'protein_mpnn_configured': bool(self.config['protein_mpnn_path']),
+            'pdb_file_exists': bool(self.config['pdb_path'] and Path(self.config['pdb_path']).exists()),
+            'output_dir_writable': self.output_dir.exists() and os.access(self.output_dir, os.W_OK)
+        }
+        
+        # Check RFDiffusion installation
+        if validation['rfdiffusion_configured']:
+            rf_path = Path(self.config['rfdiffusion_path'])
+            validation['rfdiffusion_exists'] = rf_path.exists()
+            validation['rfdiffusion_script_exists'] = (rf_path / "scripts" / "run_inference.py").exists()
+        else:
+            validation['rfdiffusion_exists'] = False
+            validation['rfdiffusion_script_exists'] = False
+        
+        # Check ProteinMPNN installation
+        if validation['protein_mpnn_configured']:
+            mpnn_path = Path(self.config['protein_mpnn_path'])
+            validation['protein_mpnn_exists'] = mpnn_path.exists()
+            validation['protein_mpnn_script_exists'] = (mpnn_path / "protein_mpnn_run.py").exists()
+        else:
+            validation['protein_mpnn_exists'] = False
+            validation['protein_mpnn_script_exists'] = False
+        
+        return validation
+    
+    def _print_configuration(self):
+        """Print the current configuration and validation status."""
+        print("=== Borf Configuration ===")
+        for key, value in self.config.items():
+            if value is None:
+                value = "Not set"
+            print(f"{key:20}: {value}")
+        
+        print("\n=== Configuration Validation ===")
+        validation = self._validate_configuration()
+        for key, status in validation.items():
+            status_str = "✓ OK" if status else "✗ FAILED"
+            print(f"{key:25}: {status_str}")
+    
+    def _run_rfdiffusion_only(
+        self,
+        samples_csv: Optional[str] = None,
+        dry_run: bool = False,
+        skip_existing: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Run only the RFDiffusion step of the pipeline.
+        """
+        if samples_csv is None:
+            samples_csv = self.create_sample_data()
+        
+        logging.info("Running RFDiffusion step...")
+        results = self.rfdiffusion.run(
+            samples_csv=samples_csv,
+            dry_run=dry_run,
+            skip_existing=skip_existing
+        )
+        
+        logging.info(f"RFDiffusion completed: {results['successful_runs']} successful, {results['failed_runs']} failed")
+        return results
+    
+    def _run_mpnn_fastrelax_only(
+        self,
+        designs_dir: Optional[str] = None,
+        temperature: float = 0.1,
+        relax_cycles: int = 1,
+        threads: int = 4,
+        limited_run: int = 0,
+        output_csv: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Run only the ProteinMPNN + FastRelax step of the pipeline.
+        """
+        logging.info("Running ProteinMPNN + FastRelax step...")
+        results = self.mpnn_fastrelax.run(
+            designs_dir=designs_dir,
+            temperature=temperature,
+            relax_cycles=relax_cycles,
+            threads=threads,
+            limited_run=limited_run,
+            output_csv=output_csv
+        )
+        
+        logging.info(f"MPNN + FastRelax completed: {results['processed_pdbs']} PDBs processed")
+        return results
+
+    
     
 
 def main():
@@ -477,7 +383,7 @@ def main():
         
         # Print configuration if requested
         if args.config:
-            borf.print_configuration()
+            borf._print_configuration()
             return
         
         # Run pipeline

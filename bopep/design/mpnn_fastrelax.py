@@ -651,7 +651,7 @@ class MPNNFastRelax:
             # Merge with sample data
             if not sample_df.empty:
                 df = df.merge(sample_df, on="sample_id", how="left")
-        
+        df = df[["sample_id", "cycle", "sequence", "interface_dG",  "mpnn_score", "mpnn_global_score", "mpnn_seq_recovery", "full_path",  "relaxed_pdb", "fasta_file"]]
         df.to_csv(output_path, index=False)
         logging.info(f"Sequences saved to {output_path}")
     
@@ -724,7 +724,7 @@ class MPNNFastRelax:
                 logging.info(f"interface_dG_scores.csv saved to {self.sequence_output_dir}")
             
             # Create output CSV
-            output_path = output_csv or str(self.sequence_output_dir / "peptide_sequences.csv")
+            output_path = output_csv or str(self.output_dir / "borf_output.csv")
             self.create_output_csv(self.sequence_output_dir / "fastas", output_path)
             
             results = {
