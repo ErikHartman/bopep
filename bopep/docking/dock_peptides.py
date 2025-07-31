@@ -112,7 +112,6 @@ def dock_peptide(
     except subprocess.CalledProcessError as e:
         logging.info(f"An error occurred during docking of {peptide_sequence}: {e}")
 
-    # Return the directory containing the docked peptide results
     return peptide_output_dir
 
 

@@ -1,5 +1,7 @@
 import os
 import sys
+
+import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
@@ -31,7 +33,8 @@ def run_minimal_complete_pipeline():
         mpnn_env=MPNN_ENV_PATH
     )
 
-    samples_csv = borf.create_sample_data(os.path.join(OUTPUT_DIR, "peptide_samples.csv"))
+    samples_csv = pd.read_csv("data/peptide_samples.csv")
+
     results = borf.run(
         samples_csv=samples_csv,
         temperature=0.1,

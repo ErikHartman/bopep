@@ -17,11 +17,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-[project.optional-dependencies]
-pyrosetta = [
-    "pyrosetta @ https://west.rosettacommons.org/pyrosetta/release/release/PyRosetta4.Release.python313.ubuntu.wheel/pyrosetta-2025.25+release.a0cefad01b-cp313-cp313-linux_x86_64.whl#sha256=0ec84ac865336ca3266eb8a6e8b1c5908dbce661db21f173bbed36007e3f8408",
-    "pyrosetta-installer==0.1.2"
-]
 
 [tool.hatch.metadata]
 allow-direct-references = true

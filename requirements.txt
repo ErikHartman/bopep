@@ -11,4 +11,5 @@ biopython
 fair-esm
 pytest>=6.0
 pytest-mock
+pyrosetta-installer
 
