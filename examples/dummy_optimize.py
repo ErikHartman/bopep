@@ -223,7 +223,7 @@ def test_bopep_with_precomputed_data(
         logging.warning(f"Could not find PDB file, using {target_pdb_path} (may not exist)")
 
     try:
-        bopep.optimize(
+        bopep.run(
             target_structure_path=target_pdb_path,
             num_initial=100,
             batch_size=10,
@@ -263,7 +263,7 @@ def test_bopep_with_precomputed_data(
         bopep_cont._score_batch = mock_score_batch
         bopep_cont.docker.dock_peptides = lambda peptides: peptides
 
-        bopep_cont.optimize(
+        bopep_cont.run(
             target_structure_path=target_pdb_path,
             batch_size=10,
             schedule=schedule_continue,
@@ -456,7 +456,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
     try:
         # Run traditional approach
         logging.info("Running optimization with traditional binding sites...")
-        bopep_traditional.optimize(
+        bopep_traditional.run(
             target_structure_path=target_pdb_path,
             num_initial=3,
             batch_size=2,
@@ -470,7 +470,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
 
         # Run peptide-specific approach  
         logging.info("Running optimization with peptide-specific binding sites...")
-        bopep_specific.optimize(
+        bopep_specific.run(
             target_structure_path=target_pdb_path,
             num_initial=3,
             batch_size=2,

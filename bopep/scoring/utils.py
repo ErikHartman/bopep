@@ -1,5 +1,6 @@
 from Bio.PDB import PDBParser
 from Bio.PDB.Polypeptide import is_aa
+from Bio.Data.IUPACData import protein_letters_3to1
 import os
 import json
 import re
@@ -31,9 +32,7 @@ def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
 
     :return: (
         receptor_coords: list of (x, y, z),
-        receptor_bfactors: list of float,
         peptide_coords: list of (x, y, z),
-        peptide_bfactors: list of float
     )
     """
     parser = PDBParser(QUIET=True)
@@ -54,7 +53,6 @@ def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
                 if atom_type != "CA":
                     continue    
                 x, y, z = atom.coord
-                bfactor = atom.bfactor
                 if chain_id == receptor_chain:
                     receptor_coords.append((x, y, z))
                 elif chain_id == peptide_chain:
@@ -89,3 +87,21 @@ def get_plDDT_from_dir(colab_dir, rank_num : int = 1):
     except (IOError, json.JSONDecodeError) as e:
         print(f"Error reading JSON file: {e}")
         return None
+
+def get_chain_sequences(pdb_file):
+     parser = PDBParser(QUIET=True)
+     structure = parser.get_structure('struct', pdb_file)
+     return {chain.id: ''.join([
+         protein_letters_3to1.get(residue.get_resname().capitalize(), 'X')
+         for residue in chain if residue.id[0] == ' '
+     ]) for model in structure for chain in model}
+
+def match_and_truncate(ref_seq, ref_coords, target_seq, target_coords):
+    if ref_seq in target_seq:
+        i = target_seq.index(ref_seq)
+        return ref_coords, target_coords[i:i+len(ref_seq)]
+    elif target_seq in ref_seq:
+        i = ref_seq.index(target_seq)
+        return ref_coords[i:i+len(target_seq)], target_coords
+    else:
+        raise ValueError("Could not match reference and target receptor sequences for alignment.")

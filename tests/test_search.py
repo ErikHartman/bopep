@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
-from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
-from bopep.bayesian_optimization.selection import PeptideSelector
+from bopep.search.acquisition_functions import AcquisitionFunction
+from bopep.search.selection import PeptideSelector
 
 
 class TestAcquisitionFunction:

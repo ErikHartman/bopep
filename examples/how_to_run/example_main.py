@@ -120,7 +120,6 @@ if __name__ == "__main__":
         schedule=BO_SCHEDULE,
         initial_peptides=INITIAL_PEPTIDES,
         batch_size=BATCH_SIZE,
-        embeddings=EMBEDDINGS,
         binding_site_residue_indices=BINDING_SITE_RESIDUE_INDICES,
         assume_zero_indexed=True,  # PDB files are 0-indexed
         num_validate=NUM_VALIDATE,

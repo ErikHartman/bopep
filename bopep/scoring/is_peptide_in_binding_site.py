@@ -6,8 +6,6 @@ import os
 import re
 import math
 
-from Bio.PDB import PDBParser
-import numpy as np
 
 def centroid(coords: np.ndarray) -> np.ndarray:
     """Return the arithmetic mean of an (N×3) array of points."""
@@ -102,12 +100,6 @@ def get_binding_site(
 
         receptor_chain = model[receptor_chain]
         peptide_chain = model[peptide_chain]
-
-        min_receptor_residue_id = min(
-            residue.id[1]
-            for residue in receptor_chain.get_residues()
-            if residue.id[0] == " "
-        ) # This will be 1 since AlphaFold PDBs start at 1
 
         min_peptide_residue_id = min(
             residue.id[1]

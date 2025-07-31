@@ -1,5 +1,5 @@
-from bopep.surrogate_model.mc_dropout import MonteCarloDropout
-from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble
-from bopep.surrogate_model.deep_evidential_regression import DeepEvidentialRegression
-from bopep.surrogate_model.mve import MVE
-from bopep.surrogate_model.hyperparameter_tuner import tune_hyperparams
+from bopep.surrogate_model.mc_dropout import MonteCarloDropout as MonteCarloDropout
+from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble as NeuralNetworkEnsemble
+from bopep.surrogate_model.deep_evidential_regression import DeepEvidentialRegression as DeepEvidentialRegression
+from bopep.surrogate_model.mve import MVE as MVE
+from bopep.surrogate_model.hyperparameter_tuner import tune_hyperparams as tune_hyperparams

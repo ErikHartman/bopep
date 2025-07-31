@@ -1,7 +1,6 @@
 import torch
 from typing import List, Optional, Tuple
 import torch.nn.utils.rnn as rnn_utils
-import torch.nn.functional as F
 import torch.nn as nn
 import math
 

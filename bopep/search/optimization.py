@@ -13,12 +13,12 @@ from bopep.surrogate_model import (
     MVE,
 )
 from bopep.logging.logger import Logger
-from bopep.bayesian_optimization.acquisition_functions import AcquisitionFunction
-from bopep.bayesian_optimization.utils import (_validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
-from bopep.bayesian_optimization.pdb_utils import _check_binding_site_residue_indices
-from bopep.bayesian_optimization.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
-from bopep.bayesian_optimization.train_validate_utils import _compute_model_metrics, _compute_split_indices, _train_and_validate, _split_train_validation, _train_on_all
-from bopep.bayesian_optimization.selection import PeptideSelector
+from bopep.search.acquisition_functions import AcquisitionFunction
+from bopep.search.utils import (_validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
+from bopep.search.pdb_utils import _check_binding_site_residue_indices
+from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
+from bopep.search.train_validate_utils import _compute_model_metrics, _compute_split_indices, _train_and_validate, _split_train_validation, _train_on_all
+from bopep.search.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
 import torch
 import logging
@@ -106,7 +106,7 @@ class BoPep:
         self._train_on_all = _train_on_all.__get__(self, BoPep)
 
 
-    def optimize(
+    def run(
         self,
         schedule: List[Dict[str, Any]],
         batch_size: int,
@@ -536,7 +536,7 @@ class BoPep:
                 inputs=docked_dirs,
                 input_type="colab_dir",
                 binding_site_residue_indices=self.binding_site_residue_indices,
-                n_jobs=self.scoring_kwargs.get("n_jobs", 12),
+                n_jobs=self.scoring_kwargs.get("n_jobs", 1), # Default to 1 job unless specified (not safe otherwise)
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 required_n_contact_residues=required_n_contact_residues,
                 template_pdbs=self.template_pdbs,

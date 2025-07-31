@@ -246,7 +246,7 @@ def main():
     model_types = ["mve", "deep_evidential", "nn_ensemble", "mc_dropout"]
     results = {}
 
-    fixed_params = {"mve": 0.3,  "deep_evidential": 1, "nn_ensemble": 10, "mc_dropout": 0.3}
+    # fixed_params = {"mve": 0.3,  "deep_evidential": 1, "nn_ensemble": 10, "mc_dropout": 0.3}
     
     # Run hyperparameter tuning for each model type
     for i, model_type in enumerate(model_types):
@@ -305,7 +305,7 @@ def main():
     # Save the combined figure
     os.makedirs("examples/figures", exist_ok=True)
     plt.savefig("examples/figures/combined_hyperparameter_tuning.png", dpi=300)
-    print(f"Figure saved as 'examples/figures/combined_hyperparameter_tuning.png'")
+    print("Figure saved as 'examples/figures/combined_hyperparameter_tuning.png'")
     
     # Print summary of all optimized parameters
     print("\n\n===== Optimal Parameters Summary =====")

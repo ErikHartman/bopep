@@ -1,6 +1,7 @@
 """
 Test configuration and fixtures for BOPEP tests.
 """
+import importlib
 import pytest
 import tempfile
 import numpy as np
@@ -93,8 +94,6 @@ def skip_if_no_gpu():
 
 @pytest.fixture
 def skip_if_no_esm():
-    """Skip test if ESM is not available."""
-    try:
-        import esm
-    except ImportError:
+    """Skip test if ESM is not available."""    
+    if importlib.util.find_spec("esm") is None:
         pytest.skip("ESM not available")

@@ -1,10 +1,9 @@
 import os
 import shutil
 import subprocess
-from functools import partial
 from multiprocessing import get_context
 from typing import List, Optional
-from bopep.docking.utils import clean_up_files, docking_folder_exists
+from bopep.docking.utils import clean_up_files
 import logging
 
 logging.basicConfig(
@@ -113,7 +112,6 @@ def dock_peptide(
     except subprocess.CalledProcessError as e:
         logging.info(f"An error occurred during docking of {peptide_sequence}: {e}")
 
-    # Return the directory containing the docked peptide results
     return peptide_output_dir
 
 

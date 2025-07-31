@@ -3,7 +3,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Union
 import torch
 
-from bopep.bayesian_optimization.acquisition_functions import available_acquistion_functions
+from bopep.search.acquisition_functions import available_acquistion_functions
 
 def _save_model(save_path: str, model, surrogate_model_kwargs: dict, best_hyperparams: dict):
         """
@@ -61,9 +61,13 @@ def _validate_dependencies():
             stderr=subprocess.STDOUT,
             universal_newlines=True,
         )
-    except:
+    except FileNotFoundError:
         raise ValueError(
             "colabfold is not callable through the command: colabfold_batch --help"
+        )
+    except Exception as e:
+        raise ValueError(
+            f"Error occurred while checking colabfold: {e}"
         )
 
     try:
