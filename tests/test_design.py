@@ -60,7 +60,7 @@ def mock_mpnn_env(temp_dir):
 @pytest.fixture
 def sample_csv_path():
     """Path to the sample CSV file in the data directory."""
-    return "/home/er8813ha/bopep/data/peptide_samples.csv"
+    return "./data/peptide_samples.csv"
 
 
 @pytest.fixture
@@ -131,10 +131,10 @@ class TestBorf:
                 mpnn_env="/nonexistent/python"
             )
 
-    def test_validate_configuration_valid(self, borf_config):
+    def test__validate_configuration_valid(self, borf_config):
         """Test configuration validation with valid setup."""
         borf = Borf(**borf_config)
-        validation = borf.validate_configuration()
+        validation = borf._validate_configuration()
         
         assert validation['rfdiffusion_configured'] is True
         assert validation['protein_mpnn_configured'] is True
@@ -145,7 +145,7 @@ class TestBorf:
         assert validation['protein_mpnn_exists'] is True
         assert validation['protein_mpnn_script_exists'] is True
 
-    def test_validate_configuration_missing_components(self, temp_dir, mock_pdb_file, mock_mpnn_env):
+    def test__validate_configuration_missing_components(self, temp_dir, mock_pdb_file, mock_mpnn_env):
         """Test configuration validation with missing components."""
         borf = Borf(
             output_dir=temp_dir,
@@ -154,7 +154,7 @@ class TestBorf:
             pdb_path=mock_pdb_file,
             mpnn_env=mock_mpnn_env
         )
-        validation = borf.validate_configuration()
+        validation = borf._validate_configuration()
         
         assert validation['rfdiffusion_configured'] is False
         assert validation['protein_mpnn_configured'] is False
@@ -199,15 +199,6 @@ class TestBorf:
         assert mpnn_instance is mock_instance
         mock_mpnn_class.assert_called_once()
 
-    def test_print_configuration(self, borf_config, capsys):
-        """Test configuration printing."""
-        borf = Borf(**borf_config)
-        borf.print_configuration()
-        
-        captured = capsys.readouterr()
-        assert "=== Borf Configuration ===" in captured.out
-        assert "=== Configuration Validation ===" in captured.out
-        assert "output_dir" in captured.out
 
     @patch('bopep.design.borf.RFDiffusion')
     def test_run_rfdiffusion_only(self, mock_rfdiffusion_class, borf_config, sample_csv_path):
