@@ -11,7 +11,7 @@ from bopep.surrogate_model import (
     MVE
 )
 from bopep.scoring.scores_to_objective import ScoresToObjective
-from bopep.bayesian_optimization.utils import _validate_surrogate_model_kwargs
+from bopep.search.utils import _validate_surrogate_model_kwargs
 import torch
 _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
