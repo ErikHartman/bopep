@@ -5,7 +5,7 @@ import shutil
 import json
 import pickle
 from typing import Optional
-from bopep.bayesian_optimization.utils import _save_model
+from bopep.search.utils import _save_model
 import logging
 
 def _next_checkpoint_dir(self) -> Path:
