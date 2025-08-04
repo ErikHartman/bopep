@@ -1,7 +1,7 @@
 import random
 import string
-from bopep.docking.dock_peptides import dock_peptides_parallel
-from bopep.docking.utils import docking_folder_exists, extract_sequence_from_pdb
+from bopep.docking.alphafold_docker import AlphaFoldDocker
+from bopep.docking.utils import extract_sequence_from_pdb
 import os
 from Bio.PDB import PDBParser, PDBIO, Select
 import tempfile
@@ -26,6 +26,7 @@ class Docker:
     - overwrite_results: Whether to overwrite existing results.
     """
     def __init__(self, docker_kwargs: dict):
+        self.model = docker_kwargs.get("model", "alphafold2")
         self.num_models = docker_kwargs.get("num_models", 5)
         self.num_recycles = docker_kwargs.get("num_recycles", 10)
         self.recycle_early_stop_tolerance = docker_kwargs.get("recycle_early_stop_tolerance", 0.01)
@@ -113,60 +114,89 @@ class Docker:
         self._log_config()
 
     def dock_peptides(self, peptide_sequences: list):
+        if self.model == "alphafold2":
+            logging.info("Using AlphaFold2 for docking.")
+            return self.dock_alphafold2(peptide_sequences)
+        elif self.model == "boltz2":
+            logging.info("Using Boltz sampling for docking.")
+            return self.dock_boltz2(peptide_sequences)
+        else:
+            raise ValueError(f"Unsupported model: {self.model}. Supported models are 'alphafold2' and 'boltz2'.")
+
+    def dock_boltz2(self, peptide_sequences: list):
         """
-        Dock multiple peptides to a target structure using ColabFold.
-
-        Will not dock peptide if there is a folder called target_peptide
-        in the output directory.
-
-        Will remove unnecessary files generated during docking.
+        Dock multiple peptides to a target structure using Boltz.
         
-        Parameters:
-        - peptide_records: List of peptide records (with id and seq properties).
-        
-        Returns:
-        - List of directories containing the docked peptide results.
+        Returns list of processed output directories.
         """
         if not self.target_structure_path:
             raise ValueError(
                 "Target structure not set. Please set the target structure using set_target_structure."
             )
         
-        previously_docked_dirs = []
-        peptides_to_dock = []
-
-        # Use original target path for checking existing docking results
-        for peptide in peptide_sequences: 
-            exists, peptide_dir = docking_folder_exists(self.output_dir, peptide, self.original_target_path)
-            if exists and not self.overwrite_results:
-                previously_docked_dirs.append(peptide_dir)
-            else:
-                peptides_to_dock.append(peptide)
-
-        if len(peptides_to_dock) == 0:
-            return previously_docked_dirs
-        else:
-            logging.info(f"Will dock {len(peptides_to_dock)} peptides...")
-
-        # Dock the peptides and return results
-        docked_dirs = dock_peptides_parallel(
-            peptides=peptides_to_dock,
-            target_structure=self.target_structure_path,  # Use cleaned structure for docking
+        # Import here to avoid circular imports
+        from bopep.docking.boltz_docker import BoltzDocker
+        
+        # Create Boltz docker with current parameters
+        boltz_docker = BoltzDocker(
+            output_dir=self.output_dir,
+            gpu_ids=self.gpu_ids,
+            overwrite_results=self.overwrite_results,
+            recycling_steps=self.num_recycles,  # Map to Boltz parameter name
+            diffusion_samples=getattr(self, 'diffusion_samples', 1),
+            use_msa_server=getattr(self, 'use_msa_server', True),
+            use_potentials=getattr(self, 'use_potentials', False),
+            output_format=getattr(self, 'output_format', 'pdb'),
+        )
+        
+        # Perform docking
+        processed_dirs = boltz_docker.dock(
+            peptide_sequences=peptide_sequences,
+            target_structure=self.target_structure_path,
             target_sequence=self.target_sequence,
+            target_name=self.target_name,
+        )
+        
+        # Clean up temporary files
+        self._clean_up()
+        
+        return processed_dirs
+
+    def dock_alphafold2(self, peptide_sequences: list):
+        """
+        Dock multiple peptides to a target structure using AlphaFold2/ColabFold.
+        
+        Returns list of processed output directories.
+        """
+        if not self.target_structure_path:
+            raise ValueError(
+                "Target structure not set. Please set the target structure using set_target_structure."
+            )
+        
+        # Create AlphaFold docker with current parameters
+        alphafold_docker = AlphaFoldDocker(
+            output_dir=self.output_dir,
+            gpu_ids=self.gpu_ids,
+            overwrite_results=self.overwrite_results,
             num_models=self.num_models,
             num_recycles=self.num_recycles,
             recycle_early_stop_tolerance=self.recycle_early_stop_tolerance,
             amber=self.amber,
             num_relax=self.num_relax,
-            output_dir=self.output_dir,
-            gpu_ids=self.gpu_ids,
-            target_name=self.target_name,  # Pass the original target name for consistent naming
         )
-        docked_dirs += previously_docked_dirs
+        
+        # Perform docking
+        processed_dirs = alphafold_docker.dock(
+            peptide_sequences=peptide_sequences,
+            target_structure=self.target_structure_path,
+            target_sequence=self.target_sequence,
+            target_name=self.target_name,
+        )
+        
         # Clean up temporary files
         self._clean_up()
         
-        return docked_dirs
+        return processed_dirs
     
     def _clean_up(self):
         """Remove any temporary files created during processing."""

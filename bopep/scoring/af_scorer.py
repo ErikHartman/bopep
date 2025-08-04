@@ -1,11 +1,12 @@
 import os
 import json
 import re
+from Bio.PDB import PDBParser, NeighborSearch, Selection
+from collections import defaultdict
 
 class AFScorer:
     """
     Class for scoring AlphaFold/ColabFold predictions.
-    
     """
     
     def __init__(self, colab_dir, rank_num=1):
@@ -115,6 +116,92 @@ class AFScorer:
         chain_plddt_vals = [plddt_array[i] for i in chain_indices]
         return sum(chain_plddt_vals) / len(chain_plddt_vals)
     
+    def get_weighted_plddt(self, chain_id="B", protein_chain="A", distance_threshold=5.0):
+        """
+        Calculate weighted pLDDT for peptide chain based on contact residues.
+        Uses B-factors (pLDDT values) from the PDB file and weights them by 
+        contact with the protein chain.
+        
+        Args:
+            chain_id: Chain ID of the peptide (default: "B")
+            protein_chain: Chain ID of the protein (default: "A") 
+            distance_threshold: Distance threshold for defining contacts (default: 5.0 Å)
+            
+        Returns:
+            tuple: (overall_weighted_avg, residue_weighted_avg)
+        """
+        if not self.initialized:
+            self._initialize()
+            
+        if not self.pdb_file or not os.path.exists(self.pdb_file):
+            print(f"PDB file not found: {self.pdb_file}")
+            return None, None
+            
+        try:
+            # Initialize the PDB parser
+            parser = PDBParser(QUIET=True)
+            structure = parser.get_structure('structure', self.pdb_file)
+            
+            # Extract chains A and B
+            chain_a = None
+            chain_b = None
+            for model in structure:
+                try:
+                    chain_a = model[protein_chain]
+                    chain_b = model[chain_id]
+                    break  # Assuming only one model is needed
+                except KeyError as e:
+                    print(f"Chain not found: {e}")
+                    return None, None
+            
+            if not chain_a or not chain_b:
+                print(f"Could not find chains {protein_chain} and/or {chain_id}")
+                return None, None
+            
+            # Identify contact residues in chain B (within distance threshold to any residue in chain A)
+            atoms_in_chain_a = Selection.unfold_entities(chain_a, 'A')  # List of all atoms in chain A
+            atoms_in_chain_b = Selection.unfold_entities(chain_b, 'A')  # List of all atoms in chain B
+
+            # Using NeighborSearch to find contacts
+            ns = NeighborSearch(atoms_in_chain_a)
+            contact_residues_in_chain_b = set()
+            
+            for atom in atoms_in_chain_b:
+                neighbors = ns.search(atom.coord, distance_threshold, 'R')  # 'R' for residues
+                if neighbors:
+                    contact_residues_in_chain_b.add(atom.get_parent().get_id())
+
+            # To store B-factors for each residue in chain B (including zeros for non-contact residues)
+            residue_bfactors = defaultdict(list)
+
+            # Loop over all residues in chain B
+            for residue in chain_b:
+                residue_id = residue.get_id()
+                if residue_id in contact_residues_in_chain_b:
+                    # Get B-factors for all atoms in the residue
+                    for atom in residue:
+                        residue_bfactors[residue_id].append(atom.get_bfactor())
+                else:
+                    # If not in contact, add a zero for the residue
+                    residue_bfactors[residue_id].append(0)
+
+            # Calculate average B-factor per residue (averaging over all atoms within a residue)
+            avg_bfactors_per_residue = {res_id: sum(bfactors)/len(bfactors) 
+                                        for res_id, bfactors in residue_bfactors.items()}
+            
+            # Calculate the overall average (Direct average of all atoms in contact and non-contact residues)
+            all_bfactors = [bfactor for bfactors in residue_bfactors.values() for bfactor in bfactors]
+            overall_avg_bfactor = sum(all_bfactors) / len(all_bfactors) if all_bfactors else 0
+            
+            # Calculate the average of residue averages
+            avg_bfactor_from_residues = sum(avg_bfactors_per_residue.values()) / len(avg_bfactors_per_residue) if avg_bfactors_per_residue else 0
+            
+            return overall_avg_bfactor, avg_bfactor_from_residues
+            
+        except Exception as e:
+            print(f"Error calculating weighted pLDDT: {e}")
+            return None, None
+    
     def get_peptide_pae(self, chain_id="B"):
         if not self.initialized:
             self._initialize()
@@ -170,6 +257,13 @@ class AFScorer:
         if peptide_pae is not None:
             metrics['peptide_pae'] = peptide_pae
             
+        # Add weighted pLDDT metrics
+        weighted_plddt_overall, weighted_plddt_residues = self.get_weighted_plddt()
+        if weighted_plddt_overall is not None:
+            metrics['weighted_plddt_overall'] = weighted_plddt_overall
+        if weighted_plddt_residues is not None:
+            metrics['weighted_plddt_residues'] = weighted_plddt_residues
+            
         return metrics
 
 
@@ -182,3 +276,8 @@ if __name__ == "__main__":
     print(f"ipTM: {scorer.get_iptm()}")
     print(f"Peptide pLDDT: {scorer.get_peptide_plddt()}")
     print(f"Peptide PAE: {scorer.get_peptide_pae()}")
+    
+    # Test weighted pLDDT
+    weighted_overall, weighted_residues = scorer.get_weighted_plddt()
+    print(f"Weighted pLDDT (overall): {weighted_overall}")
+    print(f"Weighted pLDDT (residues): {weighted_residues}")

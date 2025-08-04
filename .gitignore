@@ -14,6 +14,8 @@ __pycache__/
 
 slurm.sh
 
+examples/docking
+
 /tests/optimize_test
 
 # C extensions

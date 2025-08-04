@@ -1,8 +1,10 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
 import traceback
+import json
 from typing import Optional
 from bopep.scoring.pep_prot_distance import distance_score_from_pdb
+from bopep.scoring.af_scorer import AFScorer
 from bopep.scoring.rosetta_scorer import RosettaScorer
 from bopep.scoring.af_scorer import AFScorer
 from bopep.scoring.is_peptide_in_binding_site import (
@@ -52,11 +54,22 @@ class Scorer:
         ]
         pass
 
+    def _load_standardized_metrics(self, processed_dir: str) -> dict:
+        """
+        Load standardized metrics.json file from processed directory.
+        """
+        metrics_file = os.path.join(processed_dir, "metrics.json")
+        if not os.path.exists(metrics_file):
+            raise FileNotFoundError(f"Metrics file not found: {metrics_file}")
+        
+        with open(metrics_file, 'r') as f:
+            return json.load(f)
+
     def score(
         self,
         scores_to_include: list,
         pdb_file: str = None,
-        colab_dir: str = None,
+        processed_dir: str = None,
         binding_site_residue_indices: list = None,
         peptide_sequence: str = None,
         required_n_contact_residues: Optional[int] = 5,
@@ -70,7 +83,7 @@ class Scorer:
         metrics. The available data sources determine which scores can be calculated:
         - With only a peptide sequence: Only peptide property scores are available
         - With a PDB file: Rosetta scores and peptide property scores are available
-        - With a colab_dir: All scores including ipTM and binding site metrics are available
+        - With a processed_dir: All scores including ipTM and binding site metrics are available
 
         Parameters
         ----------
@@ -90,8 +103,12 @@ class Scorer:
             - "in_binding_site": Whether peptide is in the defined binding site (requires binding_site_residue_indices)
             - "in_binding_site_score": Continuous score for peptide in binding site (0-1)
 
-            ColabFold specific scores (requires colab_dir):
-            - "iptm": Interface predicted TM-score from ColabFold
+            Standardized docking scores (requires processed_dir):
+            - "iptm": Interface predicted TM-score from standardized metrics
+            - "peptide_plddt": pLDDT score from standardized metrics
+            - "peptide_pae": Predicted Aligned Error (PAE) from standardized metrics
+            - "weighted_plddt_overall": Weighted pLDDT considering contact residues (overall average)
+            - "weighted_plddt_residues": Weighted pLDDT considering contact residues (residue average)
 
             Peptide property scores (requires peptide_sequence or PDB file):
             - "peptide_properties": Include all peptide property scores
@@ -109,14 +126,12 @@ class Scorer:
             - "negatively_charged_aa_percent": Percentage of negatively charged amino acids
             - "delta_net_charge_frac": Net charge as a fraction of peptide length
             - "uHrel": Relative hydrophobic moment (measure of amphipathicity)
-            - "peptide_plddt": pLDDT score from ColabFold (requires colab_dir)
-            - "peptide_pae": Predicted Aligned Error (PAE) from ColabFold (requires colab_dir)
             - "template_rmsd": RMSD to a template PDB (if provided, requires template_pdb)
 
         pdb_file : str, optional
             Path to a PDB file for structure-based scores)
-        colab_dir : str, optional
-            Path to a ColabFold output directory for additional scores
+        processed_dir : str, optional
+            Path to a standardized processed output directory for additional scores
         binding_site_residue_indices : list, optional
             List of residue indices defining the binding site (required for in_binding_site score)
         peptide_sequence : str, optional
@@ -138,6 +153,8 @@ class Scorer:
         >>> scores = scorer.score(scores_to_include=["molecular_weight", "gravy"], peptide_sequence="ACDEFGH")
         >>> # Get Rosetta scores from PDB file
         >>> scores = scorer.score(scores_to_include=["rosetta_score", "packstat"], pdb_file="complex.pdb")
+        >>> # Get all scores from processed directory
+        >>> scores = scorer.score(scores_to_include=["iptm", "rosetta_score"], processed_dir="/path/to/processed/target_peptide")
         """
 
         for score in scores_to_include:
@@ -145,9 +162,10 @@ class Scorer:
                 raise ValueError(f"WARNING: {score} is not a valid score")
 
         scores = {}
+        metrics_data = None  # Initialize metrics data
 
         # When only peptide_sequence is provided, we can only calculate peptide properties
-        if peptide_sequence and not pdb_file and not colab_dir:
+        if peptide_sequence and not pdb_file and not processed_dir:
             # Check if any non-peptide-property scores are requested
             peptide_property_scores = [
                 "peptide_properties",
@@ -170,29 +188,32 @@ class Scorer:
             for score in scores_to_include:
                 if score not in peptide_property_scores:
                     raise ValueError(
-                        f"WARNING: {score} requires a PDB file or colab_dir"
+                        f"WARNING: {score} requires a PDB file or processed_dir"
                     )
 
             peptide_properties = PeptideProperties(peptide_sequence=peptide_sequence)
-        elif colab_dir and not pdb_file:
-            pdb_pattern = re.compile(
-                r".*_relaxed_rank_001_.*\.pdb"
-            )  # Regex for the top scoring docking result (relaxed)
-            pdb_file = os.path.join(
-                colab_dir,
-                [f for f in os.listdir(colab_dir) if pdb_pattern.search(f)][0],
-            )
-            peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id="B")
+        elif processed_dir and not pdb_file:
+            # Load from standardized processed directory
+            metrics_data = self._load_standardized_metrics(processed_dir)
+            peptide_sequence = metrics_data.get("peptide_sequence")
+            
+            # Use the best model PDB file for Rosetta scoring
+            pdb_file = os.path.join(processed_dir, "model_1.pdb")
+            if not os.path.exists(pdb_file):
+                # Try CIF format
+                pdb_file = os.path.join(processed_dir, "model_1.cif")
+                if not os.path.exists(pdb_file):
+                    raise FileNotFoundError(f"No model files found in {processed_dir}")
+            
             peptide_properties = PeptideProperties(pdb_file=pdb_file)
             rosetta_scorer = RosettaScorer(pdb_file)
-            af_scorer = AFScorer(colab_dir) if colab_dir else None
         elif pdb_file:
             peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id="B")
             peptide_properties = PeptideProperties(pdb_file=pdb_file)
             rosetta_scorer = RosettaScorer(pdb_file)
         else:
             raise ValueError(
-                "Either pdb_file, colab_dir, or peptide_sequence must be provided"
+                "Either pdb_file, processed_dir, or peptide_sequence must be provided"
             )
 
         # Process scores based on what can be calculated
@@ -215,27 +236,27 @@ class Scorer:
             if "distance_score" in scores_to_include:
                 scores["distance_score"] = distance_score_from_pdb(pdb_file)
 
-        # ipTM, pae and plddt score needs colab_dir
+        # ipTM, pae and plddt score from standardized metrics
         if "iptm" in scores_to_include:
-            if not colab_dir:
-                print("WARNING: ipTM score needs a docking result directory.")
+            if not processed_dir:
+                print("WARNING: ipTM score needs a processed_dir.")
             else:
-                if af_scorer:
-                    scores["iptm"] = af_scorer.get_iptm()
+                scores["iptm"] = metrics_data.get("best_iptm")
 
         if "peptide_plddt" in scores_to_include:
-            if not colab_dir:
-                print("WARNING: peptide_plddt score needs a docking result directory.")
+            if not processed_dir:
+                print("WARNING: peptide_plddt score needs a processed_dir.")
             else:
-                if af_scorer:
-                    scores["peptide_plddt"] = af_scorer.get_peptide_plddt(chain_id="B")
+                scores["peptide_plddt"] = metrics_data.get("best_plddt")
 
         if "peptide_pae" in scores_to_include:
-            if not colab_dir:
-                print("WARNING: peptide_pae score needs a docking result directory.")
+            if not processed_dir:
+                print("WARNING: peptide_pae score needs a processed_dir.")
             else:
-                if af_scorer:
-                    scores["peptide_pae"] = af_scorer.get_peptide_pae(chain_id="B")
+                # For PAE, we might need to extract from the best model
+                if "models" in metrics_data and metrics_data["models"]:
+                    best_model = metrics_data["models"][0]  # Already sorted by confidence
+                    scores["peptide_pae"] = best_model.get("complex_ipde")  # or another PAE metric
 
         # Binding site scores need binding_site_residue_indices and a PDB file
         if "in_binding_site" in scores_to_include:
@@ -243,18 +264,16 @@ class Scorer:
                 raise ValueError(
                     "WARNING: binding_site_residue_indices is required for in_binding_site score"
                 )
-            if colab_dir:
-                # If colab_dir, we will get the fraction that are in the binding site ([0 to 1]) and a true false
-                fraction_in_binding_site, top_pdb_in_binding_site, n_contacts = (
-                    n_peptides_in_binding_site_colab_dir(
-                        colab_dir,
-                        binding_site_residue_indices = binding_site_residue_indices,
+            if processed_dir:
+                # For processed directories, we need to implement batch processing logic
+                # For now, use the single PDB file approach with model_1.pdb
+                n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
+                        pdb_file,
+                        binding_site_residue_indices=binding_site_residue_indices,
                         threshold=binding_site_distance_threshold,
-                        required_n_contact_residues = required_n_contact_residues,
+                        required_n_contact_residues=required_n_contact_residues,
                     )
-                )
-                scores["in_binding_site"] = top_pdb_in_binding_site
-                scores["fraction_in_binding_site"] = fraction_in_binding_site
+                scores["in_binding_site"] = in_binding_site
                 scores["n_contacts"] = n_contacts  # number of contact residues
 
             elif pdb_file:
@@ -357,7 +376,7 @@ class Scorer:
         inputs : list
             List of inputs based on input_type (pdb_files, colab_dirs, or peptide_sequences)
         input_type : str
-            Type of input: "pdb_file", "colab_dir", or "peptide_sequence"
+            Type of input: "pdb_file", "processed_dir", or "peptide_sequence"
         binding_site_residue_indices : list, optional
             List of residue indices defining the binding site
         template_pdbs : dict, optional
@@ -441,20 +460,21 @@ class Scorer:
         template_pdb = None
         if "template_rmsd" in scores_to_include and template_pdbs:
             try:
-                if input_type == "colab_dir":
-                    pdb_pattern = re.compile(r".*_relaxed_rank_001_.*\.pdb")
-                    pdb_files = [f for f in os.listdir(input_value) if pdb_pattern.search(f)]
-                    if pdb_files:
-                        relaxed_pdb = os.path.join(input_value, pdb_files[0])
-                        peptide_sequence = extract_sequence_from_pdb(relaxed_pdb, chain_id="B")
+                if input_type == "processed_dir":
+                    # Extract peptide sequence from metrics.json
+                    metrics_file = os.path.join(input_value, "metrics.json")
+                    if os.path.exists(metrics_file):
+                        with open(metrics_file, 'r') as f:
+                            metrics = json.load(f)
+                        peptide_sequence = metrics.get("peptide_sequence")
                     else:
-                        print(f"WARNING: No relaxed rank_001 PDB found in {input_value}")
+                        print(f"WARNING: No metrics.json found in {input_value}")
                         peptide_sequence = None
                 elif input_type == "pdb_file":
                     peptide_sequence = extract_sequence_from_pdb(input_value, chain_id="B")
                 else:  
                     raise ValueError(
-                        f"WARNING: Unsupported input_type: {input_type}. Must be 'pdb_file' or 'colab_dir' when using template_rmsd scoring."
+                        f"WARNING: Unsupported input_type: {input_type}. Must be 'pdb_file' or 'processed_dir' when using template_rmsd scoring."
                     )
                 
                 # Lookup template for this peptide
@@ -476,10 +496,10 @@ class Scorer:
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 template_pdb=template_pdb,
             )
-        elif input_type == "colab_dir":
+        elif input_type == "processed_dir":
             return scorer.score(
                 scores_to_include,
-                colab_dir=input_value,
+                processed_dir=input_value,
                 binding_site_residue_indices=binding_site_residue_indices,
                 required_n_contact_residues=required_n_contact_residues,
                 binding_site_distance_threshold=binding_site_distance_threshold,
@@ -496,46 +516,30 @@ class Scorer:
 
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
-    colab_dir_path = "/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/docked_pdbs/4glf_LKNPDDPDMVD" #"/srv/data1/general/immunopeptides_data/databases/benchmark_data/pdbs_erik/docked_peptides/1ydi_VGWEQLLTTIARTINEVENQILTR"
+    processed_dir_path = "/path/to/processed/4glf_LKNPDDPDMVD"  # Example processed directory
     scorer = Scorer()
 
     # Single score example
     scores = scorer.score(scores_to_include=["rosetta_score"], pdb_file=pdb_file_path)
     print(f"Rosetta score for {pdb_file_path}: {scores}")
 
-    scores = scorer.score(
-        scores_to_include=[
-            "iptm",
-            "rosetta_score",
-            "uHrel",
-            "peptide_plddt",
-            "in_binding_site",
-            "in_binding_site_score",
-        ],
-        colab_dir=colab_dir_path,
-        binding_site_residue_indices=[
-            110,
-            111,
-            112,
-            113,
-            114,
-            115,
-            116,
-            117,
-            118,
-            119,
-            120,
-            121,
-            122,
-            123,
-            124,
-            125,
-            126,
-            127,
-            128,
-        ],
-    )
-    print(f"Scores for {colab_dir_path}: {scores}")
+    # Example with processed directory (commented out as path may not exist)
+    # scores = scorer.score(
+    #     scores_to_include=[
+    #         "iptm",
+    #         "rosetta_score",
+    #         "uHrel",
+    #         "peptide_plddt",
+    #         "in_binding_site",
+    #         "in_binding_site_score",
+    #     ],
+    #     processed_dir=processed_dir_path,
+    #     binding_site_residue_indices=[
+    #         110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120,
+    #         121, 122, 123, 124, 125, 126, 127, 128,
+    #     ],
+    # )
+    # print(f"Scores for {processed_dir_path}: {scores}")
 
     # Batch scoring example
     peptide_sequences = ["ACDEFGH", "KLMNPQRS", "TVWY"]
