@@ -50,7 +50,9 @@ class Scorer:
             "peptide_pae",
             "iptm",
             "in_binding_site_score",
-            "template_rmsd"
+            "template_rmsd",
+            "weighted_plddt_overall",
+            "weighted_plddt_residues"
         ]
         pass
 
@@ -257,6 +259,36 @@ class Scorer:
                 if "models" in metrics_data and metrics_data["models"]:
                     best_model = metrics_data["models"][0]  # Already sorted by confidence
                     scores["peptide_pae"] = best_model.get("complex_ipde")  # or another PAE metric
+
+        # Weighted pLDDT scores using AFScorer (requires raw ColabFold output)
+        if "weighted_plddt_overall" in scores_to_include or "weighted_plddt_residues" in scores_to_include:
+            if not processed_dir:
+                print("WARNING: weighted pLDDT scores need a processed_dir.")
+            else:
+                # Try to find raw ColabFold directory
+                raw_dir = processed_dir.replace("/processed/", "/raw/")
+                if os.path.exists(raw_dir):
+                    try:
+                        af_scorer = AFScorer(raw_dir, rank_num=1)
+                        weighted_overall, weighted_residues = af_scorer.get_weighted_plddt()
+                        
+                        if "weighted_plddt_overall" in scores_to_include:
+                            scores["weighted_plddt_overall"] = weighted_overall
+                        if "weighted_plddt_residues" in scores_to_include:
+                            scores["weighted_plddt_residues"] = weighted_residues
+                            
+                    except Exception as e:
+                        print(f"WARNING: Could not calculate weighted pLDDT: {e}")
+                        if "weighted_plddt_overall" in scores_to_include:
+                            scores["weighted_plddt_overall"] = None
+                        if "weighted_plddt_residues" in scores_to_include:
+                            scores["weighted_plddt_residues"] = None
+                else:
+                    print(f"WARNING: Raw directory not found for weighted pLDDT calculation: {raw_dir}")
+                    if "weighted_plddt_overall" in scores_to_include:
+                        scores["weighted_plddt_overall"] = None
+                    if "weighted_plddt_residues" in scores_to_include:
+                        scores["weighted_plddt_residues"] = None
 
         # Binding site scores need binding_site_residue_indices and a PDB file
         if "in_binding_site" in scores_to_include:
