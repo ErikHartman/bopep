@@ -73,7 +73,7 @@ class RFDiffusion:
         self.designs_dir.mkdir(exist_ok=True, parents=True)
         self.logs_dir.mkdir(exist_ok=True, parents=True)
     
-    def get_available_gpus(self) -> List[int]:
+    def _get_available_gpus(self) -> List[int]:
         """
         Detect available GPUs for processing.
         
@@ -96,11 +96,10 @@ class RFDiffusion:
             )
             gpu_indices = [int(idx.strip()) for idx in result.stdout.strip().split('\n') if idx.strip()]
             return gpu_indices
-        except (subprocess.SubprocessError, FileNotFoundError):
-            logging.warning("Could not detect GPUs. Assuming one GPU (index 0).")
-            return [0]
-    
-    def load_samples(self, csv_path: Optional[str] = None) -> pd.DataFrame:
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            logging.error(f"Could not detect GPUs: {e}. Consider checking your pytorch installation or NVIDIA drivers.")
+
+    def _load_samples(self, csv_path: Optional[str] = None) -> pd.DataFrame:
         """
         Load peptide samples from CSV file.
         
@@ -127,7 +126,7 @@ class RFDiffusion:
         df = pd.read_csv(csv_path)
         return df.reset_index(drop=True)
     
-    def run_rfdiffusion_single(self, args: Tuple[Any, int, bool]) -> Tuple[bool, str, int]:
+    def _run_rfdiffusion_single(self, args: Tuple[Any, int, bool]) -> Tuple[bool, str, int]:
         """
         Run RFdiffusion for a single sample.
         
@@ -192,7 +191,7 @@ class RFDiffusion:
                 return False, sample_id, gpu_id
     
     @staticmethod
-    def worker(tasks: List[Tuple[Any, int, bool, dict]]) -> List[Tuple[bool, str, int]]:
+    def _worker(tasks: List[Tuple[Any, int, bool, dict]]) -> List[Tuple[bool, str, int]]:
         """
         Worker function for processing multiple tasks on a single GPU.
         Each task tuple must now include a config dict for RFDiffusion instantiation.
@@ -211,10 +210,10 @@ class RFDiffusion:
             )
             for args in tasks:
                 sample, gpu_id, dry_run, _ = args
-                results.append(diffusion_instance.run_rfdiffusion_single((sample, gpu_id, dry_run)))
+                results.append(diffusion_instance._run_rfdiffusion_single((sample, gpu_id, dry_run)))
         return results
     
-    def process_samples(
+    def _process_samples(
         self, 
         samples_df: Optional[pd.DataFrame] = None,
         gpus: Optional[List[int]] = None,
@@ -241,10 +240,10 @@ class RFDiffusion:
             Number of successful and failed runs.
         """
         if samples_df is None:
-            samples_df = self.load_samples()
+            samples_df = self._load_samples()
         
         if gpus is None:
-            gpus = self.get_available_gpus()
+            gpus = self._get_available_gpus()
         
         if not gpus:
             logging.error("No GPUs detected. Cannot run RFdiffusion.")
@@ -328,7 +327,7 @@ class RFDiffusion:
         Dict[str, Any]
             Dictionary containing run statistics and results.
         """
-        gpus = self.get_available_gpus()
+        gpus = self._get_available_gpus()
         if not gpus:
             logging.error("No GPUs detected. Cannot run RFdiffusion.")
             raise RuntimeError("No GPUs available")
@@ -336,7 +335,7 @@ class RFDiffusion:
         logging.info(f"Using {len(gpus)} GPUs: {gpus}")
         
         try:
-            samples_df = self.load_samples(samples_csv)
+            samples_df = self._load_samples(samples_csv)
         except FileNotFoundError as e:
             logging.error(str(e))
             raise

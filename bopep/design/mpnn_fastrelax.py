@@ -99,7 +99,7 @@ class MPNNFastRelax:
             logging.error(f"Failed to initialize PyRosetta: {e}")
             self.fast_relax = None
     
-    def find_design_pdbs(self, designs_dir: Optional[str] = None) -> List[str]:
+    def _find_design_pdbs(self, designs_dir: Optional[str] = None) -> List[str]:
         """
         Find RFDiffusion design PDB files.
         
@@ -122,7 +122,7 @@ class MPNNFastRelax:
         
         return sorted(pdbs)
     
-    def extract_peptide_from_pdb(self, pdb_file: str) -> Optional[Dict[str, Any]]:
+    def _extract_peptide_from_pdb(self, pdb_file: str) -> Optional[Dict[str, Any]]:
         """
         Extract peptide information from PDB file.
         
@@ -167,7 +167,7 @@ class MPNNFastRelax:
             logging.warning(f"Error reading {pdb_file}: {exc}")
             return None
     
-    def run_single_mpnn(self, pdb: str, temperature: float) -> bool:
+    def _run_single_mpnn(self, pdb: str, temperature: float) -> bool:
         """
         Run ProteinMPNN on a single PDB file.
         
@@ -258,7 +258,7 @@ class MPNNFastRelax:
         logging.info(f"ProteinMPNN completed: {successful_runs}/{len(pdb_files)} structures")
         return out_root
     
-    def seq_from_fasta(self, fa_path: Path) -> Optional[str]:
+    def _seq_from_fasta(self, fa_path: Path) -> Optional[str]:
         """
         Extract sequence from FASTA file (second record).
         
@@ -290,7 +290,7 @@ class MPNNFastRelax:
             logging.error(f"Error reading FASTA {fa_path}: {e}")
             return None
     
-    def extract_fasta_metrics(self, fa_path: Path) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    def _extract_fasta_metrics(self, fa_path: Path) -> Tuple[Optional[float], Optional[float], Optional[float]]:
         """
         Extract metrics from FASTA header.
         
@@ -327,7 +327,7 @@ class MPNNFastRelax:
             logging.error(f"Error extracting metrics from {fa_path}: {e}")
             return None, None, None
     
-    def interface_dG(self, pose) -> float:
+    def _interface_dG(self, pose) -> float:
         """
         Compute interface dG for a pose.
         
@@ -352,7 +352,7 @@ class MPNNFastRelax:
             return 0.0
     
     @staticmethod
-    def thread_and_relax_job(args) -> List[Any]:
+    def _thread_and_relax_job(args) -> List[Any]:
         """
         Worker function for threading and FastRelax.
         
@@ -434,7 +434,7 @@ class MPNNFastRelax:
             logging.error(f"Thread+Relax failed for {pdb}: {e}")
             return [None, os.path.basename(relaxed_pdb_path), cycle, sample_id]
     
-    def run_mpnn_fastrelax_pipeline(
+    def _run_mpnn_fastrelax_pipeline(
         self, 
         pdb_files: List[str], 
         temperature: float, 
@@ -536,7 +536,7 @@ class MPNNFastRelax:
         
         return True
     
-    def create_output_csv(self, fastas_root: Path, output_path: str) -> None:
+    def _create_output_csv(self, fastas_root: Path, output_path: str) -> None:
         """
         Create comprehensive output CSV with all results.
         

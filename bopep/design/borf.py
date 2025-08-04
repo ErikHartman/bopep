@@ -111,7 +111,7 @@ class Borf:
             'mpnn_env': mpnn_env,
         }
         
-        # Initialize components (lazy loading)
+        # Lazy init
         self._rfdiffusion = None
         self._mpnn_fastrelax = None
         
