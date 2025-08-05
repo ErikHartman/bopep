@@ -171,7 +171,7 @@ def _rebuild_logs_from_csvs(self, checkpoint_path: Optional[Path] = None):
                 val = row[col]
                 if val in (None, ""):
                     sc[col] = None
-                elif col == "in_binding_site":  # add other boolean columns if needed
+                elif val in ("True", "False"):
                     sc[col] = val == "True"
                 else:
                     sc[col] = float(val)
