@@ -4,7 +4,6 @@ import subprocess
 import json
 import glob
 import re
-from multiprocessing import get_context
 from typing import List
 from bopep.docking.base_docking_model import BaseDockingModel
 import logging
@@ -33,6 +32,7 @@ class AlphaFoldDocker(BaseDockingModel):
         - amber: Whether to use AMBER relaxation (default: True)
         - num_relax: Number of relaxation steps (default: 1)
         """
+        self.method_name = "alphafold"
         super().__init__(**kwargs)
         
         self.num_models = kwargs.get("num_models", 5)
@@ -48,42 +48,8 @@ class AlphaFoldDocker(BaseDockingModel):
         
         Returns list of processed output directories.
         """
-        logging.info(f"Starting AlphaFold2 docking for {len(peptide_sequences)} peptides...")
-        
-        # Check for existing results
-        previously_docked_dirs = []
-        peptides_to_dock = []
-        
-        for peptide in peptide_sequences:
-            exists, processed_dir = self.check_existing_results(peptide, target_name)
-            if exists and not self.overwrite_results:
-                previously_docked_dirs.append(processed_dir)
-                logging.info(f"Found existing results for {peptide}, skipping docking...")
-            else:
-                peptides_to_dock.append(peptide)
-        
-        if not peptides_to_dock:
-            return previously_docked_dirs
-        
-        logging.info(f"Will dock {len(peptides_to_dock)} peptides...")
-        
-        # Perform docking to raw directory
-        raw_docked_dirs = self._dock_peptides_parallel(
-            peptides_to_dock, target_structure, target_sequence, target_name
-        )
-        
-        # Process raw output to standardized format
-        processed_dirs = []
-        for raw_dir, peptide in zip(raw_docked_dirs, peptides_to_dock):
-            if os.path.exists(raw_dir):
-                processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
-                processed_dirs.append(processed_dir)
-        
-        # Combine with previously docked results
-        all_processed_dirs = processed_dirs + previously_docked_dirs
-        
-        logging.info(f"Completed docking. {len(all_processed_dirs)} total results available.")
-        return all_processed_dirs
+        return self._dock_with_common_logic(peptide_sequences, target_structure, 
+                                          target_sequence, target_name)
     
     def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
                           target_name: str) -> str:
@@ -103,42 +69,82 @@ class AlphaFoldDocker(BaseDockingModel):
         
         # Find all model files and their corresponding metrics
         relaxed_pdbs = sorted(glob.glob(os.path.join(raw_peptide_dir, "*_relaxed_rank_*.pdb")))
+        unrelaxed_pdbs = sorted(glob.glob(os.path.join(raw_peptide_dir, "*_unrelaxed_rank_*.pdb")))
         score_jsons = sorted(glob.glob(os.path.join(raw_peptide_dir, "*_scores_rank_*.json")))
         pae_json = sorted(glob.glob(os.path.join(raw_peptide_dir, "*_predicted_aligned_error_*.json")))
+        
+        logging.info(f"Found {len(relaxed_pdbs)} relaxed and {len(unrelaxed_pdbs)} unrelaxed PDB files")
         
         # Process models and collect all metrics
         all_metrics = {
             "peptide_sequence": peptide_sequence,
             "target_name": target_name,
-            "model_count": len(relaxed_pdbs),
+            "model_count": 0,
             "models": {}
         }
         
-        # Copy model files with standardized names
-        for i, pdb_file in enumerate(relaxed_pdbs, 1):
-            # Copy PDB file with standardized name
-            standardized_filename = self._standardize_model_filename(pdb_file, i)
-            dest_path = os.path.join(processed_dir, standardized_filename)
-            shutil.copy2(pdb_file, dest_path)
-            
-            # Find corresponding metrics file
+        # Strategy: Use relaxed for rank 1 (if available), unrelaxed for all others
+        # First, collect all rank numbers from available files
+        available_ranks = set()
+        for pdb_file in relaxed_pdbs + unrelaxed_pdbs:
             rank_match = re.search(r'rank_(\d+)', os.path.basename(pdb_file))
             if rank_match:
-                rank_num = rank_match.group(1)
+                available_ranks.add(int(rank_match.group(1)))
+        
+        processed_count = 0
+        for rank_num in sorted(available_ranks):
+            rank_str = f"{rank_num:03d}"  # Format as 001, 002, etc.
+            
+            # For rank 1, prefer relaxed if available, otherwise use unrelaxed
+            # For all other ranks, use unrelaxed
+            selected_pdb = None
+            if rank_num == 1:
+                # Look for relaxed version first for rank 1
+                relaxed_candidates = [f for f in relaxed_pdbs if f"rank_{rank_str}" in f]
+                if relaxed_candidates:
+                    selected_pdb = relaxed_candidates[0]
+                else:
+                    # Fall back to unrelaxed for rank 1 if no relaxed available
+                    unrelaxed_candidates = [f for f in unrelaxed_pdbs if f"rank_{rank_str}" in f]
+                    if unrelaxed_candidates:
+                        selected_pdb = unrelaxed_candidates[0]
+            else:
+                # For ranks 2+, use unrelaxed
+                unrelaxed_candidates = [f for f in unrelaxed_pdbs if f"rank_{rank_str}" in f]
+                if unrelaxed_candidates:
+                    selected_pdb = unrelaxed_candidates[0]
+            
+            if selected_pdb:
+                processed_count += 1
+                model_type = "relaxed" if "relaxed" in os.path.basename(selected_pdb) else "unrelaxed"
+                logging.info(f"Processing rank {rank_num} as model {processed_count}: {model_type}")
+                
+                # Copy PDB file with standardized name
+                standardized_filename = self._standardize_model_filename(selected_pdb, processed_count)
+                dest_path = os.path.join(processed_dir, standardized_filename)
+                shutil.copy2(selected_pdb, dest_path)
+                
+                # Find corresponding metrics file
                 corresponding_json = None
                 for json_file in score_jsons:
-                    if f"rank_{rank_num}" in os.path.basename(json_file):
+                    if f"rank_{rank_str}" in os.path.basename(json_file):
                         corresponding_json = json_file
                         break
                 
                 # Load metrics for this model
-                model_metrics = {"pdb_file": standardized_filename}
+                model_metrics = {
+                    "pdb_file": standardized_filename,
+                    "original_rank": rank_num,
+                    "relaxed": "relaxed" in os.path.basename(selected_pdb)
+                }
                 if corresponding_json and os.path.exists(corresponding_json):
                     with open(corresponding_json, 'r') as f:
                         json_data = json.load(f)
                         model_metrics.update(json_data)
                 
-                all_metrics["models"][f"model_{i}"] = model_metrics
+                all_metrics["models"][f"alphafold_model_{processed_count}"] = model_metrics
+        
+        all_metrics["model_count"] = processed_count
         
         # Add overall best metrics (typically from rank_001)
         if score_jsons:
@@ -153,64 +159,19 @@ class AlphaFoldDocker(BaseDockingModel):
                 all_metrics["predicted_aligned_error"] = pae_data
         
         # Save metrics
-        self._save_metrics_json(all_metrics, processed_dir)
+        self._save_metrics_json(all_metrics, processed_dir, prefix="alphafold_metrics")
         
         return processed_dir
     
-    def _dock_peptides_parallel(self, peptides: List[str], target_structure: str, 
-                               target_sequence: str, target_name: str) -> List[str]:
-        """
-        Dock multiple peptides in parallel using ColabFold.
-        """
-        num_processes = min(len(self.gpu_ids), len(peptides))
-        
-        if num_processes <= 1:
-            # Sequential processing
-            return [self._dock_single_peptide(peptide, self.gpu_ids[0], target_structure, 
-                                            target_sequence, target_name) 
-                   for peptide in peptides]
-        
-        # Parallel processing
-        logging.info(f"Starting parallel docking on {num_processes} GPUs...")
-        
-        # Group peptides by GPU
-        peptides_by_gpu = [[] for _ in range(len(self.gpu_ids))]
-        for i, peptide in enumerate(peptides):
-            gpu_index = i % len(self.gpu_ids)
-            peptides_by_gpu[gpu_index].append(peptide)
-        
-        # Create arguments for each worker process
-        process_args = []
-        for gpu_index, gpu_peptides in enumerate(peptides_by_gpu[:num_processes]):
-            if gpu_peptides:
-                process_args.append((
-                    gpu_peptides, self.gpu_ids[gpu_index], target_structure,
-                    target_sequence, target_name, self.raw_output_dir,
-                    self.num_models, self.num_recycles, self.recycle_early_stop_tolerance,
-                    self.amber, self.num_relax
-                ))
-        
-        # Run in parallel
-        context = get_context("spawn")
-        with context.Pool(processes=num_processes) as pool:
-            all_docked_dirs = pool.starmap(self._dock_peptides_for_gpu, process_args)
-        
-        # Flatten results
-        return [dir_path for dirs in all_docked_dirs for dir_path in dirs]
-    
-    def _dock_single_peptide(self, peptide_sequence: str, gpu_id: str, 
-                           target_structure: str, target_sequence: str, 
-                           target_name: str) -> str:
+    def _dock_single_peptide(self, peptide_sequence: str, target_structure: str,
+                           target_sequence: str, target_name: str, gpu_id: str = "0") -> str:
         """
         Dock a single peptide using ColabFold.
         """
         logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
         
         # Create output directory in raw folder
-        peptide_output_dir = os.path.join(
-            self.raw_output_dir, f"{target_name}_{peptide_sequence}"
-        )
-        os.makedirs(peptide_output_dir, exist_ok=True)
+        peptide_output_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
         
         # Create FASTA file
         combined_fasta_path = os.path.join(
@@ -282,6 +243,45 @@ class AlphaFoldDocker(BaseDockingModel):
         
         return peptide_output_dir
     
+    def _get_method_parameters(self) -> dict:
+        """
+        Get AlphaFold-specific parameters for parallel processing.
+        """
+        return {
+            'num_models': self.num_models,
+            'num_recycles': self.num_recycles,
+            'recycle_early_stop_tolerance': self.recycle_early_stop_tolerance,
+            'amber': self.amber,
+            'num_relax': self.num_relax
+        }
+    
+    @staticmethod
+    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
+                              target_sequence: str, target_name: str, raw_output_dir: str,
+                              method_params: dict) -> List[str]:
+        """
+        Process a batch of peptides on a specific GPU using AlphaFold.
+        """
+        # Create a temporary docker instance for this process
+        temp_docker = AlphaFoldDocker(
+            output_dir=os.path.dirname(raw_output_dir),  # Parent of raw_output_dir
+            gpu_ids=[gpu_id],
+            **method_params
+        )
+        
+        docked_dirs = []
+        for peptide in peptides:
+            try:
+                dir_path = temp_docker._dock_single_peptide(
+                    peptide, target_structure, target_sequence, target_name, gpu_id
+                )
+                if dir_path:
+                    docked_dirs.append(dir_path)
+            except Exception as e:
+                logging.error(f"Failed to dock {peptide} on GPU {gpu_id}: {e}")
+        
+        return docked_dirs
+    
     def _clean_up_colabfold_files(self, docking_dir: str, target_structure_copy: str):
         """
         Clean up unnecessary ColabFold files while preserving model outputs.
@@ -302,35 +302,3 @@ class AlphaFoldDocker(BaseDockingModel):
                         
         except OSError as e:
             logging.warning(f"Error cleaning up files: {e}")
-    
-    @staticmethod
-    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
-                              target_sequence: str, target_name: str, raw_output_dir: str,
-                              num_models: int, num_recycles: int, 
-                              recycle_early_stop_tolerance: float, amber: bool, 
-                              num_relax: int) -> List[str]:
-        """
-        Static method for parallel processing of peptides on a specific GPU.
-        """
-        # Create a temporary AlphaFoldDocker instance for this process
-        docker_kwargs = {
-            "output_dir": os.path.dirname(raw_output_dir),  # Parent of raw_output_dir
-            "gpu_ids": [gpu_id],
-            "num_models": num_models,
-            "num_recycles": num_recycles,
-            "recycle_early_stop_tolerance": recycle_early_stop_tolerance,
-            "amber": amber,
-            "num_relax": num_relax,
-        }
-        
-        temp_docker = AlphaFoldDocker(**docker_kwargs)
-        
-        docked_dirs = []
-        for peptide in peptides:
-            dir_path = temp_docker._dock_single_peptide(
-                peptide, gpu_id, target_structure, target_sequence, target_name
-            )
-            if dir_path:
-                docked_dirs.append(dir_path)
-        
-        return docked_dirs

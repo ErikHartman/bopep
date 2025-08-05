@@ -1,20 +1,25 @@
-from Bio.PDB import PDBParser
+from Bio.PDB import PDBParser, MMCIFParser
 import os
 import glob
 
 
 def extract_sequence_from_pdb(pdb_file: str, chain_id: str = "A"):
     """
-    Extracts the sequence from a PDB file for a given chain.
+    Extracts the sequence from a PDB or CIF file for a given chain.
 
     Parameters:
-    - pdb_file: Path to the PDB file.
+    - pdb_file: Path to the PDB or CIF file.
     - chain_id: The chain ID to extract the sequence from (default is 'A').
 
     Returns:
     - Extracted sequence as a string.
     """
-    parser = PDBParser(QUIET=True)
+    # Choose parser based on file extension
+    if pdb_file.lower().endswith('.cif'):
+        parser = MMCIFParser(QUIET=True)
+    else:
+        parser = PDBParser(QUIET=True)
+    
     structure = parser.get_structure("target", pdb_file)
     aa_dict = {
         "ALA": "A",

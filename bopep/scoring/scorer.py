@@ -2,14 +2,14 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
 import traceback
 import json
-from typing import Optional
+import glob
+from typing import Optional, List
 from bopep.scoring.pep_prot_distance import distance_score_from_pdb
 from bopep.scoring.af_scorer import AFScorer
 from bopep.scoring.rosetta_scorer import RosettaScorer
 from bopep.scoring.af_scorer import AFScorer
 from bopep.scoring.is_peptide_in_binding_site import (
     is_peptide_in_binding_site_pdb_file,
-    n_peptides_in_binding_site_colab_dir,
     smooth_peptide_binding_site_score,
 )
 from bopep.scoring.model_overlap import align_and_compute_rmsd
@@ -52,7 +52,7 @@ class Scorer:
             "in_binding_site_score",
             "template_rmsd",
             "weighted_plddt_overall",
-            "weighted_plddt_residues"
+            "weighted_plddt_residues",
         ]
         pass
 
@@ -66,6 +66,72 @@ class Scorer:
         
         with open(metrics_file, 'r') as f:
             return json.load(f)
+    
+    def _find_model_files(self, processed_dir: str) -> List[str]:
+        """
+        Find all model files in the processed directory.
+        Supports both method-specific naming (e.g., alphafold_model_1.pdb, boltz_model_1.cif)
+        and generic naming (model_1.pdb).
+        """
+        # Look for method-specific model files first
+        model_files = []
+        
+        # Check for various patterns
+        patterns = [
+            "*_model_*.pdb",
+            "*_model_*.cif", 
+            "model_*.pdb",
+            "model_*.cif"
+        ]
+        
+        for pattern in patterns:
+            files = glob.glob(os.path.join(processed_dir, pattern))
+            model_files.extend(files)
+        
+        # Remove duplicates and sort
+        model_files = sorted(list(set(model_files)))
+        return model_files
+    
+    def _get_docking_method(self, processed_dir: str, metrics_data: dict) -> str:
+        """
+        Determine the docking method used based on directory contents and metrics.
+        """
+        # First check if method is specified in metrics
+        method = metrics_data.get("docking_method", "").lower()
+        if method in ["alphafold", "boltz"]:
+            return method
+            
+        # Otherwise, infer from file naming patterns
+        model_files = self._find_model_files(processed_dir)
+        for model_file in model_files:
+            filename = os.path.basename(model_file)
+            if filename.startswith("alphafold_"):
+                return "alphafold"
+            elif filename.startswith("boltz_"):
+                return "boltz"
+        
+        # Default fallback - check raw directory structure
+        raw_dir = processed_dir.replace("/processed/", "/raw/")
+        if os.path.exists(raw_dir):
+            for file in os.listdir(raw_dir):
+                if "alphafold" in file.lower() or "colabfold" in file.lower():
+                    return "alphafold"
+                elif "boltz" in file.lower():
+                    return "boltz"
+        
+        # Final fallback
+        return "unknown"
+    
+    def _get_best_model_file(self, processed_dir: str) -> str:
+        """
+        Get the best model file (typically model_1 or method_model_1).
+        """
+        model_files = self._find_model_files(processed_dir)
+        if not model_files:
+            raise FileNotFoundError(f"No model files found in {processed_dir}")
+        
+        # Sort and return the first one (should be model_1 or method_model_1)
+        return model_files[0]
 
     def score(
         self,
@@ -200,12 +266,7 @@ class Scorer:
             peptide_sequence = metrics_data.get("peptide_sequence")
             
             # Use the best model PDB file for Rosetta scoring
-            pdb_file = os.path.join(processed_dir, "model_1.pdb")
-            if not os.path.exists(pdb_file):
-                # Try CIF format
-                pdb_file = os.path.join(processed_dir, "model_1.cif")
-                if not os.path.exists(pdb_file):
-                    raise FileNotFoundError(f"No model files found in {processed_dir}")
+            pdb_file = self._get_best_model_file(processed_dir)
             
             peptide_properties = PeptideProperties(pdb_file=pdb_file)
             rosetta_scorer = RosettaScorer(pdb_file)
@@ -239,6 +300,12 @@ class Scorer:
                 scores["distance_score"] = distance_score_from_pdb(pdb_file)
 
         # ipTM, pae and plddt score from standardized metrics
+        # Handle both generic and method-specific requests
+        docking_method = None
+        if processed_dir:
+            docking_method = self._get_docking_method(processed_dir, metrics_data or {})
+        
+        # Generic metrics (backwards compatibility)
         if "iptm" in scores_to_include:
             if not processed_dir:
                 print("WARNING: ipTM score needs a processed_dir.")
@@ -259,36 +326,86 @@ class Scorer:
                 if "models" in metrics_data and metrics_data["models"]:
                     best_model = metrics_data["models"][0]  # Already sorted by confidence
                     scores["peptide_pae"] = best_model.get("complex_ipde")  # or another PAE metric
+        
+        # Method-specific AlphaFold metrics
+        if any(score.startswith("alphafold_") for score in scores_to_include):
+            if not processed_dir:
+                print("WARNING: AlphaFold-specific scores need a processed_dir.")
+            elif docking_method == "alphafold":
+                if "alphafold_iptm" in scores_to_include:
+                    scores["alphafold_iptm"] = metrics_data.get("best_iptm")
+                if "alphafold_peptide_plddt" in scores_to_include:
+                    scores["alphafold_peptide_plddt"] = metrics_data.get("best_plddt")
+                if "alphafold_peptide_pae" in scores_to_include:
+                    if "models" in metrics_data and metrics_data["models"]:
+                        best_model = metrics_data["models"][0]
+                        scores["alphafold_peptide_pae"] = best_model.get("complex_ipde")
+            else:
+                # Set to None if not AlphaFold method
+                for score in scores_to_include:
+                    if score.startswith("alphafold_"):
+                        scores[score] = None
+        
+        # Method-specific Boltz metrics  
+        if any(score.startswith("boltz_") for score in scores_to_include):
+            if not processed_dir:
+                print("WARNING: Boltz-specific scores need a processed_dir.")
+            elif docking_method == "boltz":
+                if "boltz_confidence_score" in scores_to_include:
+                    scores["boltz_confidence_score"] = metrics_data.get("best_confidence_score")
+                if "boltz_ranking_score" in scores_to_include:
+                    scores["boltz_ranking_score"] = metrics_data.get("best_ranking_score")
+                if "boltz_has_clash" in scores_to_include:
+                    if "models" in metrics_data and metrics_data["models"]:
+                        best_model = metrics_data["models"][0]
+                        scores["boltz_has_clash"] = best_model.get("has_clash")
+                if "boltz_fraction_plausible" in scores_to_include:
+                    if "models" in metrics_data and metrics_data["models"]:
+                        best_model = metrics_data["models"][0]
+                        scores["boltz_fraction_plausible"] = best_model.get("fraction_plausible")
+            else:
+                # Set to None if not Boltz method
+                for score in scores_to_include:
+                    if score.startswith("boltz_"):
+                        scores[score] = None
 
         # Weighted pLDDT scores using AFScorer (requires raw ColabFold output)
-        if "weighted_plddt_overall" in scores_to_include or "weighted_plddt_residues" in scores_to_include:
+        weighted_scores_requested = [
+            score for score in scores_to_include 
+            if "weighted_plddt" in score and ("overall" in score or "residues" in score)
+        ]
+        
+        if weighted_scores_requested:
             if not processed_dir:
                 print("WARNING: weighted pLDDT scores need a processed_dir.")
             else:
                 # Try to find raw ColabFold directory
                 raw_dir = processed_dir.replace("/processed/", "/raw/")
-                if os.path.exists(raw_dir):
+                if os.path.exists(raw_dir) and docking_method == "alphafold":
                     try:
                         af_scorer = AFScorer(raw_dir, rank_num=1)
                         weighted_overall, weighted_residues = af_scorer.get_weighted_plddt()
                         
-                        if "weighted_plddt_overall" in scores_to_include:
-                            scores["weighted_plddt_overall"] = weighted_overall
-                        if "weighted_plddt_residues" in scores_to_include:
-                            scores["weighted_plddt_residues"] = weighted_residues
-                            
+                        # Handle both generic and method-specific requests
+                        for score in weighted_scores_requested:
+                            if score in ["weighted_plddt_overall", "alphafold_weighted_plddt_overall"]:
+                                scores[score] = weighted_overall
+                            elif score in ["weighted_plddt_residues", "alphafold_weighted_plddt_residues"]:
+                                scores[score] = weighted_residues
+                                
                     except Exception as e:
                         print(f"WARNING: Could not calculate weighted pLDDT: {e}")
-                        if "weighted_plddt_overall" in scores_to_include:
-                            scores["weighted_plddt_overall"] = None
-                        if "weighted_plddt_residues" in scores_to_include:
-                            scores["weighted_plddt_residues"] = None
+                        for score in weighted_scores_requested:
+                            scores[score] = None
                 else:
-                    print(f"WARNING: Raw directory not found for weighted pLDDT calculation: {raw_dir}")
-                    if "weighted_plddt_overall" in scores_to_include:
-                        scores["weighted_plddt_overall"] = None
-                    if "weighted_plddt_residues" in scores_to_include:
-                        scores["weighted_plddt_residues"] = None
+                    # Not AlphaFold or raw directory not found
+                    if docking_method != "alphafold":
+                        print(f"WARNING: Weighted pLDDT is only available for AlphaFold docking (current: {docking_method})")
+                    else:
+                        print(f"WARNING: Raw directory not found for weighted pLDDT calculation: {raw_dir}")
+                    
+                    for score in weighted_scores_requested:
+                        scores[score] = None
 
         # Binding site scores need binding_site_residue_indices and a PDB file
         if "in_binding_site" in scores_to_include:

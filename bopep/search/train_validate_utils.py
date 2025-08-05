@@ -12,6 +12,7 @@ def _compute_model_metrics(self, predictions_dict: dict, objectives: dict):
 
         return {"r2": r2, "mae": mae}
 
+
 def _compute_split_indices(
     self, total_samples: int, n_validate: Union[int, float]
 ) -> Optional[int]:

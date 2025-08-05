@@ -32,6 +32,7 @@ class BoltzDocker(BaseDockingModel):
         - sampling_steps: Number of sampling steps (default: 200)
         - step_scale: Step scale for diffusion sampling (default: 1.638)
         """
+        self.method_name = "boltz"
         super().__init__(**kwargs)
         
         self.recycling_steps = kwargs.get("recycling_steps", 3)
@@ -47,42 +48,8 @@ class BoltzDocker(BaseDockingModel):
         
         Returns list of processed output directories.
         """
-        logging.info(f"Starting Boltz docking for {len(peptide_sequences)} peptides...")
-        
-        # Filter peptides that already have results (if not overwriting)
-        peptides_to_dock = []
-        already_docked = []
-        
-        for peptide in peptide_sequences:
-            processed_dir = os.path.join(self.processed_dir, f"{target_name}_{peptide}")
-            if os.path.exists(processed_dir) and not self.overwrite_results:
-                already_docked.append(processed_dir)
-                logging.info(f"Skipping {peptide} - already docked")
-            else:
-                peptides_to_dock.append(peptide)
-        
-        if not peptides_to_dock:
-            logging.info("All peptides already docked. Returning existing results.")
-            return already_docked
-        
-        # Perform docking for peptides that need it
-        if len(self.gpu_ids) > 1 and len(peptides_to_dock) > 1:
-            docked_dirs = self._dock_parallel(peptides_to_dock, target_structure, 
-                                            target_sequence, target_name)
-        else:
-            docked_dirs = []
-            for peptide in peptides_to_dock:
-                docked_dir = self._dock_single_peptide(peptide, target_structure, 
-                                                     target_sequence, target_name)
-                docked_dirs.append(docked_dir)
-        
-        # Process all docked results
-        all_processed_dirs = already_docked + docked_dirs
-        
-        logging.info(f"Completed docking for {len(peptides_to_dock)} peptides. "
-                    f"Total results: {len(all_processed_dirs)}")
-        
-        return all_processed_dirs
+        return self._dock_with_common_logic(peptide_sequences, target_structure, 
+                                          target_sequence, target_name)
     
     def _dock_single_peptide(self, peptide_sequence: str, target_structure: str,
                             target_sequence: str, target_name: str, gpu_id: str = "0") -> str:
@@ -92,10 +59,9 @@ class BoltzDocker(BaseDockingModel):
         logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
         
         # Create output directories
-        raw_peptide_dir = os.path.join(self.raw_dir, f"{target_name}_{peptide_sequence}")
-        processed_peptide_dir = os.path.join(self.processed_dir, f"{target_name}_{peptide_sequence}")
+        raw_peptide_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
+        processed_peptide_dir = os.path.join(self.processed_output_dir, f"{target_name}_{peptide_sequence}")
         
-        os.makedirs(raw_peptide_dir, exist_ok=True)
         os.makedirs(processed_peptide_dir, exist_ok=True)
         
         # Create YAML configuration file
@@ -116,7 +82,47 @@ class BoltzDocker(BaseDockingModel):
             logging.error(f"Failed to dock {peptide_sequence}: {e}")
             raise
         
-        return processed_peptide_dir
+        return raw_peptide_dir
+    
+    def _get_method_parameters(self) -> dict:
+        """
+        Get Boltz-specific parameters for parallel processing.
+        """
+        return {
+            'recycling_steps': self.recycling_steps,
+            'diffusion_samples': self.diffusion_samples,
+            'output_format': self.output_format,
+            'sampling_steps': self.sampling_steps,
+            'step_scale': self.step_scale,
+            'overwrite_results': self.overwrite_results
+        }
+    
+    @staticmethod
+    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
+                              target_sequence: str, target_name: str, raw_output_dir: str,
+                              method_params: dict) -> List[str]:
+        """
+        Process a batch of peptides on a specific GPU using Boltz.
+        """
+        # Create a temporary docker instance for this process
+        temp_docker = BoltzDocker(
+            output_dir=os.path.dirname(raw_output_dir),  # Parent of raw_output_dir
+            gpu_ids=[gpu_id],
+            **method_params
+        )
+        
+        docked_dirs = []
+        for peptide in peptides:
+            try:
+                dir_path = temp_docker._dock_single_peptide(
+                    peptide, target_structure, target_sequence, target_name, gpu_id
+                )
+                docked_dirs.append(dir_path)
+            except Exception as e:
+                logging.error(f"Failed to dock {peptide} on GPU {gpu_id}: {e}")
+                # Continue with other peptides even if one fails
+        
+        return docked_dirs
     
     def _create_yaml_config(self, peptide_sequence: str, target_sequence: str,
                            target_name: str, output_dir: str, target_structure: str = None) -> str:
@@ -241,8 +247,22 @@ class BoltzDocker(BaseDockingModel):
         """
         logging.info("Processing Boltz output into standardized format...")
         
-        # Find the prediction directory
-        predictions_dir = os.path.join(raw_dir, "predictions")
+        # Find the Boltz results directory - it should be named like "boltz_results_{target_name}_{peptide_sequence}"
+        boltz_results_pattern = f"boltz_results_{target_name}_{peptide_sequence}"
+        boltz_results_dir = os.path.join(raw_dir, boltz_results_pattern)
+        
+        if not os.path.exists(boltz_results_dir):
+            # Fallback: look for any directory starting with "boltz_results_"
+            possible_dirs = [d for d in os.listdir(raw_dir) 
+                           if d.startswith("boltz_results_") and os.path.isdir(os.path.join(raw_dir, d))]
+            if possible_dirs:
+                boltz_results_dir = os.path.join(raw_dir, possible_dirs[0])
+                logging.warning(f"Expected {boltz_results_pattern} but found {possible_dirs[0]}")
+            else:
+                raise ValueError(f"Boltz results directory not found. Expected: {boltz_results_dir}")
+        
+        # Find the prediction directory inside the boltz results
+        predictions_dir = os.path.join(boltz_results_dir, "predictions")
         
         if not os.path.exists(predictions_dir):
             raise ValueError(f"Predictions directory not found: {predictions_dir}")
@@ -268,9 +288,9 @@ class BoltzDocker(BaseDockingModel):
         # Copy and rename structure files
         for i, struct_file in enumerate(structure_files, 1):
             if self.output_format == "pdb":
-                dest_file = os.path.join(processed_dir, f"model_{i}.pdb")
+                dest_file = os.path.join(processed_dir, f"boltz_model_{i}.pdb")
             else:
-                dest_file = os.path.join(processed_dir, f"model_{i}.cif")
+                dest_file = os.path.join(processed_dir, f"boltz_model_{i}.cif")
             
             shutil.copy2(struct_file, dest_file)
             logging.info(f"Copied {os.path.basename(struct_file)} -> {os.path.basename(dest_file)}")
@@ -278,7 +298,7 @@ class BoltzDocker(BaseDockingModel):
         # Process and combine all metrics into a single JSON file
         metrics = self._extract_boltz_metrics(input_dir, peptide_sequence)
         
-        metrics_file = os.path.join(processed_dir, "metrics.json")
+        metrics_file = os.path.join(processed_dir, "boltz_metrics.json")
         with open(metrics_file, 'w') as f:
             json.dump(metrics, f, indent=2)
         
@@ -350,78 +370,26 @@ class BoltzDocker(BaseDockingModel):
         
         return metrics
     
-    def _dock_parallel(self, peptide_sequences: List[str], target_structure: str,
-                      target_sequence: str, target_name: str) -> List[str]:
-        """
-        Dock multiple peptides in parallel using multiple GPUs.
-        """
-        logging.info(f"Starting parallel docking on {len(self.gpu_ids)} GPUs...")
-        
-        # Group peptides by GPU
-        peptides_by_gpu = [[] for _ in range(len(self.gpu_ids))]
-        for i, peptide in enumerate(peptide_sequences):
-            gpu_index = i % len(self.gpu_ids)
-            peptides_by_gpu[gpu_index].append(peptide)
-        
-        # Create arguments for each worker process
-        process_args = []
-        for gpu_index, gpu_peptides in enumerate(peptides_by_gpu):
-            if not gpu_peptides:
-                continue
-            
-            process_args.append((
-                gpu_peptides,
-                self.gpu_ids[gpu_index],
-                target_structure,
-                target_sequence,
-                target_name,
-                self  # Pass self to access all parameters
-            ))
-        
-        # Run in parallel
-        from multiprocessing import get_context
-        context = get_context("spawn")
-        
-        with context.Pool(processes=len(process_args)) as pool:
-            all_docked_dirs = pool.starmap(self._dock_peptides_for_gpu, process_args)
-        
-        # Flatten the list of lists
-        return [dir_path for dirs in all_docked_dirs for dir_path in dirs]
-    
-    @staticmethod
-    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
-                              target_sequence: str, target_name: str, docker_instance) -> List[str]:
-        """
-        Process a batch of peptides on a specific GPU.
-        """
-        docked_dirs = []
-        for peptide in peptides:
-            try:
-                dir_path = docker_instance._dock_single_peptide(
-                    peptide, target_structure, target_sequence, target_name, gpu_id
-                )
-                docked_dirs.append(dir_path)
-            except Exception as e:
-                logging.error(f"Failed to dock {peptide} on GPU {gpu_id}: {e}")
-                # Continue with other peptides even if one fails
-        
-        return docked_dirs
-    
-    def process_raw_output(self, raw_dir: str, processed_dir: str, 
-                          peptide_sequence: str, target_name: str = None) -> str:
+    def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
+                          target_name: str) -> str:
         """
         Process raw Boltz output into standardized format.
         
         This method implements the abstract method from BaseDockingModel.
         """
+        # Create the processed directory path using the same pattern as base class
+        peptide_dir_name = f"{target_name}_{peptide_sequence}"
+        processed_dir = os.path.join(self.processed_output_dir, peptide_dir_name)
+        os.makedirs(processed_dir, exist_ok=True)
+        
         # Extract target name from directory structure if not provided
         if target_name is None:
             # Try to extract from the directory name
-            dir_name = os.path.basename(raw_dir)
+            dir_name = os.path.basename(raw_peptide_dir)
             if "_" in dir_name:
                 target_name = dir_name.split("_")[0]
             else:
                 target_name = "unknown"
         
-        self._process_boltz_output(raw_dir, processed_dir, peptide_sequence, target_name)
+        self._process_boltz_output(raw_peptide_dir, processed_dir, peptide_sequence, target_name)
         return processed_dir

@@ -1,6 +1,7 @@
 import random
 import string
 from bopep.docking.alphafold_docker import AlphaFoldDocker
+from bopep.docking.boltz_docker import BoltzDocker
 from bopep.docking.utils import extract_sequence_from_pdb
 import os
 from Bio.PDB import PDBParser, PDBIO, Select
@@ -15,26 +16,51 @@ logging.basicConfig(
 class Docker:
     """
     Docker class for docking peptides to a target structure.
-    Necessary parameters are passed in as a dictionary with keys:
-    - num_models: Number of models to generate.
-    - num_recycles: Number of recycling steps.
-    - recycle_early_stop_tolerance: Early stopping tolerance for recycling.
-    - amber: Whether to use AMBER relaxation.
-    - num_relax: Number of relaxation steps.
-    - output_dir: Output directory for PDB files.
-    - gpu_ids: List of GPU IDs to use.
-    - overwrite_results: Whether to overwrite existing results.
+    
+    Parameters:
+    - model: Single model to use ('alphafold' or 'boltz') - for backward compatibility
+    - models: List of models to use (['alphafold', 'boltz', etc.])
+    - base_output_dir: Base output directory for results
+    - num_workers: Number of parallel workers
+    - **kwargs: Model-specific parameters (passed to individual docking classes)
+    
+    For AlphaFold parameters, see AlphaFoldDocker documentation.
+    For Boltz parameters, see BoltzDocker documentation.
     """
-    def __init__(self, docker_kwargs: dict):
-        self.model = docker_kwargs.get("model", "alphafold2")
-        self.num_models = docker_kwargs.get("num_models", 5)
-        self.num_recycles = docker_kwargs.get("num_recycles", 10)
-        self.recycle_early_stop_tolerance = docker_kwargs.get("recycle_early_stop_tolerance", 0.01)
-        self.amber = docker_kwargs.get("amber", True)
-        self.num_relax = docker_kwargs.get("num_relax", 1)
-        self.output_dir = docker_kwargs["output_dir"]
-        self.gpu_ids = docker_kwargs.get("gpu_ids", [0])
-        self.overwrite_results = docker_kwargs.get("overwrite_results", False)
+    def __init__(self, model=None, models=None, base_output_dir="output", 
+                 num_workers=1, **kwargs):
+        """
+        Initialize Docker for docking peptides to a target structure.
+        
+        Parameters:
+        - model: Single model to use ('alphafold' or 'boltz') - for backward compatibility
+        - models: List of models to use (['alphafold', 'boltz', etc.])
+        - base_output_dir: Base output directory for results
+        - num_workers: Number of parallel workers
+        - **kwargs: Additional model-specific parameters
+        """
+        # Support both single model and multiple models
+        if models is not None:
+            self.models = models if isinstance(models, list) else [models]
+        elif model is not None:
+            self.models = [model]
+        else:
+            self.models = ["alphafold"]  # Default
+        
+        # Validate supported models
+        supported_models = ["alphafold", "boltz"]
+        for model in self.models:
+            if model not in supported_models:
+                raise ValueError(f"Unsupported model: {model}. Supported models are {supported_models}")
+        
+        # Base parameters
+        self.base_output_dir = base_output_dir
+        self.num_workers = num_workers
+        
+        # Store all kwargs for passing to specific docking classes
+        self.docking_kwargs = kwargs
+        
+        # Target structure tracking
         self.target_structure_path = None
         self.original_target_path = None
         self.target_sequence = None
@@ -58,7 +84,14 @@ class Docker:
             )
         
         self.original_target_path = target_structure_path
-        self.target_name = os.path.basename(target_structure_path).replace(".pdb", "")
+        # Extract target name by removing both .pdb and .cif extensions
+        base_name = os.path.basename(target_structure_path)
+        if base_name.lower().endswith('.cif'):
+            self.target_name = base_name[:-4]  # Remove .cif
+        elif base_name.lower().endswith('.pdb'):
+            self.target_name = base_name[:-4]  # Remove .pdb
+        else:
+            self.target_name = os.path.splitext(base_name)[0]  # Remove any other extension
         
         if self.temp_pdb_path and os.path.exists(self.temp_pdb_path):
             os.remove(self.temp_pdb_path)
@@ -114,90 +147,74 @@ class Docker:
         self._log_config()
 
     def dock_peptides(self, peptide_sequences: list):
-        if self.model == "alphafold2":
-            logging.info("Using AlphaFold2 for docking.")
-            return self.dock_alphafold2(peptide_sequences)
-        elif self.model == "boltz2":
-            logging.info("Using Boltz sampling for docking.")
-            return self.dock_boltz2(peptide_sequences)
-        else:
-            raise ValueError(f"Unsupported model: {self.model}. Supported models are 'alphafold2' and 'boltz2'.")
-
-    def dock_boltz2(self, peptide_sequences: list):
         """
-        Dock multiple peptides to a target structure using Boltz.
+        Dock peptides using all specified models.
         
-        Returns list of processed output directories.
+        Parameters:
+        - peptide_sequences: List of peptide sequences to dock
+        
+        Returns:
+        - Dictionary with model names as keys and list of processed directories as values
         """
         if not self.target_structure_path:
             raise ValueError(
                 "Target structure not set. Please set the target structure using set_target_structure."
             )
         
-        # Import here to avoid circular imports
-        from bopep.docking.boltz_docker import BoltzDocker
+        all_results = {}
         
-        # Create Boltz docker with current parameters
-        boltz_docker = BoltzDocker(
-            output_dir=self.output_dir,
-            gpu_ids=self.gpu_ids,
-            overwrite_results=self.overwrite_results,
-            recycling_steps=self.num_recycles,  # Map to Boltz parameter name
-            diffusion_samples=getattr(self, 'diffusion_samples', 1),
-            use_msa_server=getattr(self, 'use_msa_server', True),
-            use_potentials=getattr(self, 'use_potentials', False),
-            output_format=getattr(self, 'output_format', 'pdb'),
-        )
+        for model in self.models:
+            logging.info(f"Starting docking with {model.upper()}...")
+            
+            if model == "alphafold":
+                results = self._dock_with_alphafold(peptide_sequences)
+            elif model == "boltz":
+                results = self._dock_with_boltz(peptide_sequences)
+            else:
+                raise ValueError(f"Unsupported model: {model}")
+            
+            all_results[model] = results
+            logging.info(f"Completed {model.upper()} docking for {len(results)} peptides")
         
-        # Perform docking
-        processed_dirs = boltz_docker.dock(
-            peptide_sequences=peptide_sequences,
-            target_structure=self.target_structure_path,
-            target_sequence=self.target_sequence,
-            target_name=self.target_name,
-        )
-        
-        # Clean up temporary files
+        # Clean up temporary files after all docking is complete
         self._clean_up()
         
-        return processed_dirs
-
-    def dock_alphafold2(self, peptide_sequences: list):
-        """
-        Dock multiple peptides to a target structure using AlphaFold2/ColabFold.
+        return all_results
         
-        Returns list of processed output directories.
-        """
-        if not self.target_structure_path:
-            raise ValueError(
-                "Target structure not set. Please set the target structure using set_target_structure."
-            )
-        
-        # Create AlphaFold docker with current parameters
+    def _dock_with_alphafold(self, peptide_sequences: list):
+        """Dock peptides using AlphaFold/ColabFold."""
+        # Create alphafold instance and let it handle its own parameters
         alphafold_docker = AlphaFoldDocker(
-            output_dir=self.output_dir,
-            gpu_ids=self.gpu_ids,
-            overwrite_results=self.overwrite_results,
-            num_models=self.num_models,
-            num_recycles=self.num_recycles,
-            recycle_early_stop_tolerance=self.recycle_early_stop_tolerance,
-            amber=self.amber,
-            num_relax=self.num_relax,
+            output_dir=self.base_output_dir,
+            num_workers=self.num_workers,
+            **self.docking_kwargs  # Pass all kwargs, AlphaFoldDocker will extract what it needs
         )
         
-        # Perform docking
-        processed_dirs = alphafold_docker.dock(
-            peptide_sequences=peptide_sequences,
-            target_structure=self.target_structure_path,
-            target_sequence=self.target_sequence,
-            target_name=self.target_name,
+        # Dock the peptides
+        return alphafold_docker.dock(
+            peptide_sequences, 
+            self.target_structure_path, 
+            self.target_sequence, 
+            self.target_name
+        )
+
+    def _dock_with_boltz(self, peptide_sequences: list):
+        """Dock peptides using Boltz."""
+        # Create boltz instance and let it handle its own parameters
+        boltz_docker = BoltzDocker(
+            output_dir=self.base_output_dir,
+            num_workers=self.num_workers,
+            **self.docking_kwargs  # Pass all kwargs, BoltzDocker will extract what it needs
         )
         
-        # Clean up temporary files
-        self._clean_up()
-        
-        return processed_dirs
-    
+        # Dock the peptides
+        return boltz_docker.dock(
+            peptide_sequences, 
+            self.target_structure_path, 
+            self.target_sequence, 
+            self.target_name
+        )
+
     def _clean_up(self):
         """Remove any temporary files created during processing."""
         if self.temp_pdb_path and os.path.exists(self.temp_pdb_path):
@@ -218,11 +235,19 @@ class Docker:
         """Log the current configuration of the Docker instance."""
         logging.info("Docker configuration:")
         logging.info(f"Target structure: {self.target_structure_path}")
-        logging.info(f"Output directory: {self.output_dir}")
-        logging.info(f"Number of models: {self.num_models}")
-        logging.info(f"Number of recycles: {self.num_recycles}")
-        logging.info(f"Recycle early stop tolerance: {self.recycle_early_stop_tolerance}")
-        logging.info(f"Using AMBER relaxation: {self.amber}")
-        logging.info(f"Number of relaxations: {self.num_relax}")
-        logging.info(f"GPU IDs: {self.gpu_ids}")
-        logging.info(f"Overwrite results: {self.overwrite_results}")
+        logging.info(f"Base output directory: {self.base_output_dir}")
+        logging.info(f"Models: {self.models}")
+        logging.info(f"Number of workers: {self.num_workers}")
+        
+        # Log method-specific parameters if present
+        if "alphafold" in self.models:
+            logging.info("AlphaFold parameters:")
+            for param in ["num_models", "num_recycles", "recycle_early_stop_tolerance", "amber", "num_relax"]:
+                if param in self.docking_kwargs:
+                    logging.info(f"  {param}: {self.docking_kwargs[param]}")
+        
+        if "boltz" in self.models:
+            logging.info("Boltz parameters:")
+            for param in ["diffusion_samples", "output_format", "sampling_steps", "step_scale"]:
+                if param in self.docking_kwargs:
+                    logging.info(f"  {param}: {self.docking_kwargs[param]}")
