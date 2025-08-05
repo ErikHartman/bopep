@@ -97,10 +97,10 @@ def dock_peptide(
             universal_newlines=True,
             env=env,
         )
-        process.wait()
+        output, _ = process.communicate()
         if process.returncode != 0:
             raise subprocess.CalledProcessError(
-                returncode=process.returncode, cmd=command
+                returncode=process.returncode, cmd=command, output=output
             )
         logging.info(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
 
@@ -110,7 +110,8 @@ def dock_peptide(
         with open(os.path.join(peptide_output_dir, "finished.txt"), "w") as f:
             f.write("Docking finished successfully.")
     except subprocess.CalledProcessError as e:
-        logging.info(f"An error occurred during docking of {peptide_sequence}: {e}")
+        logging.error(f"An error occurred during docking of {peptide_sequence}: {e}")
+        logging.error(f"ColabFold output:\n{e.output}")
 
     return peptide_output_dir
 
