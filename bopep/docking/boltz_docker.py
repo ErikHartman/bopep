@@ -346,15 +346,8 @@ class BoltzDocker(BaseDockingModel):
             except Exception as e:
                 logging.warning(f"Failed to read affinity file: {e}")
         
-        # Add PAE data if available
-        pae_files = glob.glob(os.path.join(input_dir, "pae_*.npz"))
-        if pae_files:
-            metrics["pae_files"] = [os.path.basename(f) for f in pae_files]
-        
-        # Add pLDDT data if available  
-        plddt_files = glob.glob(os.path.join(input_dir, "plddt_*.npz"))
-        if plddt_files:
-            metrics["plddt_files"] = [os.path.basename(f) for f in plddt_files]
+        # Extract NPZ data to JSON format
+        self._extract_npz_data_to_metrics(input_dir, metrics)
         
         # Add summary statistics
         if metrics["models"]:
@@ -393,3 +386,64 @@ class BoltzDocker(BaseDockingModel):
         
         self._process_boltz_output(raw_peptide_dir, processed_dir, peptide_sequence, target_name)
         return processed_dir
+    
+    def _extract_npz_data_to_metrics(self, input_dir: str, metrics: Dict[str, Any]) -> None:
+        """
+        Extract confidence data from NPZ files and add to metrics as JSON-serializable data.
+        
+        Args:
+            input_dir: Directory containing Boltz NPZ files
+            metrics: Metrics dict to update with extracted data
+        """
+        try:
+            import numpy as np
+            
+            # Extract PAE data
+            pae_files = glob.glob(os.path.join(input_dir, "pae_*.npz"))
+            if pae_files:
+                # Sort files to ensure consistent ordering
+                pae_files.sort()
+                try:
+                    # Load first PAE file (assuming model 1 is primary)
+                    pae_data = np.load(pae_files[0])
+                    if 'pae' in pae_data:
+                        pae_matrix = pae_data['pae'].tolist()  # Convert to JSON-serializable list
+                        metrics["pae_matrix"] = pae_matrix
+                        logging.info(f"Extracted PAE matrix with shape: {np.array(pae_matrix).shape}")
+                except Exception as e:
+                    logging.warning(f"Failed to extract PAE data: {e}")
+            
+            # Extract pLDDT data
+            plddt_files = glob.glob(os.path.join(input_dir, "plddt_*.npz"))
+            if plddt_files:
+                # Sort files to ensure consistent ordering
+                plddt_files.sort()
+                try:
+                    # Load first pLDDT file (assuming model 1 is primary)
+                    plddt_data = np.load(plddt_files[0])
+                    if 'plddt' in plddt_data:
+                        plddt_vector = plddt_data['plddt'].tolist()  # Convert to JSON-serializable list
+                        metrics["plddt_vector"] = plddt_vector
+                        logging.info(f"Extracted pLDDT vector with length: {len(plddt_vector)}")
+                except Exception as e:
+                    logging.warning(f"Failed to extract pLDDT data: {e}")
+            
+            # Extract PDE data (Protein Distance Error - specific to Boltz)
+            pde_files = glob.glob(os.path.join(input_dir, "pde_*.npz"))
+            if pde_files:
+                # Sort files to ensure consistent ordering
+                pde_files.sort()
+                try:
+                    # Load first PDE file (assuming model 1 is primary)
+                    pde_data = np.load(pde_files[0])
+                    if 'pde' in pde_data:
+                        pde_vector = pde_data['pde'].tolist()  # Convert to JSON-serializable list
+                        metrics["pde_vector"] = pde_vector
+                        logging.info(f"Extracted PDE vector with length: {len(pde_vector)}")
+                except Exception as e:
+                    logging.warning(f"Failed to extract PDE data: {e}")
+                    
+        except ImportError:
+            logging.warning("NumPy not available - cannot extract NPZ confidence data")
+        except Exception as e:
+            logging.warning(f"Error extracting NPZ data: {e}")

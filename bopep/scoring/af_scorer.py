@@ -4,6 +4,8 @@ import re
 from Bio.PDB import PDBParser, NeighborSearch, Selection
 from collections import defaultdict
 
+# TODO UPDATE THIS!
+
 class AFScorer:
     """
     Class for scoring AlphaFold/ColabFold predictions.

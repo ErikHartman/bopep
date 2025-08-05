@@ -17,7 +17,7 @@ def _compute_split_indices(
     self, total_samples: int, n_validate: Union[int, float]
 ) -> Optional[int]:
     """Return num_validate or None if split is infeasible."""
-    if isinstance(n_validate, float):
+    if isinstance(n_validate, float) and n_validate < 1:
         num = int(total_samples * n_validate)
     else:
         num = n_validate
