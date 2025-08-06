@@ -7,6 +7,7 @@ import shutil
 from typing import List, Dict, Any
 from bopep.docking.base_docking_model import BaseDockingModel
 import logging
+import numpy as np
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -58,29 +59,18 @@ class BoltzDocker(BaseDockingModel):
         """
         logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
         
-        # Create output directories
         raw_peptide_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
         processed_peptide_dir = os.path.join(self.processed_output_dir, f"{target_name}_{peptide_sequence}")
         
         os.makedirs(processed_peptide_dir, exist_ok=True)
         
-        # Create YAML configuration file
         yaml_path = self._create_yaml_config(peptide_sequence, target_sequence, 
                                            target_name, raw_peptide_dir, target_structure)
-        
-        # Run Boltz prediction
-        try:
-            self._run_boltz_prediction(yaml_path, raw_peptide_dir, gpu_id)
-            
-            # Process the raw output into standardized format
-            self._process_boltz_output(raw_peptide_dir, processed_peptide_dir, 
-                                     peptide_sequence, target_name)
-            
-            logging.info(f"Successfully completed docking for {peptide_sequence}")
-            
-        except Exception as e:
-            logging.error(f"Failed to dock {peptide_sequence}: {e}")
-            raise
+
+        self._run_boltz_prediction(yaml_path, raw_peptide_dir, gpu_id)
+    
+        self._process_boltz_output(raw_peptide_dir, processed_peptide_dir, 
+                                    peptide_sequence, target_name)
         
         return raw_peptide_dir
     
@@ -104,28 +94,24 @@ class BoltzDocker(BaseDockingModel):
         """
         Process a batch of peptides on a specific GPU using Boltz.
         """
-        # Create a temporary docker instance for this process
         temp_docker = BoltzDocker(
-            output_dir=os.path.dirname(raw_output_dir),  # Parent of raw_output_dir
+            output_dir=os.path.dirname(raw_output_dir),
             gpu_ids=[gpu_id],
             **method_params
         )
         
         docked_dirs = []
         for peptide in peptides:
-            try:
-                dir_path = temp_docker._dock_single_peptide(
-                    peptide, target_structure, target_sequence, target_name, gpu_id
-                )
-                docked_dirs.append(dir_path)
-            except Exception as e:
-                logging.error(f"Failed to dock {peptide} on GPU {gpu_id}: {e}")
-                # Continue with other peptides even if one fails
+            dir_path = temp_docker._dock_single_peptide(
+                peptide, target_structure, target_sequence, target_name, gpu_id
+            )
+            docked_dirs.append(dir_path)
+ 
         
         return docked_dirs
     
     def _create_yaml_config(self, peptide_sequence: str, target_sequence: str,
-                           target_name: str, output_dir: str, target_structure: str = None) -> str:
+                           target_name: str, output_dir: str, target_structure: str) -> str:
         """
         Create a YAML configuration file for Boltz.
         """
@@ -134,33 +120,27 @@ class BoltzDocker(BaseDockingModel):
                 {
                     "protein": {
                         "id": "A",
-                        "sequence": target_sequence
+                        "sequence": target_sequence,
+                        "msa": "empty"  # Placeholder for MSA
                     }
                 },
                 {
                     "protein": {
                         "id": "B", 
-                        "sequence": peptide_sequence
+                        "sequence": peptide_sequence,
+                        "msa": "empty"  # Placeholder for MSA
                     }
                 }
             ]
         }
         
-
-        config["sequences"][0]["protein"]["msa"] = "empty"
-        config["sequences"][1]["protein"]["msa"] = "empty"
-        
-        # Add template configuration if target structure is provided
-        if target_structure and os.path.exists(target_structure):
-
-            template_path = self._prepare_template_file(target_structure, output_dir)
-            config["templates"] = [
-                {
-                    "cif": template_path,
-                    "chain_id": "A"  # Specify which chain to template (target protein)
-                }
-            ]
-            logging.info(f"Added template: {template_path}")
+        template_path = self._prepare_template_file(target_structure, output_dir)
+        config["templates"] = [
+            {
+                "cif": template_path,
+                "chain_id": "A"
+            }
+        ]
         
         yaml_path = os.path.join(output_dir, f"{target_name}_{peptide_sequence}.yaml")
         
@@ -174,9 +154,7 @@ class BoltzDocker(BaseDockingModel):
         """
         Prepare template file for Boltz.
         """
-        # Check if the file is already in CIF format
         if target_structure.lower().endswith('.cif'):
-            # Copy CIF file to output directory
             template_name = os.path.basename(target_structure)
             template_path = os.path.join(output_dir, template_name)
             shutil.copy2(target_structure, template_path)
@@ -206,7 +184,6 @@ class BoltzDocker(BaseDockingModel):
         if self.overwrite_results:
             cmd.append("--override")
         
-        # Set environment to use specific GPU
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = gpu_id
         env.pop("MPLBACKEND", None)
@@ -247,36 +224,22 @@ class BoltzDocker(BaseDockingModel):
         """
         logging.info("Processing Boltz output into standardized format...")
         
-        # Find the Boltz results directory - it should be named like "boltz_results_{target_name}_{peptide_sequence}"
+
         boltz_results_pattern = f"boltz_results_{target_name}_{peptide_sequence}"
         boltz_results_dir = os.path.join(raw_dir, boltz_results_pattern)
         
-        if not os.path.exists(boltz_results_dir):
-            # Fallback: look for any directory starting with "boltz_results_"
-            possible_dirs = [d for d in os.listdir(raw_dir) 
-                           if d.startswith("boltz_results_") and os.path.isdir(os.path.join(raw_dir, d))]
-            if possible_dirs:
-                boltz_results_dir = os.path.join(raw_dir, possible_dirs[0])
-                logging.warning(f"Expected {boltz_results_pattern} but found {possible_dirs[0]}")
-            else:
-                raise ValueError(f"Boltz results directory not found. Expected: {boltz_results_dir}")
-        
-        # Find the prediction directory inside the boltz results
         predictions_dir = os.path.join(boltz_results_dir, "predictions")
         
         if not os.path.exists(predictions_dir):
             raise ValueError(f"Predictions directory not found: {predictions_dir}")
         
         # Find the input-specific subdirectory
-        input_dirs = [d for d in os.listdir(predictions_dir) 
-                     if os.path.isdir(os.path.join(predictions_dir, d))]
+        input_dir = [d for d in os.listdir(predictions_dir) 
+                     if os.path.isdir(os.path.join(predictions_dir, d))][0]
         
-        if not input_dirs:
+        if not input_dir:
             raise ValueError(f"No input directories found in {predictions_dir}")
-        
-        # Use the first (and typically only) input directory
-        input_dir = os.path.join(predictions_dir, input_dirs[0])
-        
+
         # Find structure files
         if self.output_format == "pdb":
             structure_files = glob.glob(os.path.join(input_dir, "*_model_*.pdb"))
@@ -285,7 +248,6 @@ class BoltzDocker(BaseDockingModel):
         
         structure_files.sort()  # Sort to maintain consistent ordering
         
-        # Copy and rename structure files
         for i, struct_file in enumerate(structure_files, 1):
             if self.output_format == "pdb":
                 dest_file = os.path.join(processed_dir, f"boltz_model_{i}.pdb")
@@ -295,7 +257,6 @@ class BoltzDocker(BaseDockingModel):
             shutil.copy2(struct_file, dest_file)
             logging.info(f"Copied {os.path.basename(struct_file)} -> {os.path.basename(dest_file)}")
         
-        # Process and combine all metrics into a single JSON file
         metrics = self._extract_boltz_metrics(input_dir, peptide_sequence)
         
         metrics_file = os.path.join(processed_dir, "boltz_metrics.json")
@@ -305,6 +266,7 @@ class BoltzDocker(BaseDockingModel):
         logging.info(f"Created standardized metrics file: {metrics_file}")
     
     def _extract_boltz_metrics(self, input_dir: str, peptide_sequence: str) -> Dict[str, Any]:
+        # Get best model on confidence score and make primary
         """
         Extract all available metrics from Boltz output files.
         """
@@ -319,37 +281,26 @@ class BoltzDocker(BaseDockingModel):
         confidence_files.sort()
         
         for i, conf_file in enumerate(confidence_files, 1):
-            try:
-                with open(conf_file, 'r') as f:
-                    confidence_data = json.load(f)
-                
-                model_metrics = {
-                    "model_id": i,
-                    "confidence_file": os.path.basename(conf_file),
-                    **confidence_data
-                }
-                
-                metrics["models"].append(model_metrics)
-                
-            except Exception as e:
-                logging.warning(f"Failed to read confidence file {conf_file}: {e}")
-        
-        # Add affinity data if available
+            with open(conf_file, 'r') as f:
+                confidence_data = json.load(f)
+            
+            model_metrics = {
+                "model_id": i,
+                "confidence_file": os.path.basename(conf_file),
+                **confidence_data
+            }
+            metrics["models"].append(model_metrics)
+            
         affinity_files = glob.glob(os.path.join(input_dir, "affinity_*.json"))
         if affinity_files:
-            try:
-                with open(affinity_files[0], 'r') as f:
-                    affinity_data = json.load(f)
-                
-                metrics["affinity"] = affinity_data
-                
-            except Exception as e:
-                logging.warning(f"Failed to read affinity file: {e}")
+            with open(affinity_files[0], 'r') as f:
+                affinity_data = json.load(f)
+            
+            metrics["affinity"] = affinity_data
+
         
-        # Extract NPZ data to JSON format
         self._extract_npz_data_to_metrics(input_dir, metrics)
         
-        # Add summary statistics
         if metrics["models"]:
             # Get best model based on confidence score
             best_model = max(metrics["models"], 
@@ -390,60 +341,53 @@ class BoltzDocker(BaseDockingModel):
     def _extract_npz_data_to_metrics(self, input_dir: str, metrics: Dict[str, Any]) -> None:
         """
         Extract confidence data from NPZ files and add to metrics as JSON-serializable data.
+
+        Here we assume model 1 is primary model - which might not be the case.
         
         Args:
             input_dir: Directory containing Boltz NPZ files
             metrics: Metrics dict to update with extracted data
         """
-        try:
-            import numpy as np
-            
-            # Extract PAE data
-            pae_files = glob.glob(os.path.join(input_dir, "pae_*.npz"))
-            if pae_files:
-                # Sort files to ensure consistent ordering
-                pae_files.sort()
-                try:
-                    # Load first PAE file (assuming model 1 is primary)
-                    pae_data = np.load(pae_files[0])
-                    if 'pae' in pae_data:
-                        pae_matrix = pae_data['pae'].tolist()  # Convert to JSON-serializable list
-                        metrics["pae_matrix"] = pae_matrix
-                        logging.info(f"Extracted PAE matrix with shape: {np.array(pae_matrix).shape}")
-                except Exception as e:
-                    logging.warning(f"Failed to extract PAE data: {e}")
-            
-            # Extract pLDDT data
-            plddt_files = glob.glob(os.path.join(input_dir, "plddt_*.npz"))
-            if plddt_files:
-                # Sort files to ensure consistent ordering
-                plddt_files.sort()
-                try:
-                    # Load first pLDDT file (assuming model 1 is primary)
-                    plddt_data = np.load(plddt_files[0])
-                    if 'plddt' in plddt_data:
-                        plddt_vector = plddt_data['plddt'].tolist()  # Convert to JSON-serializable list
-                        metrics["plddt_vector"] = plddt_vector
-                        logging.info(f"Extracted pLDDT vector with length: {len(plddt_vector)}")
-                except Exception as e:
-                    logging.warning(f"Failed to extract pLDDT data: {e}")
-            
-            # Extract PDE data (Protein Distance Error - specific to Boltz)
-            pde_files = glob.glob(os.path.join(input_dir, "pde_*.npz"))
-            if pde_files:
-                # Sort files to ensure consistent ordering
-                pde_files.sort()
-                try:
-                    # Load first PDE file (assuming model 1 is primary)
-                    pde_data = np.load(pde_files[0])
-                    if 'pde' in pde_data:
-                        pde_vector = pde_data['pde'].tolist()  # Convert to JSON-serializable list
-                        metrics["pde_vector"] = pde_vector
-                        logging.info(f"Extracted PDE vector with length: {len(pde_vector)}")
-                except Exception as e:
-                    logging.warning(f"Failed to extract PDE data: {e}")
-                    
-        except ImportError:
-            logging.warning("NumPy not available - cannot extract NPZ confidence data")
-        except Exception as e:
-            logging.warning(f"Error extracting NPZ data: {e}")
+
+        # Extract PAE data
+        pae_files = glob.glob(os.path.join(input_dir, "pae_*.npz"))
+        if pae_files:
+            # Sort files to ensure consistent ordering
+            pae_files.sort()
+
+            # Load first PAE file (assuming model 1 is primary)
+            pae_data = np.load(pae_files[0])
+            if 'pae' in pae_data:
+                pae_matrix = pae_data['pae'].tolist()  # Convert to JSON-serializable list
+                metrics["pae_matrix"] = pae_matrix
+                logging.info(f"Extracted PAE matrix with shape: {np.array(pae_matrix).shape}")
+
+        
+        # Extract pLDDT data
+        plddt_files = glob.glob(os.path.join(input_dir, "plddt_*.npz"))
+        if plddt_files:
+            # Sort files to ensure consistent ordering
+            plddt_files.sort()
+
+            # Load first pLDDT file (assuming model 1 is primary)
+            plddt_data = np.load(plddt_files[0])
+            if 'plddt' in plddt_data:
+                plddt_vector = plddt_data['plddt'].tolist()  # Convert to JSON-serializable list
+                metrics["plddt_vector"] = plddt_vector
+                logging.info(f"Extracted pLDDT vector with length: {len(plddt_vector)}")
+
+        
+        # Extract PDE data (Protein Distance Error - specific to Boltz)
+        pde_files = glob.glob(os.path.join(input_dir, "pde_*.npz"))
+        if pde_files:
+            # Sort files to ensure consistent ordering
+            pde_files.sort()
+
+            # Load first PDE file (assuming model 1 is primary)
+            pde_data = np.load(pde_files[0])
+            if 'pde' in pde_data:
+                pde_matrix = pde_data['pde'].tolist()  # Convert to JSON-serializable list (actually a matrix)
+                metrics["pde_vector"] = pde_matrix  # Keep the key name for backward compatibility
+                logging.info(f"Extracted PDE matrix with shape: {np.array(pde_matrix).shape}")
+
+                

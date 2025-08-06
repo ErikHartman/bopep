@@ -117,14 +117,12 @@ class AlphaFoldDocker(BaseDockingModel):
             if selected_pdb:
                 processed_count += 1
                 model_type = "relaxed" if "relaxed" in os.path.basename(selected_pdb) else "unrelaxed"
-                logging.info(f"Processing rank {rank_num} as model {processed_count}: {model_type}")
                 
                 # Copy PDB file with standardized name
                 standardized_filename = self._standardize_model_filename(selected_pdb, processed_count)
                 dest_path = os.path.join(processed_dir, standardized_filename)
                 shutil.copy2(selected_pdb, dest_path)
                 
-                # Find corresponding metrics file
                 corresponding_json = None
                 for json_file in score_jsons:
                     if f"rank_{rank_str}" in os.path.basename(json_file):
@@ -134,8 +132,6 @@ class AlphaFoldDocker(BaseDockingModel):
                 # Load metrics for this model
                 model_metrics = {
                     "pdb_file": standardized_filename,
-                    "original_rank": rank_num,
-                    "relaxed": "relaxed" in os.path.basename(selected_pdb)
                 }
                 if corresponding_json and os.path.exists(corresponding_json):
                     with open(corresponding_json, 'r') as f:
@@ -145,13 +141,6 @@ class AlphaFoldDocker(BaseDockingModel):
                 all_metrics["models"][f"alphafold_model_{processed_count}"] = model_metrics
         
         all_metrics["model_count"] = processed_count
-        
-        # Add overall best metrics (typically from rank_001)
-        if score_jsons:
-            best_json = score_jsons[0]  # Assuming first is best ranked
-            with open(best_json, 'r') as f:
-                best_metrics = json.load(f)
-                all_metrics["best_model_metrics"] = best_metrics
         
         if pae_json:
             with open(pae_json[0], 'r') as f:
@@ -170,17 +159,14 @@ class AlphaFoldDocker(BaseDockingModel):
         """
         logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
         
-        # Create output directory in raw folder
         peptide_output_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
         
-        # Create FASTA file
         combined_fasta_path = os.path.join(
             peptide_output_dir, f"input_{peptide_sequence}.fasta"
         )
         with open(combined_fasta_path, "w") as f:
             f.write(f">{target_name}_{peptide_sequence}\n{target_sequence}:{peptide_sequence}\n")
         
-        # Copy target structure
         target_copy_path = os.path.join(
             peptide_output_dir, os.path.basename(target_structure)
         )
@@ -271,14 +257,13 @@ class AlphaFoldDocker(BaseDockingModel):
         
         docked_dirs = []
         for peptide in peptides:
-            try:
-                dir_path = temp_docker._dock_single_peptide(
-                    peptide, target_structure, target_sequence, target_name, gpu_id
-                )
-                if dir_path:
-                    docked_dirs.append(dir_path)
-            except Exception as e:
-                logging.error(f"Failed to dock {peptide} on GPU {gpu_id}: {e}")
+
+            dir_path = temp_docker._dock_single_peptide(
+                peptide, target_structure, target_sequence, target_name, gpu_id
+            )
+            if dir_path:
+                docked_dirs.append(dir_path)
+
         
         return docked_dirs
     
@@ -286,19 +271,19 @@ class AlphaFoldDocker(BaseDockingModel):
         """
         Clean up unnecessary ColabFold files while preserving model outputs.
         """
-        try:
-            # Remove copied PDB file
-            if os.path.exists(target_structure_copy):
-                os.remove(target_structure_copy)
-            
-            # Remove some unnecessary files but keep all model-related outputs
-            for file in os.listdir(docking_dir):
-                if (file.startswith("pdb70") or 
-                    file == "cite.bibtex" or 
-                    file.startswith("combined_input")):
-                    file_path = os.path.join(docking_dir, file)
-                    if os.path.isfile(file_path):
-                        os.remove(file_path)
-                        
-        except OSError as e:
-            logging.warning(f"Error cleaning up files: {e}")
+
+        # Remove copied PDB file
+        if os.path.exists(target_structure_copy):
+            os.remove(target_structure_copy)
+        
+        # Remove some unnecessary files but keep all model-related outputs
+        for file in os.listdir(docking_dir):
+            if (file.startswith("pdb70") or 
+                file == "cite.bibtex" or 
+                file.endswith(".cif.bak") or
+                file.endswith(".png") or
+                file.startswith("combined_input")):
+                file_path = os.path.join(docking_dir, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    

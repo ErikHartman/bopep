@@ -38,7 +38,6 @@ class MetricsParser:
                 "alphafold_iptm": 0.88,
                 "alphafold_plddt": 0.85,
                 "boltz_confidence_score": 0.75,
-                "boltz_has_clash": False,
                 ...
             }
         """
@@ -247,7 +246,7 @@ class MetricsParser:
             metrics["boltz_pae_matrix"] = data["pae_matrix"]
         
         if "pde_vector" in data:
-            metrics["boltz_pde_vector"] = data["pde_vector"]
+            metrics["boltz_pde_matrix"] = data["pde_vector"]  # Actually a matrix, not a vector
         
         return {k: v for k, v in metrics.items() if v is not None}
     
@@ -324,10 +323,7 @@ if __name__ == "__main__":
     
     parser = MetricsParser()
     
-    print("Available methods:", parser.get_available_methods(test_dir))
-    print("Validation:", parser.validate_processed_dir(test_dir))
-    
     metrics = parser.parse_processed_dir(test_dir)
-    print("\nParsed metrics:")
-    for key, value in sorted(metrics.items()):
-        print(f"  {key}: {value}")
+    print(len(metrics["boltz_pde_matrix"])) # 326
+    print(len(metrics["boltz_pde_matrix"][0])) # 326
+    print(len(metrics["boltz_pde_matrix"][1])) # 326

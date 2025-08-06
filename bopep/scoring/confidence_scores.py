@@ -5,11 +5,9 @@ This module provides functions to calculate peptide-specific confidence scores
 from matrices/vectors extracted from AlphaFold and Boltz predictions.
 """
 
-import numpy as np
 from typing import Dict, Any, Optional, Tuple, List
 from Bio.PDB import PDBParser
-import re
-
+from Bio.PDB import Selection, NeighborSearch
 
 def get_peptide_plddt_from_vector(
     plddt_vector: List[float], 
@@ -17,7 +15,7 @@ def get_peptide_plddt_from_vector(
     peptide_chain: str = "B"
 ) -> Optional[float]:
     """
-    Calculate peptide pLDDT from confidence vector using residue mapping.
+    Calculate peptide pLDDT from vector using residue mapping.
     
     Args:
         plddt_vector: Vector of pLDDT values per residue
@@ -73,7 +71,6 @@ def get_weighted_peptide_plddt_from_vector(
         Tuple of (overall_weighted_avg, residue_weighted_avg) or (None, None) if error
     """
     try:
-        from Bio.PDB import Selection, NeighborSearch
         
         # Get residue chain mapping from PDB
         residue_chain_list = _parse_pdb_residues(pdb_file)
@@ -197,16 +194,16 @@ def get_peptide_pae_from_matrix(
         return None
 
 
-def get_peptide_pde_from_vector(
-    pde_vector: List[float],
+def get_peptide_pde_from_matrix(
+    pde_matrix: List[List[float]],
     pdb_file: str,
     peptide_chain: str = "B"
 ) -> Optional[float]:
     """
-    Calculate peptide PDE (Protein Distance Error) from confidence vector.
+    Calculate peptide PDE (Protein Distance Error) from confidence matrix.
     
     Args:
-        pde_vector: Vector of PDE values per residue
+        pde_matrix: 2D matrix of PDE values (residue x residue)
         pdb_file: Path to PDB file for residue mapping
         peptide_chain: Chain ID of the peptide (default: "B")
         
@@ -228,13 +225,16 @@ def get_peptide_pde_from_vector(
         if not peptide_indices:
             return None
         
-        # Extract PDE values for peptide residues
-        peptide_pde_values = [pde_vector[i] for i in peptide_indices]
+        # Extract PDE values involving peptide residues
+        all_pde_values = []
+        for i in peptide_indices:
+            for j in range(len(residue_chain_list)):
+                all_pde_values.append(pde_matrix[i][j])
         
-        return sum(peptide_pde_values) / len(peptide_pde_values)
+        return sum(all_pde_values) / len(all_pde_values) if all_pde_values else None
         
     except Exception as e:
-        print(f"Error calculating peptide PDE from vector: {e}")
+        print(f"Error calculating peptide PDE from matrix: {e}")
         return None
 
 
@@ -286,11 +286,11 @@ def calculate_peptide_confidence_scores(
         
         # Calculate PDE scores (Boltz only)
         if method == "boltz":
-            pde_key = f"{method}_pde_vector"
+            pde_key = f"{method}_pde_matrix"
             if pde_key in metrics_data:
-                pde_vector = metrics_data[pde_key]
-                scores["peptide_pde"] = get_peptide_pde_from_vector(
-                    pde_vector, pdb_file, peptide_chain
+                pde_matrix = metrics_data[pde_key]
+                scores["peptide_pde"] = get_peptide_pde_from_matrix(
+                    pde_matrix, pdb_file, peptide_chain
                 )
         
     except Exception as e:
@@ -328,3 +328,17 @@ def _parse_pdb_residues(pdb_file: str) -> List[Tuple[str, str]]:
         print(f"Error reading PDB file: {e}")
         
     return residue_chain_list
+
+if __name__ == "__main__":
+    # Example usage
+    from parser import MetricsParser
+
+    test_dir = "/home/er8813ha/bopep/examples/docking/both_docking_output/processed/4glf_NYLSELSEHV"
+    
+    parser = MetricsParser()
+    
+    metrics = parser.parse_processed_dir(test_dir)
+    
+    pde = get_peptide_pde_from_matrix(metrics["boltz_pde_matrix"], test_dir + "/boltz_model_1.pdb", peptide_chain="B")
+
+    print(pde)

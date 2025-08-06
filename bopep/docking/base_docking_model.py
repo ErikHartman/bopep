@@ -43,24 +43,7 @@ class BaseDockingModel(ABC):
     @abstractmethod
     def dock(self, peptide_sequences: List[str], target_structure: str, 
              target_sequence: str, target_name: str) -> List[str]:
-        """
-        Dock peptides to the target structure.
-        
-        This method should:
-        1. Perform the actual docking using the model-specific approach
-        2. Save raw output to self.raw_output_dir
-        3. Process raw output and save to self.processed_output_dir
-        4. Return list of processed output directories
-        
-        Parameters:
-        - peptide_sequences: List of peptide sequences to dock
-        - target_structure: Path to target PDB file
-        - target_sequence: Target protein sequence
-        - target_name: Name of the target protein
-        
-        Returns:
-        - List of processed output directories for each peptide
-        """
+
         pass
     
     def _dock_with_common_logic(self, peptide_sequences: List[str], target_structure: str, 
@@ -124,22 +107,7 @@ class BaseDockingModel(ABC):
     @abstractmethod
     def _dock_single_peptide(self, peptide_sequence: str, target_structure: str,
                            target_sequence: str, target_name: str, gpu_id: str = "0") -> str:
-        """
-        Dock a single peptide using the specific docking method.
-        
-        This method should be implemented by subclasses to handle the actual
-        docking process for a single peptide.
-        
-        Parameters:
-        - peptide_sequence: The peptide sequence to dock
-        - target_structure: Path to target structure file
-        - target_sequence: Target protein sequence
-        - target_name: Name of the target protein
-        - gpu_id: GPU ID to use for docking
-        
-        Returns:
-        - Path to the raw output directory for this peptide
-        """
+
         pass
     
     def _dock_parallel(self, peptide_sequences: List[str], target_structure: str,
@@ -188,11 +156,6 @@ class BaseDockingModel(ABC):
     
     @abstractmethod
     def _get_method_parameters(self) -> dict:
-        """
-        Get method-specific parameters for parallel processing.
-        
-        Returns a dictionary of parameters needed for the docking method.
-        """
         pass
     
     @staticmethod
@@ -200,12 +163,6 @@ class BaseDockingModel(ABC):
     def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
                               target_sequence: str, target_name: str, raw_output_dir: str,
                               method_params: dict) -> List[str]:
-        """
-        Process a batch of peptides on a specific GPU.
-        
-        This static method is used for multiprocessing and should be implemented
-        by subclasses to handle GPU-specific docking.
-        """
         pass
     
     def _create_raw_peptide_dir(self, target_name: str, peptide_sequence: str) -> str:
@@ -222,23 +179,6 @@ class BaseDockingModel(ABC):
     @abstractmethod
     def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
                           target_name: str) -> str:
-        """
-        Process raw docking output into standardized format.
-        
-        This method should:
-        1. Extract model files (PDB/CIF) from raw output
-        2. Extract all available metrics
-        3. Save standardized files to processed directory
-        4. Create metrics.json with all model scores
-        
-        Parameters:
-        - raw_peptide_dir: Directory containing raw docking output for one peptide
-        - peptide_sequence: The peptide sequence that was docked
-        - target_name: Name of the target protein
-        
-        Returns:
-        - Path to the processed output directory for this peptide
-        """
         pass
     
     def _create_processed_peptide_dir(self, target_name: str, peptide_sequence: str) -> str:
@@ -255,10 +195,7 @@ class BaseDockingModel(ABC):
     def _save_metrics_json(self, metrics: Dict[str, Any], output_dir: str, prefix: str = "metrics") -> None:
         """
         Save metrics dictionary to metrics.json file.
-        
-        Parameters:
-        - metrics: Dictionary containing all model metrics
-        - output_dir: Directory to save the metrics.json file
+    
         """
         metrics_path = os.path.join(output_dir, f"{prefix}.json")
         with open(metrics_path, 'w') as f:
@@ -268,10 +205,6 @@ class BaseDockingModel(ABC):
     def _standardize_model_filename(self, original_path: str, model_index: int) -> str:
         """
         Create standardized model filename with method prefix.
-        
-        Parameters:
-        - original_path: Original model file path
-        - model_index: Index of the model (1-based)
         
         Returns:
         - Standardized filename (e.g., "alphafold_model_1.pdb", "boltz_model_1.cif")
@@ -290,16 +223,6 @@ class BaseDockingModel(ABC):
         return f"{method_name}_model_{model_index}{extension}"
     
     def check_existing_results(self, peptide_sequence: str, target_name: str) -> tuple:
-        """
-        Check if processed results already exist for a peptide.
-        
-        Parameters:
-        - peptide_sequence: The peptide sequence
-        - target_name: Name of the target protein
-        
-        Returns:
-        - (exists: bool, processed_dir: str or None)
-        """
         peptide_dir_name = f"{target_name}_{peptide_sequence}"
         processed_dir = os.path.join(self.processed_output_dir, peptide_dir_name)
         

@@ -16,15 +16,13 @@ from bopep.scoring.parser import MetricsParser
 from bopep.scoring.confidence_scores import calculate_peptide_confidence_scores
 from bopep.docking.utils import extract_sequence_from_pdb
 import os
-import re
-
 
 class Scorer:
 
     def __init__(self):
         # Core scores that can be calculated for any method
         self.core_docking_scores = [
-            "iptm", "ptm", "plddt", "pae"
+            "iptm", 
         ]
         
         # Structural scores that require PDB files
@@ -32,9 +30,9 @@ class Scorer:
             "rosetta_score", "interface_sasa", "interface_dG", 
             "interface_delta_hbond_unsat", "packstat", "distance_score",
             "in_binding_site", "in_binding_site_score", "template_rmsd",
-            "peptide_plddt", "weighted_plddt_overall", "weighted_plddt_residues",
-            "peptide_pae", "peptide_pde"
-        ]        # Peptide property scores (method-independent)
+            "peptide_plddt", "peptide_pae",
+            "weighted_plddt_overall", "weighted_plddt_residues",
+        ] 
         self.peptide_property_scores = [
             "peptide_properties",
             "molecular_weight",
@@ -53,24 +51,17 @@ class Scorer:
             "uHrel",
         ]
         
-        # Method-specific scores (only available for specific methods)
         self.method_specific_scores = {
-            "alphafold": [
-                "model_count", "best_model", "original_rank", "relaxed"
-            ],
+            "alphafold": [], # No specific scores for AlphaFold
             "boltz": [
-                "confidence_score", "best_model_id", "complex_plddt", "complex_iplddt",
-                "complex_pde", "complex_ipde", "ligand_iptm", "protein_iptm", 
-                "has_clash", "fraction_plausible", "chain_0_ptm", "chain_1_ptm"
+                "peptide_pde",
+                "confidence_score", "complex_plddt", "complex_iplddt",
+                "complex_pde", "complex_ipde", "ligand_iptm", 
+                "protein_iptm", "chain_0_ptm", "chain_1_ptm"
             ]
         }
         
-        # Special scores
-        self.special_scores = [
-            "all_rosetta_scores",
-        ]
         
-        # Build comprehensive available scores list
         all_method_specific = []
         for method, scores in self.method_specific_scores.items():
             all_method_specific.extend(scores)
@@ -82,47 +73,10 @@ class Scorer:
             self.core_docking_scores + 
             self.structural_scores +
             self.peptide_property_scores + 
-            all_method_specific +
-            self.special_scores
+            all_method_specific
         )
         
-        # Supported docking methods (extensible for future methods like ESMFold)
         self.supported_methods = ["alphafold", "boltz"]
-
-    def _get_available_methods(self, processed_dir: str) -> List[str]:
-        """
-        Get list of methods that have model files in the processed directory.
-        """
-        available_methods = []
-        
-        for method in self.supported_methods:
-            # Check for method-specific model files
-            model_pattern = os.path.join(processed_dir, f"{method}_model_*.pdb")
-            if glob.glob(model_pattern):
-                available_methods.append(method)
-        
-        return available_methods
-    
-    def _get_method_model_file(self, processed_dir: str, method: str, model_num: int = 1) -> Optional[str]:
-        """
-        Get the path to a specific method's model file.
-        
-        Args:
-            processed_dir: Processed directory path
-            method: Method name (alphafold, boltz, etc.)
-            model_num: Model number (default 1 for best model)
-            
-        Returns:
-            Path to model file or None if not found
-        """
-        # Look for PDB files first, then CIF
-        for ext in ["pdb", "cif"]:
-            pattern = os.path.join(processed_dir, f"{method}_model_{model_num}.{ext}")
-            files = glob.glob(pattern)
-            if files:
-                return files[0]
-        
-        return None
 
     def score(
         self,
@@ -136,12 +90,10 @@ class Scorer:
         template_pdb: Optional[str] = None,
     ) -> dict:
         """
-        Calculate and return selected scores for a peptide with smart method detection.
-
-        The scorer automatically detects available methods and applies intelligent naming:
-        - Single method: Generic names (iptm, distance_score)  
-        - Multiple methods: Method-prefixed names (alphafold_iptm, boltz_iptm)
-        - Method-specific scores: Must specify exact method (confidence_score only for Boltz)
+        Calculate and return selected scores for a peptide.
+        
+        All score names must be explicit - no auto-resolution.
+        Use method-prefixed names like "alphafold_iptm", "boltz_confidence_score" etc.
         """
         
         # Validate requested scores
@@ -150,25 +102,12 @@ class Scorer:
                 raise ValueError(f"ERROR: '{score}' is not a valid score. Available scores: {self.available_scores}")
 
         scores = {}
-        peptide_properties = None  # Initialize to avoid UnboundLocalError
-        available_methods = []
-        parsed_metrics = {}
         
-        # Determine peptide sequence and available data sources
-        if peptide_sequence and not pdb_file and not processed_dir:
-            # Only peptide properties available
-            peptide_properties = PeptideProperties(peptide_sequence=peptide_sequence)
-            available_methods = []
-            
-        elif processed_dir:
-            # Use parser to get all method-specific metrics
-            parser = MetricsParser()
-            parsed_metrics = parser.parse_processed_dir(processed_dir)
-            available_methods = parser.get_available_methods(processed_dir)
-            
-            # Extract peptide sequence from parser data or first available metrics file
-            if not peptide_sequence:
-                for method in available_methods:
+        # Determine peptide sequence
+        if not peptide_sequence:
+            if processed_dir:
+                # Extract from first available metrics file
+                for method in ["alphafold", "boltz"]:
                     method_file = os.path.join(processed_dir, f"{method}_metrics.json")
                     if os.path.exists(method_file):
                         with open(method_file, 'r') as f:
@@ -176,60 +115,561 @@ class Scorer:
                             peptide_sequence = data.get("peptide_sequence")
                             if peptide_sequence:
                                 break
-            
-            # Setup for structural scoring (find best model file)
-            if not pdb_file:
-                for method in available_methods:
-                    model_file = self._get_method_model_file(processed_dir, method, 1)
-                    if model_file:
-                        pdb_file = model_file
-                        break
-                        
-            # Initialize peptide properties
-            if pdb_file:
-                peptide_properties = PeptideProperties(pdb_file=pdb_file)
-            elif peptide_sequence:
-                peptide_properties = PeptideProperties(peptide_sequence=peptide_sequence)
-                
-        elif pdb_file:
-            # Single PDB file provided
-            peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id="B")
-            peptide_properties = PeptideProperties(pdb_file=pdb_file)
-            available_methods = []
-            
-        else:
-            raise ValueError("Either pdb_file, processed_dir, or peptide_sequence must be provided")
+            elif pdb_file:
+                peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id="B")
+            else:
+                raise ValueError("Could not determine peptide sequence from provided inputs")
         
-        # Ensure we have peptide_sequence
         if not peptide_sequence:
-            raise ValueError("Could not determine peptide sequence from provided inputs")
+            raise ValueError("Peptide sequence is required")
+        
+        has_alphafold = False
+        has_boltz = False
+        if processed_dir:
+            has_alphafold = os.path.exists(os.path.join(processed_dir, "alphafold_metrics.json"))
+            has_boltz = os.path.exists(os.path.join(processed_dir, "boltz_metrics.json"))
+        
+        # Load all data upfront
+        alphafold_data = {}
+        boltz_data = {}
+        alphafold_model_file = None
+        boltz_model_file = None
+        
+        if has_alphafold:
+            with open(os.path.join(processed_dir, "alphafold_metrics.json"), 'r') as f:
+                alphafold_data = json.load(f)
+            # Find AlphaFold model file
+            for ext in ["pdb", "cif"]:
+                pattern = os.path.join(processed_dir, f"alphafold_model_1.{ext}")
+                files = glob.glob(pattern)
+                if files:
+                    alphafold_model_file = files[0]
+                    break
+        
+        if has_boltz:
+            with open(os.path.join(processed_dir, "boltz_metrics.json"), 'r') as f:
+                boltz_data = json.load(f)
+            # Find Boltz model file
+            for ext in ["pdb", "cif"]:
+                pattern = os.path.join(processed_dir, f"boltz_model_1.{ext}")
+                files = glob.glob(pattern)
+                if files:
+                    boltz_model_file = files[0]
+                    break
+        
+        # Setup PDB file for structural scoring
+        target_pdb_file = pdb_file
+        if not target_pdb_file:
+            if alphafold_model_file:
+                target_pdb_file = alphafold_model_file
+            elif boltz_model_file:
+                target_pdb_file = boltz_model_file
+        
+        # Initialize peptide properties
+        peptide_properties = PeptideProperties(peptide_sequence=peptide_sequence)
+        
+        if "alphafold_iptm" in scores_to_include:
+            if not has_alphafold:
+                raise ValueError("alphafold_iptm requires AlphaFold output")
+            scores["alphafold_iptm"] = alphafold_data.get("iptm")
+        
+        if "alphafold_rosetta_score" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_rosetta_score requires AlphaFold model file")
+            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            scores["alphafold_rosetta_score"] = rosetta_scorer.get_rosetta_score()
+        
+        if "alphafold_interface_sasa" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_interface_sasa requires AlphaFold model file")
+            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            scores["alphafold_interface_sasa"] = rosetta_scorer.get_interface_sasa()
+        
+        if "alphafold_interface_dG" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_interface_dG requires AlphaFold model file")
+            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            scores["alphafold_interface_dG"] = rosetta_scorer.get_interface_dG()
+        
+        if "alphafold_interface_delta_hbond_unsat" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_interface_delta_hbond_unsat requires AlphaFold model file")
+            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            scores["alphafold_interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
+        
+        if "alphafold_packstat" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_packstat requires AlphaFold model file")
+            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            scores["alphafold_packstat"] = rosetta_scorer.get_packstat()
+        
+        if "alphafold_distance_score" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_distance_score requires AlphaFold model file")
+            scores["alphafold_distance_score"] = distance_score_from_pdb(alphafold_model_file)
+        
+        if "alphafold_in_binding_site" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_in_binding_site requires AlphaFold model file")
+            if not binding_site_residue_indices:
+                raise ValueError("binding_site_residue_indices required for alphafold_in_binding_site")
+            n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
+                alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+            scores["alphafold_in_binding_site"] = in_binding_site
+            scores["alphafold_n_contacts"] = n_contacts
+        
+        if "alphafold_in_binding_site_score" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_in_binding_site_score requires AlphaFold model file")
+            if not binding_site_residue_indices:
+                raise ValueError("binding_site_residue_indices required for alphafold_in_binding_site_score")
+            scores["alphafold_in_binding_site_score"] = smooth_peptide_binding_site_score(
+                alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+        
+        if "alphafold_template_rmsd" in scores_to_include:
+            if not alphafold_model_file:
+                raise ValueError("alphafold_template_rmsd requires AlphaFold model file")
+            if not template_pdb:
+                raise ValueError("template_pdb required for alphafold_template_rmsd")
+            scores["alphafold_template_rmsd"] = align_and_compute_rmsd(template_pdb, alphafold_model_file, peptide_sequence)
+        
+        # AlphaFold confidence scores
+        if "alphafold_peptide_plddt" in scores_to_include:
+            if not (has_alphafold and alphafold_model_file):
+                raise ValueError("alphafold_peptide_plddt requires AlphaFold output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(alphafold_data, alphafold_model_file, "alphafold")
+                scores["alphafold_peptide_plddt"] = confidence_scores.get("peptide_plddt")
+            except Exception as e:
+                print(f"Error calculating AlphaFold confidence scores: {e}")
+        
+        if "alphafold_weighted_plddt_overall" in scores_to_include:
+            if not (has_alphafold and alphafold_model_file):
+                raise ValueError("alphafold_weighted_plddt_overall requires AlphaFold output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(alphafold_data, alphafold_model_file, "alphafold")
+                scores["alphafold_weighted_plddt_overall"] = confidence_scores.get("weighted_plddt_overall")
+            except Exception as e:
+                print(f"Error calculating AlphaFold confidence scores: {e}")
+        
+        if "alphafold_weighted_plddt_residues" in scores_to_include:
+            if not (has_alphafold and alphafold_model_file):
+                raise ValueError("alphafold_weighted_plddt_residues requires AlphaFold output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(alphafold_data, alphafold_model_file, "alphafold")
+                scores["alphafold_weighted_plddt_residues"] = confidence_scores.get("weighted_plddt_residues")
+            except Exception as e:
+                print(f"Error calculating AlphaFold confidence scores: {e}")
+        
+        if "alphafold_peptide_pae" in scores_to_include:
+            if not (has_alphafold and alphafold_model_file):
+                raise ValueError("alphafold_peptide_pae requires AlphaFold output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(alphafold_data, alphafold_model_file, "alphafold")
+                scores["alphafold_peptide_pae"] = confidence_scores.get("peptide_pae")
+            except Exception as e:
+                print(f"Error calculating AlphaFold confidence scores: {e}")
+        
 
-        # Smart score resolution
-        resolved_scores = self._resolve_score_requests(scores_to_include, available_methods, parsed_metrics)
+        # Boltz docking scores
+        if "boltz_iptm" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_iptm requires Boltz output")
+            scores["boltz_iptm"] = boltz_data.get("iptm")
         
-        # Calculate peptide property scores (if peptide_properties available)
-        if peptide_properties:
-            scores.update(self._calculate_peptide_property_scores(resolved_scores, peptide_properties))
+        if "boltz_confidence_score" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_confidence_score requires Boltz output")
+            scores["boltz_confidence_score"] = boltz_data.get("confidence_score")
         
-        # Calculate structural scores (if PDB available)
-        if pdb_file:
-            scores.update(self._calculate_structural_scores(
-                resolved_scores, pdb_file, processed_dir, available_methods, 
-                binding_site_residue_indices, required_n_contact_residues, 
-                binding_site_distance_threshold, template_pdb, peptide_sequence
-            ))
+        if "boltz_complex_plddt" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_complex_plddt requires Boltz output")
+            scores["boltz_complex_plddt"] = boltz_data.get("complex_plddt")
         
-        # Add parsed docking metrics (if processed_dir available)
-        if processed_dir and parsed_metrics:
-            scores.update(self._extract_docking_scores(resolved_scores, parsed_metrics, available_methods))
+        if "boltz_complex_iplddt" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_complex_iplddt requires Boltz output")
+            scores["boltz_complex_iplddt"] = boltz_data.get("complex_iplddt")
         
-        # Calculate confidence scores using raw confidence data (if available)
-        if processed_dir and pdb_file and parsed_metrics:
-            scores.update(self._calculate_confidence_scores(
-                resolved_scores, parsed_metrics, pdb_file, available_methods, peptide_sequence
-            ))
+        if "boltz_complex_pde" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_complex_pde requires Boltz output")
+            scores["boltz_complex_pde"] = boltz_data.get("complex_pde")
+        
+        if "boltz_complex_ipde" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_complex_ipde requires Boltz output")
+            scores["boltz_complex_ipde"] = boltz_data.get("complex_ipde")
+        
+        if "boltz_ligand_iptm" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_ligand_iptm requires Boltz output")
+            scores["boltz_ligand_iptm"] = boltz_data.get("ligand_iptm")
+        
+        if "boltz_protein_iptm" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_protein_iptm requires Boltz output")
+            scores["boltz_protein_iptm"] = boltz_data.get("protein_iptm")
+        
+        if "boltz_chain_0_ptm" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_chain_0_ptm requires Boltz output")
+            scores["boltz_chain_0_ptm"] = boltz_data.get("chain_0_ptm")
+        
+        if "boltz_chain_1_ptm" in scores_to_include:
+            if not has_boltz:
+                raise ValueError("boltz_chain_1_ptm requires Boltz output")
+            scores["boltz_chain_1_ptm"] = boltz_data.get("chain_1_ptm")
+        
+        # Boltz structural scores
+        if "boltz_rosetta_score" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_rosetta_score requires Boltz model file")
+            rosetta_scorer = RosettaScorer(boltz_model_file)
+            scores["boltz_rosetta_score"] = rosetta_scorer.get_rosetta_score()
+        
+        if "boltz_interface_sasa" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_interface_sasa requires Boltz model file")
+            rosetta_scorer = RosettaScorer(boltz_model_file)
+            scores["boltz_interface_sasa"] = rosetta_scorer.get_interface_sasa()
+        
+        if "boltz_interface_dG" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_interface_dG requires Boltz model file")
+            rosetta_scorer = RosettaScorer(boltz_model_file)
+            scores["boltz_interface_dG"] = rosetta_scorer.get_interface_dG()
+        
+        if "boltz_interface_delta_hbond_unsat" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_interface_delta_hbond_unsat requires Boltz model file")
+            rosetta_scorer = RosettaScorer(boltz_model_file)
+            scores["boltz_interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
+        
+        if "boltz_packstat" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_packstat requires Boltz model file")
+            rosetta_scorer = RosettaScorer(boltz_model_file)
+            scores["boltz_packstat"] = rosetta_scorer.get_packstat()
+        
+        if "boltz_distance_score" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_distance_score requires Boltz model file")
+            scores["boltz_distance_score"] = distance_score_from_pdb(boltz_model_file)
+        
+        if "boltz_in_binding_site" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_in_binding_site requires Boltz model file")
+            if not binding_site_residue_indices:
+                raise ValueError("binding_site_residue_indices required for boltz_in_binding_site")
+            n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
+                boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+            scores["boltz_in_binding_site"] = in_binding_site
+            scores["boltz_n_contacts"] = n_contacts
+        
+        if "boltz_in_binding_site_score" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_in_binding_site_score requires Boltz model file")
+            if not binding_site_residue_indices:
+                raise ValueError("binding_site_residue_indices required for boltz_in_binding_site_score")
+            scores["boltz_in_binding_site_score"] = smooth_peptide_binding_site_score(
+                boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+        
+        if "boltz_template_rmsd" in scores_to_include:
+            if not boltz_model_file:
+                raise ValueError("boltz_template_rmsd requires Boltz model file")
+            if not template_pdb:
+                raise ValueError("template_pdb required for boltz_template_rmsd")
+            scores["boltz_template_rmsd"] = align_and_compute_rmsd(template_pdb, boltz_model_file, peptide_sequence)
+        
+        # Boltz confidence scores
+        if "boltz_peptide_plddt" in scores_to_include:
+            if not (has_boltz and boltz_model_file):
+                raise ValueError("boltz_peptide_plddt requires Boltz output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                scores["boltz_peptide_plddt"] = confidence_scores.get("peptide_plddt")
+            except Exception as e:
+                print(f"Error calculating Boltz confidence scores: {e}")
+        
+        if "boltz_weighted_plddt_overall" in scores_to_include:
+            if not (has_boltz and boltz_model_file):
+                raise ValueError("boltz_weighted_plddt_overall requires Boltz output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                scores["boltz_weighted_plddt_overall"] = confidence_scores.get("weighted_plddt_overall")
+            except Exception as e:
+                print(f"Error calculating Boltz confidence scores: {e}")
+        
+        if "boltz_weighted_plddt_residues" in scores_to_include:
+            if not (has_boltz and boltz_model_file):
+                raise ValueError("boltz_weighted_plddt_residues requires Boltz output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                scores["boltz_weighted_plddt_residues"] = confidence_scores.get("weighted_plddt_residues")
+            except Exception as e:
+                print(f"Error calculating Boltz confidence scores: {e}")
+        
+        if "boltz_peptide_pae" in scores_to_include:
+            if not (has_boltz and boltz_model_file):
+                raise ValueError("boltz_peptide_pae requires Boltz output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                scores["boltz_peptide_pae"] = confidence_scores.get("peptide_pae")
+            except Exception as e:
+                print(f"Error calculating Boltz confidence scores: {e}")
+        
+        if "boltz_peptide_pde" in scores_to_include:
+            if not (has_boltz and boltz_model_file):
+                raise ValueError("boltz_peptide_pde requires Boltz output with model file")
+            try:
+                confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                scores["boltz_peptide_pde"] = confidence_scores.get("peptide_pde")
+            except Exception as e:
+                print(f"Error calculating Boltz confidence scores: {e}")
+        
+        # Generic structural scores (use available PDB file)
+        if "rosetta_score" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("rosetta_score requires a PDB file")
+            rosetta_scorer = RosettaScorer(target_pdb_file)
+            scores["rosetta_score"] = rosetta_scorer.get_rosetta_score()
+        
+        if "interface_sasa" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("interface_sasa requires a PDB file")
+            rosetta_scorer = RosettaScorer(target_pdb_file)
+            scores["interface_sasa"] = rosetta_scorer.get_interface_sasa()
+        
+        if "interface_dG" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("interface_dG requires a PDB file")
+            rosetta_scorer = RosettaScorer(target_pdb_file)
+            scores["interface_dG"] = rosetta_scorer.get_interface_dG()
+        
+        if "interface_delta_hbond_unsat" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("interface_delta_hbond_unsat requires a PDB file")
+            rosetta_scorer = RosettaScorer(target_pdb_file)
+            scores["interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
+        
+        if "packstat" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("packstat requires a PDB file")
+            rosetta_scorer = RosettaScorer(target_pdb_file)
+            scores["packstat"] = rosetta_scorer.get_packstat()
+        
+        if "distance_score" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("distance_score requires a PDB file")
+            scores["distance_score"] = distance_score_from_pdb(target_pdb_file)
+        
+        if "in_binding_site" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("in_binding_site requires a PDB file")
+            if not binding_site_residue_indices:
+                raise ValueError("binding_site_residue_indices required for in_binding_site")
+            n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
+                target_pdb_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+            scores["in_binding_site"] = in_binding_site
+            scores["n_contacts"] = n_contacts
+        
+        if "in_binding_site_score" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("in_binding_site_score requires a PDB file")
+            if not binding_site_residue_indices:
+                raise ValueError("binding_site_residue_indices required for in_binding_site_score")
+            scores["in_binding_site_score"] = smooth_peptide_binding_site_score(
+                target_pdb_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+        
+        if "template_rmsd" in scores_to_include:
+            if not target_pdb_file:
+                raise ValueError("template_rmsd requires a PDB file")
+            if not template_pdb:
+                raise ValueError("template_pdb required for template_rmsd")
+            scores["template_rmsd"] = align_and_compute_rmsd(template_pdb, target_pdb_file, peptide_sequence)
+        
+        # Generic confidence scores (use available method)
+        if "peptide_plddt" in scores_to_include:
+            if has_alphafold and alphafold_model_file and has_boltz and boltz_model_file:
+                raise ValueError("Multiple methods available for 'peptide_plddt'. Use 'alphafold_peptide_plddt' or 'boltz_peptide_plddt'")
+            elif has_alphafold and alphafold_model_file:
+                try:
+                    confidence_scores = calculate_peptide_confidence_scores(alphafold_data, alphafold_model_file, "alphafold")
+                    scores["peptide_plddt"] = confidence_scores.get("peptide_plddt")
+                except Exception as e:
+                    print(f"Error calculating confidence scores: {e}")
+            elif has_boltz and boltz_model_file:
+                try:
+                    confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                    scores["peptide_plddt"] = confidence_scores.get("peptide_plddt")
+                except Exception as e:
+                    print(f"Error calculating confidence scores: {e}")
+            else:
+                raise ValueError("peptide_plddt requires docking output with model file")
+        
+        if "weighted_plddt_overall" in scores_to_include:
+            if has_alphafold and alphafold_model_file and has_boltz and boltz_model_file:
+                raise ValueError("Multiple methods available for 'weighted_plddt_overall'. Use 'alphafold_weighted_plddt_overall' or 'boltz_weighted_plddt_overall'")
+            elif has_alphafold and alphafold_model_file:
+                try:
+                    confidence_scores = calculate_peptide_confidence_scores(alphafold_data, alphafold_model_file, "alphafold")
+                    scores["weighted_plddt_overall"] = confidence_scores.get("weighted_plddt_overall")
+                except Exception as e:
+                    print(f"Error calculating confidence scores: {e}")
+            elif has_boltz and boltz_model_file:
+                try:
+                    confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                    scores["weighted_plddt_overall"] = confidence_scores.get("weighted_plddt_overall")
+                except Exception as e:
+                    print(f"Error calculating confidence scores: {e}")
+            else:
+                raise ValueError("weighted_plddt_overall requires docking output with model file")
+        
+        if "weighted_plddt_residues" in scores_to_include:
+            if has_alphafold and alphafold_model_file and has_boltz and boltz_model_file:
+                raise ValueError("Multiple methods available for 'weighted_plddt_residues'. Use 'alphafold_weighted_plddt_residues' or 'boltz_weighted_plddt_residues'")
+            elif has_alphafold and alphafold_model_file:
+                try:
+                    confidence_scores = calculate_peptide_confidence_scores(alphafold_data, alphafold_model_file, "alphafold")
+                    scores["weighted_plddt_residues"] = confidence_scores.get("weighted_plddt_residues")
+                except Exception as e:
+                    print(f"Error calculating confidence scores: {e}")
+            elif has_boltz and boltz_model_file:
+                try:
+                    confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                    scores["weighted_plddt_residues"] = confidence_scores.get("weighted_plddt_residues")
+                except Exception as e:
+                    print(f"Error calculating confidence scores: {e}")
+            else:
+                raise ValueError("weighted_plddt_residues requires docking output with model file")
+        
+        if "peptide_pae" in scores_to_include:
+            if has_alphafold and alphafold_model_file and has_boltz and boltz_model_file:
+                raise ValueError("Multiple methods available for 'peptide_pae'. Use 'alphafold_peptide_pae' or 'boltz_peptide_pae'")
+            elif has_alphafold and alphafold_model_file:
+                try:
+                    confidence_scores = calculate_peptide_confidence_scores(alphafold_data, alphafold_model_file, "alphafold")
+                    scores["peptide_pae"] = confidence_scores.get("peptide_pae")
+                except Exception as e:
+                    print(f"Error calculating confidence scores: {e}")
+            elif has_boltz and boltz_model_file:
+                try:
+                    confidence_scores = calculate_peptide_confidence_scores(boltz_data, boltz_model_file, "boltz")
+                    scores["peptide_pae"] = confidence_scores.get("peptide_pae")
+                except Exception as e:
+                    print(f"Error calculating confidence scores: {e}")
+            else:
+                raise ValueError("peptide_pae requires docking output with model file")
+        
+        # Generic docking scores (use available method)
+        if "iptm" in scores_to_include:
+            if has_alphafold and has_boltz:
+                raise ValueError("Multiple methods available for 'iptm'. Use 'alphafold_iptm' or 'boltz_iptm'")
+            elif has_alphafold:
+                scores["iptm"] = alphafold_data.get("iptm")
+            elif has_boltz:
+                scores["iptm"] = boltz_data.get("iptm")
+            else:
+                raise ValueError("iptm requires docking output")
+        
+        # =============================================================================
+        # 5. PEPTIDE PROPERTY SCORES
+        # =============================================================================
+        
+        if "peptide_properties" in scores_to_include:
+            if peptide_properties:
+                scores.update(peptide_properties.get_all_properties())
+            else:
+                raise ValueError("peptide_properties requires peptide sequence or PDB file")
+        
+        if "molecular_weight" in scores_to_include:
+            if peptide_properties:
+                scores["molecular_weight"] = peptide_properties.get_molecular_weight()
+            else:
+                raise ValueError("molecular_weight requires peptide sequence or PDB file")
+        
+        if "aromaticity" in scores_to_include:
+            if peptide_properties:
+                scores["aromaticity"] = peptide_properties.get_aromaticity()
+            else:
+                raise ValueError("aromaticity requires peptide sequence or PDB file")
+        
+        if "instability_index" in scores_to_include:
+            if peptide_properties:
+                scores["instability_index"] = peptide_properties.get_instability_index()
+            else:
+                raise ValueError("instability_index requires peptide sequence or PDB file")
+        
+        if "isoelectric_point" in scores_to_include:
+            if peptide_properties:
+                scores["isoelectric_point"] = peptide_properties.get_isoelectric_point()
+            else:
+                raise ValueError("isoelectric_point requires peptide sequence or PDB file")
+        
+        if "gravy" in scores_to_include:
+            if peptide_properties:
+                scores["gravy"] = peptide_properties.get_gravy()
+            else:
+                raise ValueError("gravy requires peptide sequence or PDB file")
+        
+        if "helix_fraction" in scores_to_include:
+            if peptide_properties:
+                scores["helix_fraction"] = peptide_properties.get_helix_fraction()
+            else:
+                raise ValueError("helix_fraction requires peptide sequence or PDB file")
+        
+        if "turn_fraction" in scores_to_include:
+            if peptide_properties:
+                scores["turn_fraction"] = peptide_properties.get_turn_fraction()
+            else:
+                raise ValueError("turn_fraction requires peptide sequence or PDB file")
+        
+        if "sheet_fraction" in scores_to_include:
+            if peptide_properties:
+                scores["sheet_fraction"] = peptide_properties.get_sheet_fraction()
+            else:
+                raise ValueError("sheet_fraction requires peptide sequence or PDB file")
+        
+        if "hydrophobic_aa_percent" in scores_to_include:
+            if peptide_properties:
+                scores["hydrophobic_aa_percent"] = peptide_properties.get_hydrophobic_aa_percent()
+            else:
+                raise ValueError("hydrophobic_aa_percent requires peptide sequence or PDB file")
+        
+        if "polar_aa_percent" in scores_to_include:
+            if peptide_properties:
+                scores["polar_aa_percent"] = peptide_properties.get_polar_aa_percent()
+            else:
+                raise ValueError("polar_aa_percent requires peptide sequence or PDB file")
+        
+        if "positively_charged_aa_percent" in scores_to_include:
+            if peptide_properties:
+                scores["positively_charged_aa_percent"] = peptide_properties.get_positively_charged_aa_percent()
+            else:
+                raise ValueError("positively_charged_aa_percent requires peptide sequence or PDB file")
+        
+        if "negatively_charged_aa_percent" in scores_to_include:
+            if peptide_properties:
+                scores["negatively_charged_aa_percent"] = peptide_properties.get_negatively_charged_aa_percent()
+            else:
+                raise ValueError("negatively_charged_aa_percent requires peptide sequence or PDB file")
+        
+        if "delta_net_charge_frac" in scores_to_include:
+            if peptide_properties:
+                scores["delta_net_charge_frac"] = peptide_properties.get_delta_net_charge_frac()
+            else:
+                raise ValueError("delta_net_charge_frac requires peptide sequence or PDB file")
+        
+        if "uHrel" in scores_to_include:
+            if peptide_properties:
+                scores["uHrel"] = peptide_properties.get_uHrel()
+            else:
+                raise ValueError("uHrel requires peptide sequence or PDB file")
         
         return {peptide_sequence: scores}
+
 
     def score_batch(
         self,
@@ -389,270 +829,6 @@ class Scorer:
 
     def get_available_scores(self):
         return self.available_scores
-
-    def _resolve_score_requests(self, requested_scores: list, available_methods: list, parsed_metrics: dict) -> dict:
-        """
-        Resolve score requests using smart method detection.
-        
-        Rules:
-        1. Single method available: Generic names work (iptm → alphafold_iptm if only AlphaFold)
-        2. Multiple methods available: Must use prefixed names (alphafold_iptm, boltz_confidence_score)
-        3. Method-specific scores: Always require exact prefix
-        
-        Returns dict with resolved score names and their sources.
-        """
-        resolved = {}
-        
-        for score in requested_scores:
-            # Check if it's already a method-specific score
-            if any(score.startswith(f"{method}_") for method in ["alphafold", "boltz"]):
-                # Validate the method is available
-                method = score.split("_")[0]
-                if method not in available_methods and available_methods:  # Only check if we have methods
-                    raise ValueError(f"Score '{score}' requires {method} method, but only {available_methods} are available")
-                resolved[score] = score
-                continue
-            
-            # Check if it's a core docking score that can be auto-resolved
-            if score in self.core_docking_scores:
-                if len(available_methods) == 0:
-                    # No docking methods available
-                    raise ValueError(f"Score '{score}' requires docking output (processed_dir), but none available")
-                elif len(available_methods) == 1:
-                    # Single method - use generic name, resolve to method-specific internally
-                    method = available_methods[0]
-                    resolved[score] = f"{method}_{score}"
-                else:
-                    # Multiple methods - require user to specify which one
-                    method_scores = [f"{method}_{score}" for method in available_methods if f"{method}_{score}" in parsed_metrics]
-                    if method_scores:
-                        raise ValueError(f"Multiple methods available for '{score}'. Please specify: {method_scores}")
-                    else:
-                        raise ValueError(f"Score '{score}' not available in any method: {available_methods}")
-            
-            # Check if it's a structural score that can be auto-resolved
-            elif score in self.structural_scores:
-                if len(available_methods) == 0:
-                    # No methods available - can still calculate if pdb_file is provided directly
-                    resolved[score] = score
-                elif len(available_methods) == 1:
-                    # Single method - use generic name for structural scores
-                    resolved[score] = score
-                else:
-                    # Multiple methods - require user to specify which one for structural scores
-                    method_scores = [f"{method}_{score}" for method in available_methods]
-                    raise ValueError(f"Multiple methods available for structural score '{score}'. Please specify: {method_scores}")
-            
-            else:
-                # Non-docking, non-structural score - use as-is
-                resolved[score] = score
-                
-        return resolved
-
-    def _calculate_peptide_property_scores(self, resolved_scores: dict, peptide_properties) -> dict:
-        """Calculate peptide property scores."""
-        scores = {}
-        
-        property_score_map = {
-            "peptide_properties": "get_all_properties",
-            "molecular_weight": "get_molecular_weight", 
-            "aromaticity": "get_aromaticity",
-            "instability_index": "get_instability_index",
-            "isoelectric_point": "get_isoelectric_point",
-            "gravy": "get_gravy",
-            "helix_fraction": "get_helix_fraction",
-            "turn_fraction": "get_turn_fraction", 
-            "sheet_fraction": "get_sheet_fraction",
-            "hydrophobic_aa_percent": "get_hydrophobic_aa_percent",
-            "polar_aa_percent": "get_polar_aa_percent",
-            "positively_charged_aa_percent": "get_positively_charged_aa_percent",
-            "negatively_charged_aa_percent": "get_negatively_charged_aa_percent",
-            "delta_net_charge_frac": "get_delta_net_charge_frac",
-            "uHrel": "get_uHrel"
-        }
-        
-        for original_score, resolved_score in resolved_scores.items():
-            if resolved_score in property_score_map:
-                method_name = property_score_map[resolved_score]
-                result = getattr(peptide_properties, method_name)()
-                if resolved_score == "peptide_properties":
-                    scores.update(result)  # get_all_properties returns dict
-                else:
-                    scores[original_score] = result
-                    
-        return scores
-
-    def _calculate_structural_scores(self, resolved_scores: dict, pdb_file: str, processed_dir: str, available_methods: list,
-                                  binding_site_residue_indices: list, required_n_contact_residues: int,
-                                  binding_site_distance_threshold: float, template_pdb: str, peptide_sequence: str) -> dict:
-        """Calculate structural scores that require PDB files."""
-        scores = {}
-        
-        # Determine which scores need to be calculated and for which methods
-        method_specific_structural_scores = {}  # {method: [scores_to_calculate]}
-        non_method_scores = {}  # {score_name: resolved_score}
-        
-        for original_score, resolved_score in resolved_scores.items():
-            # Check if this is a method-specific structural score
-            if any(resolved_score.startswith(f"{method}_") for method in ["alphafold", "boltz"]):
-                method = resolved_score.split("_")[0]
-                base_score = "_".join(resolved_score.split("_")[1:])
-                if base_score in self.structural_scores:
-                    if method not in method_specific_structural_scores:
-                        method_specific_structural_scores[method] = []
-                    method_specific_structural_scores[method].append((original_score, base_score))
-            # Check if this is a structural score (non-method-specific)
-            elif resolved_score in self.structural_scores:
-                non_method_scores[original_score] = resolved_score
-        
-        # Calculate method-specific structural scores
-        for method in method_specific_structural_scores:
-            if method not in available_methods:
-                continue
-                
-            model_file = self._get_method_model_file(processed_dir, method, 1) if processed_dir else None
-            if not model_file:
-                continue
-                
-            # Calculate scores for this method's model
-            method_scores = self._calculate_structural_scores_for_pdb(
-                method_specific_structural_scores[method], model_file,
-                binding_site_residue_indices, required_n_contact_residues,
-                binding_site_distance_threshold, template_pdb, peptide_sequence
-            )
-            scores.update(method_scores)
-        
-        # Calculate non-method-specific structural scores
-        if non_method_scores:
-            # For non-method scores, find the appropriate PDB file
-            target_pdb_file = None
-            
-            if processed_dir:
-                # Use processed directory - get first available method's model file
-                for method in available_methods:
-                    model_file = self._get_method_model_file(processed_dir, method, 1)
-                    if model_file:
-                        target_pdb_file = model_file
-                        break
-            else:
-                # No processed directory - use the provided pdb_file
-                target_pdb_file = pdb_file
-            
-            if target_pdb_file:
-                # Convert to format expected by _calculate_structural_scores_for_pdb
-                score_list = [(original_score, resolved_score) for original_score, resolved_score in non_method_scores.items()]
-                method_scores = self._calculate_structural_scores_for_pdb(
-                    score_list, target_pdb_file,
-                    binding_site_residue_indices, required_n_contact_residues,
-                    binding_site_distance_threshold, template_pdb, peptide_sequence
-                )
-                scores.update(method_scores)
-        
-        return scores
-    
-    def _calculate_structural_scores_for_pdb(self, score_list: list, pdb_file: str,
-                                          binding_site_residue_indices: list, required_n_contact_residues: int,
-                                          binding_site_distance_threshold: float, template_pdb: str, peptide_sequence: str) -> dict:
-        """Calculate structural scores for a specific PDB file."""
-        scores = {}
-        
-        # Initialize Rosetta scorer if needed
-        rosetta_scorer = None
-        rosetta_scores_needed = any(score_name in ["all_rosetta_scores", "rosetta_score", "interface_sasa", 
-                                                  "interface_dG", "interface_delta_hbond_unsat", "packstat"] 
-                                   for _, score_name in score_list)
-        
-        if rosetta_scores_needed:
-            rosetta_scorer = RosettaScorer(pdb_file)
-        
-        # Calculate individual scores
-        for original_score, score_name in score_list:
-            if score_name == "all_rosetta_scores" and rosetta_scorer:
-                scores.update(rosetta_scorer.get_all_metrics())
-            elif score_name == "rosetta_score" and rosetta_scorer:
-                scores[original_score] = rosetta_scorer.get_rosetta_score()
-            elif score_name == "interface_sasa" and rosetta_scorer:
-                scores[original_score] = rosetta_scorer.get_interface_sasa()
-            elif score_name == "interface_dG" and rosetta_scorer:
-                scores[original_score] = rosetta_scorer.get_interface_dG()
-            elif score_name == "interface_delta_hbond_unsat" and rosetta_scorer:
-                scores[original_score] = rosetta_scorer.get_interface_delta_hbond_unsat()
-            elif score_name == "packstat" and rosetta_scorer:
-                scores[original_score] = rosetta_scorer.get_packstat()
-            elif score_name == "distance_score":
-                scores[original_score] = distance_score_from_pdb(pdb_file)
-            elif score_name == "in_binding_site":
-                if not binding_site_residue_indices:
-                    raise ValueError("binding_site_residue_indices required for in_binding_site score")
-                n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
-                    pdb_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
-                scores[original_score] = in_binding_site
-                scores["n_contacts"] = n_contacts
-            elif score_name == "in_binding_site_score":
-                if not binding_site_residue_indices:
-                    raise ValueError("binding_site_residue_indices required for in_binding_site_score")
-                scores[original_score] = smooth_peptide_binding_site_score(
-                    pdb_file, binding_site_residue_indices, threshold=5.0, alpha=1)
-            elif score_name == "template_rmsd":
-                if not template_pdb:
-                    raise ValueError("template_pdb required for template_rmsd score")
-                scores[original_score] = align_and_compute_rmsd(template_pdb, pdb_file, peptide_sequence)
-        
-        return scores
-
-    def _calculate_confidence_scores(self, resolved_scores: dict, parsed_metrics: dict, pdb_file: str, 
-                                   available_methods: list, peptide_sequence: str) -> dict:
-        """Calculate confidence-based scores using raw confidence data."""
-        scores = {}
-        
-        # Only calculate confidence scores that were requested
-        confidence_score_names = ["peptide_plddt", "weighted_plddt_overall", "weighted_plddt_residues", "peptide_pae", "peptide_pde"]
-        requested_confidence_scores = {}
-        
-        for original_score, resolved_score in resolved_scores.items():
-            # Check for method-specific confidence scores (e.g., "alphafold_peptide_plddt")
-            for method in available_methods:
-                for conf_score in confidence_score_names:
-                    if resolved_score == f"{method}_{conf_score}":
-                        if method not in requested_confidence_scores:
-                            requested_confidence_scores[method] = {}
-                        requested_confidence_scores[method][original_score] = conf_score
-                        break
-            
-            # Check for generic confidence scores (when single method available)
-            if resolved_score in confidence_score_names and len(available_methods) == 1:
-                method = available_methods[0]
-                if method not in requested_confidence_scores:
-                    requested_confidence_scores[method] = {}
-                requested_confidence_scores[method][original_score] = resolved_score
-        
-        # Calculate confidence scores for each method
-        for method, method_scores in requested_confidence_scores.items():
-            try:
-                # Calculate all confidence scores for this method
-                confidence_scores = calculate_peptide_confidence_scores(
-                    parsed_metrics, pdb_file, method
-                )
-                
-                # Map calculated scores to requested score names
-                for original_score, conf_score_name in method_scores.items():
-                    if conf_score_name in confidence_scores:
-                        scores[original_score] = confidence_scores[conf_score_name]
-                        
-            except Exception as e:
-                print(f"Error calculating confidence scores for {method}: {e}")
-        
-        return scores
-
-    def _extract_docking_scores(self, resolved_scores: dict, parsed_metrics: dict, available_methods: list) -> dict:
-        """Extract docking scores from parsed metrics."""
-        scores = {}
-        
-        for original_score, resolved_score in resolved_scores.items():
-            if resolved_score in parsed_metrics:
-                scores[original_score] = parsed_metrics[resolved_score]
-                
-        return scores
 
 
 if __name__ == "__main__":

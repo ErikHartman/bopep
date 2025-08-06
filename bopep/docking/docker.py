@@ -29,23 +29,13 @@ class Docker:
     """
     def __init__(self, model=None, models=None, base_output_dir="output", 
                  num_workers=1, **kwargs):
-        """
-        Initialize Docker for docking peptides to a target structure.
-        
-        Parameters:
-        - model: Single model to use ('alphafold' or 'boltz') - for backward compatibility
-        - models: List of models to use (['alphafold', 'boltz', etc.])
-        - base_output_dir: Base output directory for results
-        - num_workers: Number of parallel workers
-        - **kwargs: Additional model-specific parameters
-        """
         # Support both single model and multiple models
         if models is not None:
             self.models = models if isinstance(models, list) else [models]
         elif model is not None:
             self.models = [model]
         else:
-            self.models = ["alphafold"]  # Default
+            raise ValueError("Either 'model' or 'models' must be specified.")
         
         # Validate supported models
         supported_models = ["alphafold", "boltz"]
@@ -83,6 +73,8 @@ class Docker:
                 f"Target structure {target_structure_path} not found."
             )
         
+
+        
         self.original_target_path = target_structure_path
         # Extract target name by removing both .pdb and .cif extensions
         base_name = os.path.basename(target_structure_path)
@@ -98,6 +90,10 @@ class Docker:
             self.temp_pdb_path = None
             
         if strip_template or get_first_model:
+            
+            if target_structure_path.lower().endswith('.cif'):
+                raise ValueError("CIF files cannot be processed with strip_template or get_first_model options.")
+            
             class ChainSelect(Select):
                 def __init__(self, chains_to_keep):
                     self.chains_to_keep = chains_to_keep
@@ -160,9 +156,10 @@ class Docker:
             raise ValueError(
                 "Target structure not set. Please set the target structure using set_target_structure."
             )
-        
+
+
         all_results = {}
-        
+
         for model in self.models:
             logging.info(f"Starting docking with {model.upper()}...")
             
@@ -172,14 +169,19 @@ class Docker:
                 results = self._dock_with_boltz(peptide_sequences)
             else:
                 raise ValueError(f"Unsupported model: {model}")
-            
             all_results[model] = results
             logging.info(f"Completed {model.upper()} docking for {len(results)} peptides")
         
         # Clean up temporary files after all docking is complete
         self._clean_up()
-        
-        return all_results
+
+        # For item in all results, ensure they are the same
+        # Assert that values in all results are the same
+        for result_item in all_results.values():
+            if set(result_item) != set(results):
+                raise ValueError("Results from different models do not match. Check your docking parameters.")
+   
+        return results
         
     def _dock_with_alphafold(self, peptide_sequences: list):
         """Dock peptides using AlphaFold/ColabFold."""
