@@ -216,11 +216,10 @@ class AlphaFoldDocker(BaseDockingModel):
                 universal_newlines=True,
                 env=env,
             )
-            process.wait()
-            
+            output, _ = process.communicate()
             if process.returncode != 0:
                 raise subprocess.CalledProcessError(
-                    returncode=process.returncode, cmd=command
+                    returncode=process.returncode, cmd=command, output=output
                 )
             
             logging.info(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
@@ -234,6 +233,7 @@ class AlphaFoldDocker(BaseDockingModel):
                 
         except subprocess.CalledProcessError as e:
             logging.error(f"An error occurred during docking of {peptide_sequence}: {e}")
+            logging.error(f"ColabFold output:\n{e.output}")
             return None
         
         return peptide_output_dir
