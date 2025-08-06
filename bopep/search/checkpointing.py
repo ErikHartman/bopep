@@ -166,10 +166,15 @@ def _rebuild_logs_from_csvs(self, checkpoint_path: Optional[Path] = None):
             pep = row["peptide"]
             score_cols = [c for c in reader.fieldnames
                             if c not in ("timestamp", "iteration", "peptide", "phase")]
-            sc = {
-                col: float(row[col]) if row[col] not in (None, "") else None
-                for col in score_cols
-            }
+            sc = {}
+            for col in score_cols:
+                val = row[col]
+                if val in (None, ""):
+                    sc[col] = None
+                elif val in ("True", "False"):
+                    sc[col] = val == "True"
+                else:
+                    sc[col] = float(val)
             self.scores[pep] = sc
 
     obj_path = log_base / "objectives.csv"
