@@ -180,37 +180,49 @@ def is_peptide_in_binding_site_pdb_file(
         return nr_contact_residues, False
 
 
-def n_peptides_in_binding_site_colab_dir(
-    colab_dir: str, binding_site_residue_indices: list, threshold=5.0, required_n_contact_residues: int = 2
+def n_peptides_in_binding_site_processed_dir(
+    processed_dir: str, binding_site_residue_indices: list, threshold=5.0, required_n_contact_residues: int = 2
 ) -> Tuple[float, bool, int]:
     """
     Evaluates if the docked peptide is within a given proximity to the receptor binding site
-    across multiple models. Only considers files with pattern 'rank_00X' in their name.
+    across multiple models in a processed directory. Works with standardized model naming.
     """
+    import glob
+    
     matches_within_threshold = 0
-
-    colab_files = os.listdir(colab_dir)
-
-    top_pdb_is_in_binding_site = False
-
-    # Regex search for pdb files with rank_00X pattern in the directory
-    pdb_files = [
-        os.path.join(colab_dir, file)
-        for file in colab_files
-        if re.search(r"unrelaxed_rank_00\d+.*\.pdb$", file, re.IGNORECASE)
-    ]
+    top_model_is_in_binding_site = False
     n_contacts = 0
+
+    # Find all model files in the processed directory
+    pdb_patterns = ["*_model_*.pdb", "*_model_*.cif", "model_*.pdb", "model_*.cif"]
+    pdb_files = []
+    
+    for pattern in pdb_patterns:
+        files = glob.glob(os.path.join(processed_dir, pattern))
+        pdb_files.extend(files)
+    
+    # Remove duplicates and sort
+    pdb_files = sorted(list(set(pdb_files)))
+    
+    if not pdb_files:
+        print(f"WARNING: No model files found in {processed_dir}")
+        return 0.0, False, 0
+
     for pdb_file in pdb_files:
         n_contacts_temp, is_in_binding_site = is_peptide_in_binding_site_pdb_file(
-            pdb_file, binding_site_residue_indices, threshold=threshold, required_n_contact_residues=required_n_contact_residues
+            pdb_file, binding_site_residue_indices, threshold=threshold, 
+            required_n_contact_residues=required_n_contact_residues
         )
         if is_in_binding_site:
             matches_within_threshold += 1
-            if "rank_001" in pdb_file:
-                top_pdb_is_in_binding_site = True
+            # Check if this is the top model (model_1 or method_model_1)
+            filename = os.path.basename(pdb_file)
+            if "model_1" in filename:
+                top_model_is_in_binding_site = True
                 n_contacts = n_contacts_temp
 
-    return matches_within_threshold / len(pdb_files), top_pdb_is_in_binding_site, n_contacts
+    return matches_within_threshold / len(pdb_files), top_model_is_in_binding_site, n_contacts
+
 
 
 def smooth_peptide_binding_site_score(
@@ -266,8 +278,8 @@ def smooth_peptide_binding_site_score(
 
 
 if __name__ == "__main__":
-    docked_pdb = "/srv/data1/er8813ha/docking-peptide/output_v2/run_cd14/docked_pdbs/4glf_VHLTPEEKSAVTALWG/4glf_VHLTPEEKSAVTALWG_relaxed_rank_001_alphafold2_multimer_v3_model_2_seed_000.pdb" #"/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/docked_pdbs/4glf_LKNPDDPDMVD/4glf_LKNPDDPDMVD_relaxed_rank_001_alphafold2_multimer_v3_model_3_seed_000.pdb" #
-
+    docked_pdb = "/home/er8813ha/bopep/examples/docking/processed/4glf_NYLSELSEHV/alphafold_model_1.pdb"
+    
     bsri = [22, 23, 24, 42, 43, 44, 45, 46, 47, 48, 49, 
             50, 51, 52, 53, 69, 70, 71, 72,
                 73, 74, 75, 76, 77, 81, 82, 83, 84, 85, 86, 87, 
@@ -275,6 +287,7 @@ if __name__ == "__main__":
     
     bsri = [residue - 19 for residue in bsri]  # convert to zero-based indices
     
+    print("Testing with single PDB file:")
     print(is_peptide_in_binding_site_pdb_file(docked_pdb, binding_site_residue_indices=bsri, threshold=5.0, required_n_contact_residues=5))
 
     centroid_in_binding_site = is_peptide_near_binding_site_by_centroid(
@@ -285,3 +298,12 @@ if __name__ == "__main__":
         cutoff=20.0,
     )
     print(f"Centroid is in binding site: {centroid_in_binding_site}")
+    
+    # Test with processed directory
+    processed_dir = "/home/er8813ha/bopep/examples/docking/processed/4glf_NYLSELSEHV"
+    if os.path.exists(processed_dir):
+        print("\nTesting with processed directory:")
+        result = n_peptides_in_binding_site_processed_dir(
+            processed_dir, binding_site_residue_indices=bsri, threshold=5.0, required_n_contact_residues=5
+        )
+        print(f"Processed directory result: {result}")

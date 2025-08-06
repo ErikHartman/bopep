@@ -7,7 +7,7 @@ import logging
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from bopep.bayesian_optimization.optimization import BoPep
+from bopep.search.optimization import BoPep
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -152,7 +152,7 @@ def test_bopep_with_precomputed_data(
     network_type = "mlp"
     logging.info(f"Using {network_type} network based on embedding shape {any_embedding.shape}")
 
-    from bopep.bayesian_optimization import optimization
+    from bopep.search import optimization
 
     original_validate = optimization._validate_dependencies
     optimization._validate_dependencies = lambda: None
@@ -164,6 +164,7 @@ def test_bopep_with_precomputed_data(
                 "model_type": "deep_evidential",
             },
             docker_kwargs={
+                "models": ["alphafold"],
                 "output_dir": os.path.join(output_dir, "docking"),  # Create a subdirectory for docking
                 "num_cores": 1  # Use minimal resources for testing
             },
@@ -243,6 +244,7 @@ def test_bopep_with_precomputed_data(
                     "model_type": "deep_evidential",
                 },
                 docker_kwargs={
+                    "models": ["alphafold"],
                     "output_dir": os.path.join(output_dir, "docking"),
                     "num_cores": 1
                 },
@@ -338,7 +340,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
     # Test 1: Traditional approach (same binding site for all peptides)
     logging.info("Testing traditional binding site approach (list format)...")
 
-    from bopep.bayesian_optimization import optimization
+    from bopep.search import optimization
     original_validate = optimization._validate_dependencies
     optimization._validate_dependencies = lambda: None
 
@@ -349,6 +351,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
                 "model_type": "deep_evidential",
             },
             docker_kwargs={
+                "models": ["alphafold"],
                 "output_dir": os.path.join(output_dir, "traditional", "docking"),
                 "num_cores": 1
             },
@@ -388,6 +391,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
                 "model_type": "deep_evidential",
             },
             docker_kwargs={
+                "models":["alphafold"],
                 "output_dir": os.path.join(output_dir, "peptide_specific", "docking"),
                 "num_cores": 1
             },
