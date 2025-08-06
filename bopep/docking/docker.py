@@ -23,7 +23,7 @@ class Docker:
     For AlphaFold parameters, see AlphaFoldDocker documentation.
     For Boltz parameters, see BoltzDocker documentation.
     """
-    def __init__(self, **kwargs):
+    def __init__(self, kwargs):
         models = kwargs.pop("models", None)
         base_output_dir = kwargs.pop("output_dir", None)
 
