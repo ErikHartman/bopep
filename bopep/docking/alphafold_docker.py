@@ -75,13 +75,8 @@ class AlphaFoldDocker(BaseDockingModel):
         
         logging.info(f"Found {len(relaxed_pdbs)} relaxed and {len(unrelaxed_pdbs)} unrelaxed PDB files")
         
-        # Process models and collect all metrics
-        all_metrics = {
-            "peptide_sequence": peptide_sequence,
-            "target_name": target_name,
-            "model_count": 0,
-            "models": {}
-        }
+        # Process models and collect metrics for best model only
+        all_models_data = []
         
         # Strategy: Use relaxed for rank 1 (if available), unrelaxed for all others
         # First, collect all rank numbers from available files
@@ -132,22 +127,39 @@ class AlphaFoldDocker(BaseDockingModel):
                 # Load metrics for this model
                 model_metrics = {
                     "pdb_file": standardized_filename,
+                    "original_rank": rank_num,
+                    "relaxed": model_type == "relaxed"
                 }
                 if corresponding_json and os.path.exists(corresponding_json):
                     with open(corresponding_json, 'r') as f:
                         json_data = json.load(f)
                         model_metrics.update(json_data)
                 
-                all_metrics["models"][f"alphafold_model_{processed_count}"] = model_metrics
+                all_models_data.append(model_metrics)
         
-        all_metrics["model_count"] = processed_count
+        # Find best model based on ipTM (should be rank 1 since ColabFold ranks by ipTM)
+        best_model = max(all_models_data, key=lambda x: x.get("iptm", 0))
+        best_model_rank = best_model.get("original_rank", 1)
+        
+        logging.info(f"Best model based on ipTM: rank_{best_model_rank:03d} (ipTM: {best_model.get('iptm', 'N/A')})")
+        
+        # Create metrics with only the best model's data
+        all_metrics = {
+            "peptide_sequence": peptide_sequence,
+            "target_name": target_name,
+            "docking_method": "alphafold",
+            "model_count": processed_count,
+            "best_model_rank": best_model_rank,
+            # Store all metrics from best model at root level
+            **{k: v for k, v in best_model.items() if k not in ["pdb_file"]}
+            
+        }
         
         if pae_json:
             with open(pae_json[0], 'r') as f:
                 pae_data = json.load(f)
-                all_metrics["predicted_aligned_error"] = pae_data
+                all_metrics["predicted_aligned_error"] = pae_data["predicted_aligned_error"] # so not nested
         
-        # Save metrics
         self._save_metrics_json(all_metrics, processed_dir, prefix="alphafold_metrics")
         
         return processed_dir
@@ -172,7 +184,6 @@ class AlphaFoldDocker(BaseDockingModel):
         )
         shutil.copy2(target_structure, target_copy_path)
         
-        # Prepare ColabFold command
         command = [
             "colabfold_batch",
             str(combined_fasta_path),
@@ -193,12 +204,10 @@ class AlphaFoldDocker(BaseDockingModel):
         if self.amber:
             command.append("--amber")
         
-        # Set environment
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = gpu_id
         env.pop("MPLBACKEND", None)
         
-        # Run docking
         try:
             process = subprocess.Popen(
                 command,

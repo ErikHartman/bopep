@@ -18,24 +18,19 @@ class Docker:
     Docker class for docking peptides to a target structure.
     
     Parameters:
-    - model: Single model to use ('alphafold' or 'boltz') - for backward compatibility
-    - models: List of models to use (['alphafold', 'boltz', etc.])
-    - base_output_dir: Base output directory for results
-    - num_workers: Number of parallel workers
     - **kwargs: Model-specific parameters (passed to individual docking classes)
     
     For AlphaFold parameters, see AlphaFoldDocker documentation.
     For Boltz parameters, see BoltzDocker documentation.
     """
-    def __init__(self, model=None, models=None, base_output_dir="output", 
-                 num_workers=1, **kwargs):
-        # Support both single model and multiple models
+    def __init__(self, **kwargs):
+        models = kwargs.pop("models", None)
+        base_output_dir = kwargs.pop("output_dir", None)
+
         if models is not None:
             self.models = models if isinstance(models, list) else [models]
-        elif model is not None:
-            self.models = [model]
         else:
-            raise ValueError("Either 'model' or 'models' must be specified.")
+            raise ValueError("'models' must be specified.")
         
         # Validate supported models
         supported_models = ["alphafold", "boltz"]
@@ -44,8 +39,12 @@ class Docker:
                 raise ValueError(f"Unsupported model: {model}. Supported models are {supported_models}")
         
         # Base parameters
+        if base_output_dir is None:
+            raise ValueError("Base output directory must be specified.")
+        
         self.base_output_dir = base_output_dir
-        self.num_workers = num_workers
+        if not os.path.exists(base_output_dir):
+            os.makedirs(base_output_dir)
         
         # Store all kwargs for passing to specific docking classes
         self.docking_kwargs = kwargs
@@ -73,8 +72,6 @@ class Docker:
                 f"Target structure {target_structure_path} not found."
             )
         
-
-        
         self.original_target_path = target_structure_path
         # Extract target name by removing both .pdb and .cif extensions
         base_name = os.path.basename(target_structure_path)
@@ -90,7 +87,7 @@ class Docker:
             self.temp_pdb_path = None
             
         if strip_template or get_first_model:
-            
+
             if target_structure_path.lower().endswith('.cif'):
                 raise ValueError("CIF files cannot be processed with strip_template or get_first_model options.")
             
@@ -188,7 +185,6 @@ class Docker:
         # Create alphafold instance and let it handle its own parameters
         alphafold_docker = AlphaFoldDocker(
             output_dir=self.base_output_dir,
-            num_workers=self.num_workers,
             **self.docking_kwargs  # Pass all kwargs, AlphaFoldDocker will extract what it needs
         )
         
@@ -205,7 +201,6 @@ class Docker:
         # Create boltz instance and let it handle its own parameters
         boltz_docker = BoltzDocker(
             output_dir=self.base_output_dir,
-            num_workers=self.num_workers,
             **self.docking_kwargs  # Pass all kwargs, BoltzDocker will extract what it needs
         )
         
@@ -239,7 +234,6 @@ class Docker:
         logging.info(f"Target structure: {self.target_structure_path}")
         logging.info(f"Base output directory: {self.base_output_dir}")
         logging.info(f"Models: {self.models}")
-        logging.info(f"Number of workers: {self.num_workers}")
         
         # Log method-specific parameters if present
         if "alphafold" in self.models:

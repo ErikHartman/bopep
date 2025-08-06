@@ -220,11 +220,10 @@ class BoltzDocker(BaseDockingModel):
     def _process_boltz_output(self, raw_dir: str, processed_dir: str,
                              peptide_sequence: str, target_name: str):
         """
-        Process Boltz raw output into standardized format.
+        Process Boltz raw output into standardized format with best model as model_1.
         """
         logging.info("Processing Boltz output into standardized format...")
         
-
         boltz_results_pattern = f"boltz_results_{target_name}_{peptide_sequence}"
         boltz_results_dir = os.path.join(raw_dir, boltz_results_pattern)
         
@@ -234,12 +233,17 @@ class BoltzDocker(BaseDockingModel):
             raise ValueError(f"Predictions directory not found: {predictions_dir}")
         
         # Find the input-specific subdirectory
-        input_dir = [d for d in os.listdir(predictions_dir) 
-                     if os.path.isdir(os.path.join(predictions_dir, d))][0]
+        input_dirs = [d for d in os.listdir(predictions_dir) 
+                     if os.path.isdir(os.path.join(predictions_dir, d))]
         
-        if not input_dir:
+        if not input_dirs:
             raise ValueError(f"No input directories found in {predictions_dir}")
-
+        
+        input_dir = os.path.join(predictions_dir, input_dirs[0])
+        
+        # Extract metrics and get best model ID
+        metrics, best_model_id = self._extract_boltz_metrics(input_dir, peptide_sequence)
+        
         # Find structure files
         if self.output_format == "pdb":
             structure_files = glob.glob(os.path.join(input_dir, "*_model_*.pdb"))
@@ -248,17 +252,32 @@ class BoltzDocker(BaseDockingModel):
         
         structure_files.sort()  # Sort to maintain consistent ordering
         
-        for i, struct_file in enumerate(structure_files, 1):
+        if not structure_files:
+            raise ValueError(f"No structure files found in {input_dir}")
+        
+        # Reorder files so best model comes first
+        if best_model_id <= len(structure_files):
+            best_file = structure_files[best_model_id - 1]  # Convert to 0-based index
+            other_files = [f for i, f in enumerate(structure_files) if i != best_model_id - 1]
+            ordered_files = [best_file] + other_files
+        else:
+            logging.warning(f"Best model ID {best_model_id} exceeds number of structure files {len(structure_files)}")
+            ordered_files = structure_files
+        
+        # Copy files with best model as model_1
+        for i, struct_file in enumerate(ordered_files, 1):
             if self.output_format == "pdb":
                 dest_file = os.path.join(processed_dir, f"boltz_model_{i}.pdb")
             else:
                 dest_file = os.path.join(processed_dir, f"boltz_model_{i}.cif")
             
             shutil.copy2(struct_file, dest_file)
-            logging.info(f"Copied {os.path.basename(struct_file)} -> {os.path.basename(dest_file)}")
+            if i == 1:
+                logging.info(f"Copied BEST model {os.path.basename(struct_file)} -> {os.path.basename(dest_file)} (ipTM: {metrics.get('iptm', 'N/A')})")
+            else:
+                logging.info(f"Copied {os.path.basename(struct_file)} -> {os.path.basename(dest_file)}")
         
-        metrics = self._extract_boltz_metrics(input_dir, peptide_sequence)
-        
+        # Save metrics file
         metrics_file = os.path.join(processed_dir, "boltz_metrics.json")
         with open(metrics_file, 'w') as f:
             json.dump(metrics, f, indent=2)
@@ -266,20 +285,14 @@ class BoltzDocker(BaseDockingModel):
         logging.info(f"Created standardized metrics file: {metrics_file}")
     
     def _extract_boltz_metrics(self, input_dir: str, peptide_sequence: str) -> Dict[str, Any]:
-        # Get best model on confidence score and make primary
         """
-        Extract all available metrics from Boltz output files.
+        Extract metrics from Boltz output files and return only the best model based on ipTM.
         """
-        metrics = {
-            "peptide_sequence": peptide_sequence,
-            "docking_method": "boltz",
-            "models": []
-        }
-        
         # Find all confidence files (one per model)
         confidence_files = glob.glob(os.path.join(input_dir, "confidence_*.json"))
         confidence_files.sort()
         
+        all_models = []
         for i, conf_file in enumerate(confidence_files, 1):
             with open(conf_file, 'r') as f:
                 confidence_data = json.load(f)
@@ -289,30 +302,37 @@ class BoltzDocker(BaseDockingModel):
                 "confidence_file": os.path.basename(conf_file),
                 **confidence_data
             }
-            metrics["models"].append(model_metrics)
-            
+            all_models.append(model_metrics)
+        
+        if not all_models:
+            raise ValueError(f"No confidence files found in {input_dir}")
+        
+        # Find best model based on ipTM (iptm key)
+        best_model = max(all_models, key=lambda x: x.get("iptm", 0))
+        best_model_id = best_model["model_id"]
+        
+        logging.info(f"Best model based on ipTM: model_{best_model_id} (ipTM: {best_model.get('iptm', 'N/A')})")
+        
+        # Create metrics dict with only the best model's data
+        metrics = {
+            "peptide_sequence": peptide_sequence,
+            "docking_method": "boltz",
+            "best_model_id": best_model_id,
+            # Store all metrics from best model at root level (like AlphaFold)
+            **{k: v for k, v in best_model.items() if k not in ["model_id", "confidence_file"]}
+        }
+        
+        # Add affinity data if available
         affinity_files = glob.glob(os.path.join(input_dir, "affinity_*.json"))
         if affinity_files:
             with open(affinity_files[0], 'r') as f:
                 affinity_data = json.load(f)
-            
             metrics["affinity"] = affinity_data
-
         
-        self._extract_npz_data_to_metrics(input_dir, metrics)
+        # Extract NPZ data for the best model
+        self._extract_npz_data_to_metrics(input_dir, metrics, best_model_id)
         
-        if metrics["models"]:
-            # Get best model based on confidence score
-            best_model = max(metrics["models"], 
-                           key=lambda x: x.get("confidence_score", 0))
-            
-            metrics["best_model_id"] = best_model["model_id"]
-            metrics["best_confidence_score"] = best_model.get("confidence_score")
-            metrics["best_ptm"] = best_model.get("ptm")
-            metrics["best_iptm"] = best_model.get("iptm")
-            metrics["best_plddt"] = best_model.get("complex_plddt")
-        
-        return metrics
+        return metrics, best_model_id
     
     def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
                           target_name: str) -> str:
@@ -338,56 +358,44 @@ class BoltzDocker(BaseDockingModel):
         self._process_boltz_output(raw_peptide_dir, processed_dir, peptide_sequence, target_name)
         return processed_dir
     
-    def _extract_npz_data_to_metrics(self, input_dir: str, metrics: Dict[str, Any]) -> None:
+    def _extract_npz_data_to_metrics(self, input_dir: str, metrics: Dict[str, Any], best_model_id: int) -> None:
         """
-        Extract confidence data from NPZ files and add to metrics as JSON-serializable data.
-
-        Here we assume model 1 is primary model - which might not be the case.
-        
-        Args:
-            input_dir: Directory containing Boltz NPZ files
-            metrics: Metrics dict to update with extracted data
+        Extract confidence data from NPZ files for the best model only.
         """
-
-        # Extract PAE data
+        # Extract PAE data for best model
         pae_files = glob.glob(os.path.join(input_dir, "pae_*.npz"))
         if pae_files:
-            # Sort files to ensure consistent ordering
             pae_files.sort()
-
-            # Load first PAE file (assuming model 1 is primary)
-            pae_data = np.load(pae_files[0])
-            if 'pae' in pae_data:
-                pae_matrix = pae_data['pae'].tolist()  # Convert to JSON-serializable list
-                metrics["pae_matrix"] = pae_matrix
-                logging.info(f"Extracted PAE matrix with shape: {np.array(pae_matrix).shape}")
-
+            if len(pae_files) >= best_model_id:
+                pae_file = pae_files[best_model_id - 1]  # Convert to 0-based index
+                pae_data = np.load(pae_file)
+                if 'pae' in pae_data:
+                    pae_matrix = pae_data['pae'].tolist()
+                    metrics["pae_matrix"] = pae_matrix
+                    logging.info(f"Extracted PAE matrix for model {best_model_id} with shape: {np.array(pae_matrix).shape}")
         
-        # Extract pLDDT data
+        # Extract pLDDT data for best model
         plddt_files = glob.glob(os.path.join(input_dir, "plddt_*.npz"))
         if plddt_files:
-            # Sort files to ensure consistent ordering
             plddt_files.sort()
-
-            # Load first pLDDT file (assuming model 1 is primary)
-            plddt_data = np.load(plddt_files[0])
-            if 'plddt' in plddt_data:
-                plddt_vector = plddt_data['plddt'].tolist()  # Convert to JSON-serializable list
-                metrics["plddt_vector"] = plddt_vector
-                logging.info(f"Extracted pLDDT vector with length: {len(plddt_vector)}")
-
+            if len(plddt_files) >= best_model_id:
+                plddt_file = plddt_files[best_model_id - 1]  # Convert to 0-based index
+                plddt_data = np.load(plddt_file)
+                if 'plddt' in plddt_data:
+                    plddt = plddt_data['plddt'].tolist()
+                    metrics["plddt"] = plddt
+                    logging.info(f"Extracted pLDDT vector for model {best_model_id} with length: {len(plddt)}")
         
-        # Extract PDE data (Protein Distance Error - specific to Boltz)
+        # Extract PDE data for best model
         pde_files = glob.glob(os.path.join(input_dir, "pde_*.npz"))
         if pde_files:
-            # Sort files to ensure consistent ordering
             pde_files.sort()
-
-            # Load first PDE file (assuming model 1 is primary)
-            pde_data = np.load(pde_files[0])
-            if 'pde' in pde_data:
-                pde_matrix = pde_data['pde'].tolist()  # Convert to JSON-serializable list (actually a matrix)
-                metrics["pde_vector"] = pde_matrix  # Keep the key name for backward compatibility
-                logging.info(f"Extracted PDE matrix with shape: {np.array(pde_matrix).shape}")
+            if len(pde_files) >= best_model_id:
+                pde_file = pde_files[best_model_id - 1]  # Convert to 0-based index
+                pde_data = np.load(pde_file)
+                if 'pde' in pde_data:
+                    pde_matrix = pde_data['pde'].tolist()
+                    metrics["pde_matrix"] = pde_matrix  # Updated key name
+                    logging.info(f"Extracted PDE matrix for model {best_model_id} with shape: {np.array(pde_matrix).shape}")
 
                 
