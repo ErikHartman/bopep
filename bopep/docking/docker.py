@@ -40,7 +40,7 @@ class Docker:
         
         # Base parameters
         if base_output_dir is None:
-            raise ValueError("Base output directory must be specified.")
+            raise ValueError("output_dir directory must be specified.")
         
         self.base_output_dir = base_output_dir
         if not os.path.exists(base_output_dir):
