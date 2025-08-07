@@ -1,6 +1,9 @@
 import numpy as np
 from Bio.SVDSuperimposer import SVDSuperimposer
 from bopep.scoring.utils import parse_pdb, get_chain_sequences, match_and_truncate
+import os
+import glob
+from itertools import combinations
 
 def rmsd(coords1, coords2):
     return np.sqrt(np.mean(np.sum((coords1 - coords2) ** 2, axis=1)))
@@ -49,6 +52,46 @@ def align_and_compute_rmsd(
     return rmsd(ref_pep_coords, new_pep_coords_aligned)
 
 
+def compute_intra_model_rmsd(processed_dir, peptide_sequence):
+    """
+    Compute intra-model RMSD metrics for peptide chains within and across docking methods.
+    """
+    results = {}
+    
+    # Find all model files by method
+    alphafold_models = sorted(glob.glob(os.path.join(processed_dir, "alphafold_model_*.pdb")))
+    boltz_models = sorted(glob.glob(os.path.join(processed_dir, "boltz_model_*.pdb")))
+    
+    # Function to compute pairwise RMSDs within a set of models
+    def compute_pairwise_rmsd(model_files):
+        if len(model_files) < 2:
+            return None
+        
+        rmsd_values = []
+        for ref_file, comp_file in combinations(model_files, 2):
+            try:
+                rmsd_val = align_and_compute_rmsd(ref_file, comp_file, peptide_sequence)
+                rmsd_values.append(rmsd_val)
+            except Exception as e:
+                continue
+        
+        return np.mean(rmsd_values) if rmsd_values else None
+    
+    # Compute intra-method RMSDs
+    if len(alphafold_models) >= 2:
+        results['intra_alphafold_mean_rmsd'] = compute_pairwise_rmsd(alphafold_models)
+    
+    if len(boltz_models) >= 2:
+        results['intra_boltz_mean_rmsd'] = compute_pairwise_rmsd(boltz_models)
+    
+    # Compute cross-method RMSD (all models together)
+    all_models = alphafold_models + boltz_models
+    if len(all_models) >= 2:
+        results['intra_all_mean_rmsd'] = compute_pairwise_rmsd(all_models)
+    
+    return results
+
+
 if __name__ == "__main__":
     pdb_file_path = "./data/1ssc.pdb"
 
@@ -59,3 +102,5 @@ if __name__ == "__main__":
     distance_matrix = align_and_compute_rmsd(ref_pdb_file=pdb_file_path, pdb_file=pdb_file_path, peptide_sequence=seq_dict["B"])
     print(f"Distance matrix for {pdb_file_path}:")
     print(distance_matrix)
+
+    print(compute_intra_model_rmsd(processed_dir="/home/er8813ha/bopep/examples/docking/both_docking_output/processed/4glf_NYLSELSEHV", peptide_sequence="NYLSELSEHV"))

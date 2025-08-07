@@ -21,11 +21,6 @@ class BaseDockingModel(ABC):
     def __init__(self, **kwargs):
         """
         Initialize the docking model with common parameters.
-        
-        Parameters:
-        - output_dir: Base output directory for docking results
-        - gpu_ids: List of GPU IDs to use for docking
-        - overwrite_results: Whether to overwrite existing results
         """
         self.output_dir = kwargs["output_dir"]
         self.gpu_ids = kwargs.get("gpu_ids", ["0"])
@@ -146,7 +141,13 @@ class BaseDockingModel(ABC):
             ))
         
         # Run in parallel
-        context = get_context("spawn")
+        # Use fork on Unix-like systems (faster and doesn't require __main__ guard)
+        # Use spawn on Windows or as fallback
+        try:
+            context = get_context("fork")
+        except RuntimeError:
+            # fork not available on this platform (e.g., Windows)
+            context = get_context("spawn")
         
         with context.Pool(processes=len(process_args)) as pool:
             all_docked_dirs = pool.starmap(self._dock_peptides_for_gpu, process_args)
@@ -226,6 +227,12 @@ class BaseDockingModel(ABC):
         peptide_dir_name = f"{target_name}_{peptide_sequence}"
         processed_dir = os.path.join(self.processed_output_dir, peptide_dir_name)
         
-        if os.path.exists(processed_dir) and os.path.exists(os.path.join(processed_dir, "metrics.json")):
-            return True, processed_dir
+        if os.path.exists(processed_dir):
+            # Check for method-specific metrics file
+            method_name = getattr(self, 'method_name', 'unknown')
+            method_metrics_file = os.path.join(processed_dir, f"{method_name}_metrics.json")
+            
+            if os.path.exists(method_metrics_file):
+                return True, processed_dir
+        
         return False, None

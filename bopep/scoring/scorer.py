@@ -10,7 +10,7 @@ from bopep.scoring.is_peptide_in_binding_site import (
     is_peptide_in_binding_site_pdb_file,
     smooth_peptide_binding_site_score,
 )
-from bopep.scoring.model_overlap import align_and_compute_rmsd
+from bopep.scoring.model_overlap import align_and_compute_rmsd, compute_intra_model_rmsd
 from bopep.scoring.peptide_properties import PeptideProperties
 
 from bopep.scoring.confidence_scores import get_peptide_plddt, get_weighted_peptide_plddt, get_peptide_pae, get_peptide_pde
@@ -39,6 +39,7 @@ class Scorer:
             "peptide_plddt", 
             "peptide_pae",
             "interface_peptide_plddt",
+            "intra_model_rmsd",
         ] 
         self.peptide_property_scores = [
             "peptide_properties",
@@ -410,6 +411,11 @@ class Scorer:
                 scores["peptide_pde"] = peptide_pde
             else:
                 raise ValueError("peptide_pde requires Boltz output with model file")
+            
+        if "intra_model_rmsd" in scores_to_include:
+            if not processed_dir:
+                raise ValueError("intra_model_rmsd requires processed directory with model files")
+            scores.update(compute_intra_model_rmsd(processed_dir, peptide_sequence))
         
         # Generic docking scores (use available method)
         if "iptm" in scores_to_include:
