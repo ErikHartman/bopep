@@ -11,7 +11,7 @@ class TestDocker:
         docker_kwargs = {"output_dir": "/tmp", "models": ["alphafold"]}
         docker = Docker(docker_kwargs)
         
-        assert docker.base_output_dir == "/tmp"
+        assert docker.output_dir == "/tmp"
         assert docker.models == ["alphafold"]
 
     def test_init_custom(self):
@@ -28,7 +28,7 @@ class TestDocker:
         docker = Docker(docker_kwargs)
 
         assert docker.models == ["alphafold", "boltz"]
-        assert docker.base_output_dir == "/tmp"
+        assert docker.output_dir == "/tmp"
 
     
 

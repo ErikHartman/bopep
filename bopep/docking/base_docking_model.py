@@ -79,9 +79,11 @@ class BaseDockingModel(ABC):
                                                 target_sequence, target_name)
         else:
             raw_docked_dirs = []
+            # Use the first GPU for sequential processing
+            gpu_id = self.gpu_ids[0] if self.gpu_ids else "0"
             for peptide in peptides_to_dock:
                 raw_dir = self._dock_single_peptide(peptide, target_structure, 
-                                                  target_sequence, target_name)
+                                                  target_sequence, target_name, gpu_id)
                 raw_docked_dirs.append(raw_dir)
         
         # Process raw output to standardized format

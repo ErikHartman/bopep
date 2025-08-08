@@ -25,7 +25,7 @@ class Docker:
     """
     def __init__(self, kwargs):
         models = kwargs.pop("models", None)
-        base_output_dir = kwargs.pop("output_dir", None)
+        output_dir = kwargs.pop("output_dir", None)
 
         if models is not None:
             self.models = models if isinstance(models, list) else [models]
@@ -39,12 +39,12 @@ class Docker:
                 raise ValueError(f"Unsupported model: {model}. Supported models are {supported_models}")
         
         # Base parameters
-        if base_output_dir is None:
+        if output_dir is None:
             raise ValueError("output_dir directory must be specified.")
         
-        self.base_output_dir = base_output_dir
-        if not os.path.exists(base_output_dir):
-            os.makedirs(base_output_dir)
+        self.output_dir = output_dir
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         
         # Store all kwargs for passing to specific docking classes
         self.docking_kwargs = kwargs
@@ -155,36 +155,36 @@ class Docker:
             )
 
 
-        all_results = {}
+        all_docked_dirs = {}
 
         for model in self.models:
             logging.info(f"Starting docking with {model.upper()}...")
             
             if model == "alphafold":
-                results = self._dock_with_alphafold(peptide_sequences)
+                docker_dirs = self._dock_with_alphafold(peptide_sequences)
             elif model == "boltz":
-                results = self._dock_with_boltz(peptide_sequences)
+                docker_dirs = self._dock_with_boltz(peptide_sequences)
             else:
                 raise ValueError(f"Unsupported model: {model}")
-            all_results[model] = results
-            logging.info(f"Completed {model.upper()} docking for {len(results)} peptides")
+            all_docked_dirs[model] = docker_dirs
+            logging.info(f"Completed {model.upper()} docking for {len(docker_dirs)} peptides")
         
         # Clean up temporary files after all docking is complete
         self._clean_up()
 
         # For item in all results, ensure they are the same
         # Assert that values in all results are the same
-        for result_item in all_results.values():
-            if set(result_item) != set(results):
+        for result_item in all_docked_dirs.values():
+            if set(result_item) != set(docker_dirs):
                 raise ValueError("Results from different models do not match. Check your docking parameters.")
    
-        return results
+        return docker_dirs
         
     def _dock_with_alphafold(self, peptide_sequences: list):
         """Dock peptides using AlphaFold/ColabFold."""
         # Create alphafold instance and let it handle its own parameters
         alphafold_docker = AlphaFoldDocker(
-            output_dir=self.base_output_dir,
+            output_dir=self.output_dir,
             **self.docking_kwargs  # Pass all kwargs, AlphaFoldDocker will extract what it needs
         )
         
@@ -200,7 +200,7 @@ class Docker:
         """Dock peptides using Boltz."""
         # Create boltz instance and let it handle its own parameters
         boltz_docker = BoltzDocker(
-            output_dir=self.base_output_dir,
+            output_dir=self.output_dir,
             **self.docking_kwargs  # Pass all kwargs, BoltzDocker will extract what it needs
         )
         
@@ -232,7 +232,7 @@ class Docker:
         """Log the current configuration of the Docker instance."""
         logging.info("Docker configuration:")
         logging.info(f"Target structure: {self.target_structure_path}")
-        logging.info(f"Base output directory: {self.base_output_dir}")
+        logging.info(f"Base output directory: {self.output_dir}")
         logging.info(f"Models: {self.models}")
         
         # Log method-specific parameters if present

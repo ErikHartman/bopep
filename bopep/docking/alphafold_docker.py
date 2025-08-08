@@ -257,9 +257,13 @@ class AlphaFoldDocker(BaseDockingModel):
         """
         Process a batch of peptides on a specific GPU using AlphaFold.
         """
+        # raw_output_dir is like: /base/raw/alphafold
+        # We need to get back to /base (go up 2 levels: remove /alphafold and /raw)
+        output_dir = os.path.dirname(os.path.dirname(raw_output_dir))
+        
         # Create a temporary docker instance for this process
         temp_docker = AlphaFoldDocker(
-            output_dir=os.path.dirname(raw_output_dir),  # Parent of raw_output_dir
+            output_dir=output_dir,
             gpu_ids=[gpu_id],
             **method_params
         )
