@@ -60,9 +60,7 @@ class BoltzDocker(BaseDockingModel):
         logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
         
         raw_peptide_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
-        processed_peptide_dir = os.path.join(self.processed_output_dir, f"{target_name}_{peptide_sequence}")
-        
-        os.makedirs(processed_peptide_dir, exist_ok=True)
+        processed_peptide_dir = self._create_processed_peptide_dir(target_name, peptide_sequence)
         
         yaml_path = self._create_yaml_config(peptide_sequence, target_sequence, 
                                            target_name, raw_peptide_dir, target_structure)
@@ -94,8 +92,12 @@ class BoltzDocker(BaseDockingModel):
         """
         Process a batch of peptides on a specific GPU using Boltz.
         """
+        # raw_output_dir is like: /base/raw/boltz
+        # We need to get back to /base (go up 2 levels: remove /boltz and /raw)
+        output_dir = os.path.dirname(os.path.dirname(raw_output_dir))
+        
         temp_docker = BoltzDocker(
-            output_dir=os.path.dirname(raw_output_dir),
+            output_dir=output_dir,
             gpu_ids=[gpu_id],
             **method_params
         )
@@ -163,6 +165,10 @@ class BoltzDocker(BaseDockingModel):
         elif target_structure.lower().endswith('.pdb'):
             raise ValueError(
                 "PDB files are not supported directly. Please convert to CIF format e.g using https://mmcif.pdbj.org/converter/index.php?l=en"
+            )
+        else:
+            raise ValueError(
+                f"Unsupported file format: {target_structure}. Only .cif files are supported for Boltz."
             )
     
     def _run_boltz_prediction(self, yaml_path: str, output_dir: str, gpu_id: str = "0"):
@@ -284,7 +290,7 @@ class BoltzDocker(BaseDockingModel):
         
         logging.info(f"Created standardized metrics file: {metrics_file}")
     
-    def _extract_boltz_metrics(self, input_dir: str, peptide_sequence: str) -> Dict[str, Any]:
+    def _extract_boltz_metrics(self, input_dir: str, peptide_sequence: str) -> tuple[Dict[str, Any], int]:
         """
         Extract metrics from Boltz output files and return only the best model based on ipTM.
         """
