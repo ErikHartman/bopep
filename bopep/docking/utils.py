@@ -45,9 +45,10 @@ def extract_sequence_from_pdb(pdb_file: str, chain_id: str = "A"):
         "SEC": "U",
         "PYL": "O",
     }
+    # Use only the first model to avoid repeated sequences for NMR/multi-model structures
+    model = structure[0]
     sequence = "".join(
         aa_dict.get(residue.get_resname(), "X")
-        for model in structure
         for chain in model
         if chain.id == chain_id
         for residue in chain
