@@ -368,114 +368,112 @@ class Scorer:
         if "template_rmsd" in scores_to_include:
             scores["template_rmsd"] = align_and_compute_rmsd(template_pdb, target_pdb_file, peptide_sequence)
         
-        # Generic confidence scores (use available method)
+        # Generic confidence scores (previously exclusive; now include both method-specific if both present)
         if "peptide_plddt" in scores_to_include:
-            if has_alphafold and alphafold_model_file and has_boltz and boltz_model_file:
-                raise ValueError("Multiple methods available for 'peptide_plddt'. Use 'alphafold_peptide_plddt' or 'boltz_peptide_plddt'")
-            elif has_alphafold and alphafold_model_file:
-                peptide_plddt = get_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file)
-                scores["peptide_plddt"] = peptide_plddt
-            elif has_boltz and boltz_model_file:
-                peptide_plddt = get_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file)
-                scores["peptide_plddt"] = peptide_plddt
-            else:
+            added = False
+            if has_alphafold and alphafold_model_file:
+                scores["alphafold_peptide_plddt"] = get_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file)
+                added = True
+            if has_boltz and boltz_model_file:
+                scores["boltz_peptide_plddt"] = get_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file)
+                added = True
+            if not added:
                 raise ValueError("peptide_plddt requires docking output with model file")
+            if has_alphafold ^ has_boltz:  # only one method available -> keep generic alias
+                scores["peptide_plddt"] = scores.get("alphafold_peptide_plddt") or scores.get("boltz_peptide_plddt")
         
         if "interface_peptide_plddt" in scores_to_include:
-            if has_alphafold and alphafold_model_file and has_boltz and boltz_model_file:
-                raise ValueError("Multiple methods available for 'interface_peptide_plddt'. Use 'alphafold_interface_peptide_plddt' or 'boltz_interface_peptide_plddt'")
-            elif has_alphafold and alphafold_model_file:
-                interface_peptide_plddt = get_weighted_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file)
-                scores["interface_peptide_plddt"] = interface_peptide_plddt
-            elif has_boltz and boltz_model_file:
-                interface_peptide_plddt = get_weighted_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file)
-                scores["interface_peptide_plddt"] = interface_peptide_plddt
-            else:
+            added = False
+            if has_alphafold and alphafold_model_file:
+                scores["alphafold_interface_peptide_plddt"] = get_weighted_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file)
+                added = True
+            if has_boltz and boltz_model_file:
+                scores["boltz_interface_peptide_plddt"] = get_weighted_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file)
+                added = True
+            if not added:
                 raise ValueError("interface_peptide_plddt requires docking output with model file")
+            if has_alphafold ^ has_boltz:
+                scores["interface_peptide_plddt"] = scores.get("alphafold_interface_peptide_plddt") or scores.get("boltz_interface_peptide_plddt")
         
         if "peptide_pae" in scores_to_include:
-            if has_alphafold and alphafold_model_file and has_boltz and boltz_model_file:
-                raise ValueError("Multiple methods available for 'peptide_pae'. Use 'alphafold_peptide_pae' or 'boltz_peptide_pae'")
-            elif has_alphafold and alphafold_model_file:
-                peptide_pae = get_peptide_pae(alphafold_data.get("pae_matrix", []), alphafold_model_file)
-                scores["peptide_pae"] = peptide_pae
-            elif has_boltz and boltz_model_file:
-                peptide_pae = get_peptide_pae(boltz_data.get("pae_matrix", []), boltz_model_file)
-                scores["peptide_pae"] = peptide_pae
-            else:
-                raise ValueError("peptide_pae requires docking output with model file")
-            
-        if "peptide_pde" in scores_to_include:
+            # Normalize PAE key names
+            if "pae_matrix" not in alphafold_data and "pae" in alphafold_data:
+                alphafold_data["pae_matrix"] = alphafold_data["pae"]
+            if "pae_matrix" not in boltz_data and "pae" in boltz_data:
+                boltz_data["pae_matrix"] = boltz_data["pae"]
+            added = False
+            if has_alphafold and alphafold_model_file:
+                scores["alphafold_peptide_pae"] = get_peptide_pae(alphafold_data.get("pae_matrix", []), alphafold_model_file)
+                added = True
             if has_boltz and boltz_model_file:
-                peptide_pde = get_peptide_pde(boltz_data.get("pde_matrix", []), boltz_model_file)
-                scores["peptide_pde"] = peptide_pde
+                scores["boltz_peptide_pae"] = get_peptide_pae(boltz_data.get("pae_matrix", []), boltz_model_file)
+                added = True
+            if not added:
+                raise ValueError("peptide_pae requires docking output with model file")
+            if has_alphafold ^ has_boltz: # XOR (^) means this is only true when one method is available :)
+                scores["peptide_pae"] = scores.get("alphafold_peptide_pae") or scores.get("boltz_peptide_pae")
+        
+        if "peptide_pde" in scores_to_include:
+            # Only Boltz currently provides PDE
+            if has_boltz and boltz_model_file:
+                scores["boltz_peptide_pde"] = get_peptide_pde(boltz_data.get("pde_matrix", []), boltz_model_file)
+                scores["peptide_pde"] = scores["boltz_peptide_pde"]  # always expose generic alias since single source
             else:
                 raise ValueError("peptide_pde requires Boltz output with model file")
-            
+        
         if "intra_model_rmsd" in scores_to_include:
             if not processed_dir:
                 raise ValueError("intra_model_rmsd requires processed directory with model files")
             scores.update(compute_intra_model_rmsd(processed_dir, peptide_sequence))
         
-        # Generic docking scores (use available method)
+        # Generic docking scores (iptm) now collect both if present; generic alias only if one
         if "iptm" in scores_to_include:
-            if has_alphafold and has_boltz:
-                raise ValueError("Multiple methods available for 'iptm'. Use 'alphafold_iptm' or 'boltz_iptm'")
-            elif has_alphafold:
-                scores["iptm"] = alphafold_data.get("iptm")
-            elif has_boltz:
-                scores["iptm"] = boltz_data.get("iptm")
-            else:
+            added = False
+            if has_alphafold:
+                scores["alphafold_iptm"] = alphafold_data.get("iptm")
+                added = True
+            if has_boltz:
+                scores["boltz_iptm"] = boltz_data.get("iptm")
+                added = True
+            if not added:
                 raise ValueError("iptm requires docking output")
-            
+            if has_alphafold ^ has_boltz:
+                scores["iptm"] = scores.get("alphafold_iptm") or scores.get("boltz_iptm")
+        
         if "inter_model_rmsd" in scores_to_include:
             if has_boltz and boltz_model_file and has_alphafold and alphafold_model_file:
                 scores["inter_model_rmsd"] = align_and_compute_rmsd(boltz_model_file, alphafold_model_file, peptide_sequence)
-            else:                
+            else:
                 raise ValueError("inter_model_rmsd requires both Boltz and AlphaFold model files")
         
         if "peptide_properties" in scores_to_include:
             scores.update(peptide_properties.get_all_properties())
-        
         if "molecular_weight" in scores_to_include:
             scores["molecular_weight"] = peptide_properties.get_molecular_weight()
-        
         if "aromaticity" in scores_to_include:
             scores["aromaticity"] = peptide_properties.get_aromaticity()
-        
         if "instability_index" in scores_to_include:
             scores["instability_index"] = peptide_properties.get_instability_index()
-        
         if "isoelectric_point" in scores_to_include:
             scores["isoelectric_point"] = peptide_properties.get_isoelectric_point()
-        
         if "gravy" in scores_to_include:
             scores["gravy"] = peptide_properties.get_gravy()
-        
         if "helix_fraction" in scores_to_include:
             scores["helix_fraction"] = peptide_properties.get_helix_fraction()
-        
         if "turn_fraction" in scores_to_include:
             scores["turn_fraction"] = peptide_properties.get_turn_fraction()
-        
         if "sheet_fraction" in scores_to_include:
             scores["sheet_fraction"] = peptide_properties.get_sheet_fraction()
-        
         if "hydrophobic_aa_percent" in scores_to_include:
             scores["hydrophobic_aa_percent"] = peptide_properties.get_hydrophobic_aa_percent()
-        
         if "polar_aa_percent" in scores_to_include:
             scores["polar_aa_percent"] = peptide_properties.get_polar_aa_percent()
-        
         if "positively_charged_aa_percent" in scores_to_include:
             scores["positively_charged_aa_percent"] = peptide_properties.get_positively_charged_aa_percent()
-        
         if "negatively_charged_aa_percent" in scores_to_include:
             scores["negatively_charged_aa_percent"] = peptide_properties.get_negatively_charged_aa_percent()
-        
         if "delta_net_charge_frac" in scores_to_include:
             scores["delta_net_charge_frac"] = peptide_properties.get_delta_net_charge_frac()
-        
         if "uHrel" in scores_to_include:
             scores["uHrel"] = peptide_properties.get_uHrel()
         
