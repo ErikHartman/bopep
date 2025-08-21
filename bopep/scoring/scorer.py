@@ -243,7 +243,7 @@ class Scorer:
             scores["alphafold_interface_peptide_plddt"] = interface_peptide_plddt
 
         if "alphafold_peptide_pae" in scores_to_include:
-            peptide_pae = get_peptide_pae(alphafold_data.get("pae_matrix", []), alphafold_model_file)
+            peptide_pae = get_peptide_pae(alphafold_data.get("pae", []), alphafold_model_file)
             scores["alphafold_peptide_pae"] = peptide_pae
 
         # Boltz docking scores
