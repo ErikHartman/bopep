@@ -1,9 +1,8 @@
 from typing import Tuple
-from Bio.PDB import PDBParser
+from Bio.PDB import PDBParser, MMCIFParser
 import numpy as np
 from scipy.spatial import cKDTree
 import os
-import re
 import math
 
 
@@ -88,7 +87,10 @@ def get_binding_site(
         (receptor_binding_site_atoms, receptor_binding_site_residue_indices,
          peptide_binding_site_residue_indices, peptide_atoms)
     """
-    parser = PDBParser(QUIET=True)
+    if pdb_file.endswith('.cif'):
+        parser = MMCIFParser(QUIET=True)
+    else:
+        parser = PDBParser(QUIET=True)
     try:
         structure = parser.get_structure("docked", pdb_file)
     except Exception as e:
