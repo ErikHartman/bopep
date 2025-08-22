@@ -36,7 +36,7 @@ def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
     )
     """
     if pdb_file_path.endswith('.cif'):
-        parser = MMCIFParser(QUIET=True)
+        parser = MMCIFParser(QUIET=True, auth_residues=False)
     else:
         parser = PDBParser(QUIET=True)
     structure = parser.get_structure("complex", pdb_file_path)

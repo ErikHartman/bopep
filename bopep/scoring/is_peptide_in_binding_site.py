@@ -88,7 +88,7 @@ def get_binding_site(
          peptide_binding_site_residue_indices, peptide_atoms)
     """
     if pdb_file.endswith('.cif'):
-        parser = MMCIFParser(QUIET=True)
+        parser = MMCIFParser(QUIET=True, auth_residues=False)
     else:
         parser = PDBParser(QUIET=True)
     try:
@@ -106,6 +106,12 @@ def get_binding_site(
         min_peptide_residue_id = min(
             residue.id[1]
             for residue in peptide_chain.get_residues()
+            if residue.id[0] == " "
+        )
+
+        min_receptor_residue_id = min(
+            residue.id[1]
+            for residue in receptor_chain.get_residues()
             if residue.id[0] == " "
         )
 
@@ -129,7 +135,7 @@ def get_binding_site(
             indices = peptide_tree.query_ball_point(atom.coord, threshold)
             if indices:
                 receptor_binding_site_residue_indices.add(
-                    atom.get_parent().id[1]
+                    atom.get_parent().id[1] - min_receptor_residue_id # TODO: We need to check if this is correct
                 ) # E4
                 for idx in indices:
                     peptide_binding_site_residue_indices.add(
