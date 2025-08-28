@@ -278,10 +278,12 @@ class Scorer:
             scores["boltz_protein_iptm"] = boltz_data.get("protein_iptm")
         
         if "boltz_chain_0_ptm" in scores_to_include:
-            scores["boltz_chain_0_ptm"] = boltz_data.get("chain_0_ptm")
+            chains_ptm = boltz_data.get("chains_ptm", {})
+            scores["boltz_chain_0_ptm"] = chains_ptm.get("0")
         
         if "boltz_chain_1_ptm" in scores_to_include:
-            scores["boltz_chain_1_ptm"] = boltz_data.get("chain_1_ptm")
+            chains_ptm = boltz_data.get("chains_ptm", {})
+            scores["boltz_chain_1_ptm"] = chains_ptm.get("1")
         
         # Boltz structural scores
         if "boltz_rosetta_score" in scores_to_include:
