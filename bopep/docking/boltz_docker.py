@@ -41,6 +41,7 @@ class BoltzDocker(BaseDockingModel):
         self.output_format = kwargs.get("output_format", "pdb")
         self.sampling_steps = kwargs.get("sampling_steps", 200)
         self.step_scale = kwargs.get("step_scale", 1.638)
+        self.cache = kwargs.get("cache") or kwargs.get("cache_dir")
         
     def dock(self, peptide_sequences: List[str], target_structure: str, 
              target_sequence: str, target_name: str) -> List[str]:
@@ -76,7 +77,7 @@ class BoltzDocker(BaseDockingModel):
         """
         Get Boltz-specific parameters for parallel processing.
         """
-        return {
+        params = {
             'recycling_steps': self.recycling_steps,
             'diffusion_samples': self.diffusion_samples,
             'output_format': self.output_format,
@@ -84,6 +85,7 @@ class BoltzDocker(BaseDockingModel):
             'step_scale': self.step_scale,
             'overwrite_results': self.overwrite_results
         }
+        return params
     
     @staticmethod
     def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
@@ -108,7 +110,7 @@ class BoltzDocker(BaseDockingModel):
                 peptide, target_structure, target_sequence, target_name, gpu_id
             )
             docked_dirs.append(dir_path)
- 
+        
         
         return docked_dirs
     
@@ -186,6 +188,8 @@ class BoltzDocker(BaseDockingModel):
             "--step_scale", str(self.step_scale)
         ]
         
+        if getattr(self, 'cache', None):
+            cmd.extend(["--cache", self.cache])
         
         if self.overwrite_results:
             cmd.append("--override")
@@ -193,6 +197,8 @@ class BoltzDocker(BaseDockingModel):
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = gpu_id
         env.pop("MPLBACKEND", None)
+        if getattr(self, 'cache', None):
+            env["BOLTZ_CACHE"] = self.cache
         
         logging.info(f"Running Boltz command: {' '.join(cmd)}")
         
@@ -404,4 +410,4 @@ class BoltzDocker(BaseDockingModel):
                     metrics["pde_matrix"] = pde_matrix  # Updated key name
                     logging.info(f"Extracted PDE matrix for model {best_model_id} with shape: {np.array(pde_matrix).shape}")
 
-                
+

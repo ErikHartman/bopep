@@ -1,9 +1,8 @@
 from typing import Tuple
-from Bio.PDB import PDBParser
+from Bio.PDB import PDBParser, MMCIFParser
 import numpy as np
 from scipy.spatial import cKDTree
 import os
-import re
 import math
 
 
@@ -88,7 +87,10 @@ def get_binding_site(
         (receptor_binding_site_atoms, receptor_binding_site_residue_indices,
          peptide_binding_site_residue_indices, peptide_atoms)
     """
-    parser = PDBParser(QUIET=True)
+    if pdb_file.endswith('.cif'):
+        parser = MMCIFParser(QUIET=True, auth_residues=False)
+    else:
+        parser = PDBParser(QUIET=True)
     try:
         structure = parser.get_structure("docked", pdb_file)
     except Exception as e:
@@ -104,6 +106,12 @@ def get_binding_site(
         min_peptide_residue_id = min(
             residue.id[1]
             for residue in peptide_chain.get_residues()
+            if residue.id[0] == " "
+        )
+
+        min_receptor_residue_id = min(
+            residue.id[1]
+            for residue in receptor_chain.get_residues()
             if residue.id[0] == " "
         )
 
@@ -127,7 +135,7 @@ def get_binding_site(
             indices = peptide_tree.query_ball_point(atom.coord, threshold)
             if indices:
                 receptor_binding_site_residue_indices.add(
-                    atom.get_parent().id[1]
+                    atom.get_parent().id[1] - min_receptor_residue_id # TODO: We need to check if this is correct
                 ) # E4
                 for idx in indices:
                     peptide_binding_site_residue_indices.add(
@@ -166,16 +174,15 @@ def is_peptide_in_binding_site_pdb_file(
         pdb_file, threshold=threshold
     )
 
+    nr_contact_residues = 0
     if binding_site_residue_indices is not None:
         # if any receptor_binding_site_indices is in the binding_site_residue_indices, return True
-        nr_contact_residues = 0
         for receptor_index in receptor_binding_site_indices:
             if receptor_index in binding_site_residue_indices:
                 nr_contact_residues += 1
 
     if nr_contact_residues >= required_n_contact_residues:
         return nr_contact_residues, True
-
     else:
         return nr_contact_residues, False
 

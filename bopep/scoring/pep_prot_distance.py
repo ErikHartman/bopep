@@ -6,7 +6,7 @@ Distance-based loss function for protein-peptide interactions.
 """
 
 
-def distance_score_from_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B", threshold=8.0):
+def distance_score_from_pdb(pdb_file_path : str, receptor_chain : str ="A", peptide_chain : str ="B", threshold : float = 8.0):
     """
     1) Parses the PDB to get coordinates/bfactors
     2) Computes the distance-based score
