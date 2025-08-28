@@ -174,16 +174,15 @@ def is_peptide_in_binding_site_pdb_file(
         pdb_file, threshold=threshold
     )
 
+    nr_contact_residues = 0
     if binding_site_residue_indices is not None:
         # if any receptor_binding_site_indices is in the binding_site_residue_indices, return True
-        nr_contact_residues = 0
         for receptor_index in receptor_binding_site_indices:
             if receptor_index in binding_site_residue_indices:
                 nr_contact_residues += 1
 
     if nr_contact_residues >= required_n_contact_residues:
         return nr_contact_residues, True
-
     else:
         return nr_contact_residues, False
 

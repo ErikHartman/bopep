@@ -227,11 +227,17 @@ class Scorer:
             scores["alphafold_n_contacts"] = n_contacts
         
         if "alphafold_in_binding_site_score" in scores_to_include:
-            scores["alphafold_in_binding_site_score"] = smooth_peptide_binding_site_score(
-                alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+            if binding_site_residue_indices is not None:
+                scores["alphafold_in_binding_site_score"] = smooth_peptide_binding_site_score(
+                    alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+            else:
+                scores["alphafold_in_binding_site_score"] = None
         
         if "alphafold_template_rmsd" in scores_to_include:
-            scores["alphafold_template_rmsd"] = align_and_compute_rmsd(template_pdb, alphafold_model_file, peptide_sequence)
+            if template_pdb is not None:
+                scores["alphafold_template_rmsd"] = align_and_compute_rmsd(template_pdb, alphafold_model_file, peptide_sequence)
+            else:
+                scores["alphafold_template_rmsd"] = None
         
         # AlphaFold confidence scores
         if "alphafold_peptide_plddt" in scores_to_include:
@@ -308,11 +314,17 @@ class Scorer:
             scores["boltz_n_contacts"] = n_contacts
         
         if "boltz_in_binding_site_score" in scores_to_include:
-            scores["boltz_in_binding_site_score"] = smooth_peptide_binding_site_score(
-                boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+            if binding_site_residue_indices is not None:
+                scores["boltz_in_binding_site_score"] = smooth_peptide_binding_site_score(
+                    boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+            else:
+                scores["boltz_in_binding_site_score"] = None
         
         if "boltz_template_rmsd" in scores_to_include:
-            scores["boltz_template_rmsd"] = align_and_compute_rmsd(template_pdb, boltz_model_file, peptide_sequence)
+            if template_pdb is not None:
+                scores["boltz_template_rmsd"] = align_and_compute_rmsd(template_pdb, boltz_model_file, peptide_sequence)
+            else:
+                scores["boltz_template_rmsd"] = None
         
         # Boltz confidence scores
         if "boltz_peptide_plddt" in scores_to_include:
@@ -362,11 +374,17 @@ class Scorer:
             scores["n_contacts"] = n_contacts
         
         if "in_binding_site_score" in scores_to_include:
-            scores["in_binding_site_score"] = smooth_peptide_binding_site_score(
-                target_pdb_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+            if binding_site_residue_indices is not None:
+                scores["in_binding_site_score"] = smooth_peptide_binding_site_score(
+                    target_pdb_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+            else:
+                scores["in_binding_site_score"] = None
         
         if "template_rmsd" in scores_to_include:
-            scores["template_rmsd"] = align_and_compute_rmsd(template_pdb, target_pdb_file, peptide_sequence)
+            if template_pdb is not None:
+                scores["template_rmsd"] = align_and_compute_rmsd(template_pdb, target_pdb_file, peptide_sequence)
+            else:
+                scores["template_rmsd"] = None
         
         # Generic confidence scores (previously exclusive; now include both method-specific if both present)
         if "peptide_plddt" in scores_to_include:
@@ -499,7 +517,7 @@ class Scorer:
         scores_to_include : list
             List of score names to include (same as in score method)
         inputs : list
-            List of inputs based on input_type (pdb_files, colab_dirs, or peptide_sequences)
+            List of inputs based on input_type (pdb_files, processed_dir, or peptide_sequences)
         input_type : str
             Type of input: "pdb_file", "processed_dir", or "peptide_sequence"
         binding_site_residue_indices : list, optional
