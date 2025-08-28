@@ -5,11 +5,11 @@ import os
 import glob
 from itertools import combinations
 
-def rmsd(coords1, coords2):
+def rmsd(coords1 : np.ndarray, coords2 : np.ndarray) -> float:
     return np.sqrt(np.mean(np.sum((coords1 - coords2) ** 2, axis=1)))
 
 def align_and_compute_rmsd(
-    ref_pdb_file, pdb_file, peptide_sequence,
+    ref_pdb_file : str, pdb_file : str, peptide_sequence :str,
 ):
     """
     Given multiple PDBs, align each structure's receptor (chain A by default)
@@ -52,7 +52,7 @@ def align_and_compute_rmsd(
     return rmsd(ref_pep_coords, new_pep_coords_aligned)
 
 
-def compute_intra_model_rmsd(processed_dir, peptide_sequence):
+def compute_intra_model_rmsd(processed_dir : str, peptide_sequence : str):
     """
     Compute intra-model RMSD metrics for peptide chains within and across docking methods.
     """

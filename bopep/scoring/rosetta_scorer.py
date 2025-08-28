@@ -1,5 +1,5 @@
 class RosettaScorer:
-    def __init__(self, pdb_file):
+    def __init__(self, pdb_file : str):
         self.pdb_file = pdb_file
         self.initialized = False
         self.scorefxn = None

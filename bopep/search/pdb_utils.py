@@ -50,6 +50,12 @@ def _check_binding_site_residue_indices(
     
     if binding_site_residue_indices is None:
         return None
+    
+    for residue in binding_site_residue_indices:
+        if residue < 0 or residue >= len(protein_sequence):
+            raise ValueError(
+                f"Binding site residue index {residue} is out of range for protein sequence of length {len(protein_sequence)}"
+            )
 
     # Handle both list and dict formats
     is_dict_format = isinstance(binding_site_residue_indices, dict)
@@ -114,7 +120,9 @@ def _check_binding_site_residue_indices(
     for residue_idx in residues_to_check:
         if residue_idx < 0 or residue_idx >= len(protein_sequence):
             print(f"Warning: Residue index {residue_idx} out of range")
-            continue
+            raise ValueError(
+                f"Binding site residue index {residue_idx} is out of range for protein sequence of length {len(protein_sequence)}"
+            )
 
         # Calculate start and end positions for context
         start = max(0, residue_idx - context_size)

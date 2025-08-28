@@ -3,7 +3,7 @@ import multiprocessing
 import traceback
 import json
 import glob
-from typing import Optional, List
+from typing import Optional
 from bopep.scoring.pep_prot_distance import distance_score_from_pdb
 from bopep.scoring.rosetta_scorer import RosettaScorer
 from bopep.scoring.is_peptide_in_binding_site import (

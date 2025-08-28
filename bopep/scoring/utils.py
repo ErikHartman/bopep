@@ -5,7 +5,7 @@ import os
 import json
 import re
 
-def find_relaxed_pdb_file(colab_dir):
+def find_relaxed_pdb_file(colab_dir : str):
     """
     Finds the relaxed rank_001 PDB file in the colab directory.
     
@@ -21,7 +21,7 @@ def find_relaxed_pdb_file(colab_dir):
     return None
 
 
-def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
+def parse_pdb(pdb_file_path : str, receptor_chain : str="A", peptide_chain : str="B"):
     """
     Parses a PDB file using BioPython and returns coordinates & B-factors
     for receptor and peptide atoms separately.
@@ -64,7 +64,7 @@ def parse_pdb(pdb_file_path, receptor_chain="A", peptide_chain="B"):
     return receptor_coords, peptide_coords
 
 
-def get_plDDT_from_dir(colab_dir, rank_num : int = 1):
+def get_plDDT_from_dir(colab_dir : str, rank_num : int = 1):
     """
     Extracts the plDDT score from an unzipped docking result directory.
     """
@@ -91,7 +91,7 @@ def get_plDDT_from_dir(colab_dir, rank_num : int = 1):
         print(f"Error reading JSON file: {e}")
         return None
 
-def get_chain_sequences(pdb_file):
+def get_chain_sequences(pdb_file : str):
      if pdb_file.endswith('.cif'):
          parser = MMCIFParser(QUIET=True)
      else:
@@ -102,7 +102,7 @@ def get_chain_sequences(pdb_file):
          for residue in chain if residue.id[0] == ' '
      ]) for model in structure for chain in model}
 
-def match_and_truncate(ref_seq, ref_coords, target_seq, target_coords):
+def match_and_truncate(ref_seq :  str, ref_coords : list, target_seq : str, target_coords : list):
     if ref_seq in target_seq:
         i = target_seq.index(ref_seq)
         return ref_coords, target_coords[i:i+len(ref_seq)]
