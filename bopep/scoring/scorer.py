@@ -36,6 +36,7 @@ class Scorer:
             "distance_score",
             "in_binding_site", 
             "in_binding_site_score", 
+            "n_contacts",
 
             "peptide_plddt", 
             "peptide_pae",
@@ -245,9 +246,9 @@ class Scorer:
         generic_model_dependent_scores = [
             "iptm", "rosetta_score", "interface_sasa", "interface_dG", 
             "interface_delta_hbond_unsat", "packstat", "distance_score",
-            "in_binding_site", "in_binding_site_score", "peptide_plddt", 
-            "interface_peptide_plddt", "peptide_pae", "template_rmsd",
-            "receptor_contacts"
+            "in_binding_site", "in_binding_site_score", "n_contacts",
+            "peptide_plddt", "interface_peptide_plddt", "peptide_pae", 
+            "template_rmsd", "receptor_contacts"
         ]
         
         for score in scores_to_include:
