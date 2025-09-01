@@ -41,7 +41,6 @@ class Scorer:
             "peptide_plddt", 
             "peptide_pae",
             "interface_peptide_plddt",
-            "intra_model_rmsd",
             "receptor_contacts"
         ] 
         self.peptide_property_scores = [
@@ -78,7 +77,14 @@ class Scorer:
             ]
         }
 
-        self.special_scores = ["inter_model_rmsd", "template_rmsd"]
+        self.special_scores = [
+            "inter_model_rmsd", 
+            "template_rmsd",
+            "intra_model_rmsd",
+            "intra_alphafold_mean_rmsd",
+            "intra_boltz_mean_rmsd", 
+            "intra_all_mean_rmsd"
+        ]
         
         
         all_method_specific = []
@@ -169,6 +175,20 @@ class Scorer:
         # Special scores
         if both_models_available:
             available_scores.append("inter_model_rmsd")
+            # Intra-model RMSD scores are available when we have processed directory with multiple models
+            if processed_dir:
+                available_scores.append("intra_model_rmsd")  # Returns all three
+                available_scores.append("intra_alphafold_mean_rmsd")
+                available_scores.append("intra_boltz_mean_rmsd")
+                available_scores.append("intra_all_mean_rmsd")
+        elif processed_dir:
+            # Individual method intra-RMSD scores when only one method available
+            if has_alphafold:
+                available_scores.append("intra_alphafold_mean_rmsd")
+            if has_boltz:
+                available_scores.append("intra_boltz_mean_rmsd")
+            # Generic intra_model_rmsd when only one method
+            available_scores.append("intra_model_rmsd")
         
         # Template RMSD scores - only if template provided
         if template_pdb is not None:
@@ -271,6 +291,11 @@ class Scorer:
             "template_rmsd", "alphafold_template_rmsd", "boltz_template_rmsd"
         ]
         
+        intra_rmsd_scores = [
+            "intra_model_rmsd", "intra_alphafold_mean_rmsd", 
+            "intra_boltz_mean_rmsd", "intra_all_mean_rmsd"
+        ]
+        
         for score in scores_to_include:
             if score in binding_site_scores and binding_site_residue_indices is None:
                 raise ValueError(
@@ -280,6 +305,11 @@ class Scorer:
             if score in template_rmsd_scores and template_pdb is None:
                 raise ValueError(
                     f"Score '{score}' requires template_pdb parameter to be provided."
+                )
+            
+            if score in intra_rmsd_scores and processed_dir is None:
+                raise ValueError(
+                    f"Score '{score}' requires processed_dir parameter to be provided."
                 )
             
             if score == "inter_model_rmsd" and not both_models_available:
@@ -624,6 +654,19 @@ class Scorer:
             if not processed_dir:
                 raise ValueError("intra_model_rmsd requires processed directory with model files")
             scores.update(compute_intra_model_rmsd(processed_dir, peptide_sequence))
+        
+        # Individual intra-model RMSD scores
+        if any(score in scores_to_include for score in ["intra_alphafold_mean_rmsd", "intra_boltz_mean_rmsd", "intra_all_mean_rmsd"]):
+            if not processed_dir:
+                raise ValueError("Intra-model RMSD scores require processed directory with model files")
+            intra_rmsd_results = compute_intra_model_rmsd(processed_dir, peptide_sequence)
+            
+            if "intra_alphafold_mean_rmsd" in scores_to_include:
+                scores["intra_alphafold_mean_rmsd"] = intra_rmsd_results.get("intra_alphafold_mean_rmsd")
+            if "intra_boltz_mean_rmsd" in scores_to_include:
+                scores["intra_boltz_mean_rmsd"] = intra_rmsd_results.get("intra_boltz_mean_rmsd")
+            if "intra_all_mean_rmsd" in scores_to_include:
+                scores["intra_all_mean_rmsd"] = intra_rmsd_results.get("intra_all_mean_rmsd")
         
         # Generic docking scores (iptm) now collect both if present; generic alias only if one
         if "iptm" in scores_to_include:
