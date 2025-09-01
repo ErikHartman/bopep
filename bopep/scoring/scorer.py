@@ -246,7 +246,8 @@ class Scorer:
             "iptm", "rosetta_score", "interface_sasa", "interface_dG", 
             "interface_delta_hbond_unsat", "packstat", "distance_score",
             "in_binding_site", "in_binding_site_score", "peptide_plddt", 
-            "interface_peptide_plddt", "peptide_pae", "template_rmsd"
+            "interface_peptide_plddt", "peptide_pae", "template_rmsd",
+            "receptor_contacts"
         ]
         
         for score in scores_to_include:
@@ -382,6 +383,11 @@ class Scorer:
         if "alphafold_distance_score" in scores_to_include:
             scores["alphafold_distance_score"] = distance_score_from_pdb(alphafold_model_file)
         
+        if "alphafold_receptor_contacts" in scores_to_include:
+            scores["alphafold_receptor_contacts"] = get_receptor_contacts(
+                alphafold_model_file, "A", "B", binding_site_distance_threshold
+            )
+        
         if "alphafold_in_binding_site" in scores_to_include:
             n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
                 alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
@@ -470,6 +476,11 @@ class Scorer:
         
         if "boltz_distance_score" in scores_to_include:
             scores["boltz_distance_score"] = distance_score_from_pdb(boltz_model_file)
+        
+        if "boltz_receptor_contacts" in scores_to_include:
+            scores["boltz_receptor_contacts"] = get_receptor_contacts(
+                boltz_model_file, "A", "B", binding_site_distance_threshold
+            )
         
         if "boltz_in_binding_site" in scores_to_include:
             n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
