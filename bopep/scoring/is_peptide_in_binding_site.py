@@ -162,6 +162,11 @@ def get_binding_site(
         print(f"Chain not found in structure: {e}")
         return [], [], [], []
 
+def get_receptor_contacts(pdb_file: str,
+    receptor_chain: str = "A",
+    peptide_chain: str = "B",
+    threshold: float = 5.0,):
+    return get_binding_site(pdb_file, receptor_chain, peptide_chain, threshold)[1]
 
 def is_peptide_in_binding_site_pdb_file(
     pdb_file: str, binding_site_residue_indices: list = None, threshold: float = 5.0, required_n_contact_residues: int = 2
@@ -285,7 +290,9 @@ def smooth_peptide_binding_site_score(
 
 
 if __name__ == "__main__":
-    docked_pdb = "/home/er8813ha/bopep/examples/docking/processed/4glf_NYLSELSEHV/alphafold_model_1.pdb"
+    docked_pdb = "/srv/data1/er8813ha/bopep/docked/cd14_processed/processed/4glf_NENARQQLERQNK/boltz_model_1.pdb"
+
+    docked_test_ = "/srv/data1/er8813ha/bopep/docked/cd14_processed/processed/4glf_NENARQQLERQNK/boltz_model_1.pdb"
     
     bsri = [22, 23, 24, 42, 43, 44, 45, 46, 47, 48, 49, 
             50, 51, 52, 53, 69, 70, 71, 72,
@@ -314,3 +321,6 @@ if __name__ == "__main__":
             processed_dir, binding_site_residue_indices=bsri, threshold=5.0, required_n_contact_residues=5
         )
         print(f"Processed directory result: {result}")
+
+
+    print(get_receptor_contacts(docked_test_, "A","B", 5.0))

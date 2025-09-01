@@ -9,6 +9,7 @@ from bopep.scoring.rosetta_scorer import RosettaScorer
 from bopep.scoring.is_peptide_in_binding_site import (
     is_peptide_in_binding_site_pdb_file,
     smooth_peptide_binding_site_score,
+    get_receptor_contacts
 )
 from bopep.scoring.model_overlap import align_and_compute_rmsd, compute_intra_model_rmsd
 from bopep.scoring.peptide_properties import PeptideProperties
@@ -40,6 +41,7 @@ class Scorer:
             "peptide_pae",
             "interface_peptide_plddt",
             "intra_model_rmsd",
+            "receptor_contacts"
         ] 
         self.peptide_property_scores = [
             "peptide_properties",
@@ -85,8 +87,8 @@ class Scorer:
             all_method_specific.extend([f"{method}_{score}" for score in self.core_docking_scores])
             all_method_specific.extend([f"{method}_{score}" for score in self.structural_scores])
             
-        
-        self.available_scores = (
+        # Store all possible scores for the property
+        self._all_possible_scores = (
             self.core_docking_scores + 
             self.structural_scores +
             self.peptide_property_scores + 
@@ -94,6 +96,119 @@ class Scorer:
         )
         
         self.supported_methods = ["alphafold", "boltz"]
+
+    def get_available_scores(self, 
+                           processed_dir=None, 
+                           pdb_file=None, 
+                           binding_site_residue_indices=None,
+                           template_pdb=None):
+        """
+        Get scores available for the given context.
+        
+        Parameters
+        ----------
+        processed_dir : str, optional
+            Path to processed directory to check for available models
+        pdb_file : str, optional
+            Path to PDB file if using single file input
+        binding_site_residue_indices : list, optional
+            Binding site residue indices - required for binding site scores
+        template_pdb : str, optional
+            Template PDB file - required for template RMSD scores
+            
+        Returns
+        -------
+        list
+            List of scores available for the given context
+        """
+        # Determine what models are available
+        has_alphafold = False
+        has_boltz = False
+        
+        if processed_dir:
+            has_alphafold = os.path.exists(os.path.join(processed_dir, "alphafold_metrics.json"))
+            has_boltz = os.path.exists(os.path.join(processed_dir, "boltz_metrics.json"))
+        elif pdb_file:
+            # Single PDB file - assume no method-specific data
+            has_alphafold = False
+            has_boltz = False
+        
+        both_models_available = has_alphafold and has_boltz
+        
+        # Start with all possible scores
+        available_scores = []
+        
+        # Always available: peptide property scores
+        available_scores.extend(self.peptide_property_scores)
+        
+        # Model-dependent scores
+        if has_alphafold:
+            # AlphaFold-specific scores
+            available_scores.extend([f"alphafold_{score}" for score in self.core_docking_scores])
+            available_scores.extend([f"alphafold_{score}" for score in self.structural_scores])
+            
+            # Generic scores only if no conflict with Boltz
+            if not both_models_available:
+                available_scores.extend(self.core_docking_scores)
+                available_scores.extend(self.structural_scores)
+        
+        if has_boltz:
+            # Boltz-specific scores
+            boltz_specific = self.method_specific_scores["boltz"]
+            available_scores.extend(boltz_specific)
+            available_scores.extend([f"boltz_{score}" for score in boltz_specific])
+            available_scores.extend([f"boltz_{score}" for score in self.core_docking_scores])
+            available_scores.extend([f"boltz_{score}" for score in self.structural_scores])
+            
+            # Generic scores only if no conflict with AlphaFold
+            if not both_models_available:
+                available_scores.extend(self.core_docking_scores)
+                available_scores.extend(self.structural_scores)
+        
+        # Special scores
+        if both_models_available:
+            available_scores.append("inter_model_rmsd")
+        
+        # Template RMSD scores - only if template provided
+        if template_pdb is not None:
+            if has_alphafold:
+                available_scores.append("alphafold_template_rmsd")
+            if has_boltz:
+                available_scores.append("boltz_template_rmsd")
+            if not both_models_available:
+                available_scores.append("template_rmsd")
+        
+        # Binding site scores - only if binding site indices provided
+        if binding_site_residue_indices is not None:
+            binding_site_scores = ["in_binding_site", "in_binding_site_score"]
+            
+            if has_alphafold:
+                available_scores.extend([f"alphafold_{score}" for score in binding_site_scores])
+            if has_boltz:
+                available_scores.extend([f"boltz_{score}" for score in binding_site_scores])
+            if not both_models_available:
+                available_scores.extend(binding_site_scores)
+        
+        # Single PDB file scores (when no processed_dir)
+        if pdb_file and not processed_dir:
+            generic_structural = ["rosetta_score", "interface_sasa", "interface_dG", 
+                                "interface_delta_hbond_unsat", "packstat", "distance_score"]
+            available_scores.extend(generic_structural)
+            
+            if binding_site_residue_indices is not None:
+                available_scores.extend(["in_binding_site", "in_binding_site_score"])
+            if template_pdb is not None:
+                available_scores.append("template_rmsd")
+        
+        return sorted(list(set(available_scores)))
+
+    @property 
+    def available_scores(self):
+        """
+        All possible scores (for backward compatibility).
+        For context-aware scores, use get_available_scores() instead.
+        """
+        return self._all_possible_scores
 
     def score(
         self,
@@ -117,6 +232,59 @@ class Scorer:
             if score not in self.available_scores:
                 raise ValueError(f"ERROR: '{score}' is not a valid score. Available scores: {self.available_scores}")
 
+        # Determine what models are available
+        has_alphafold = False
+        has_boltz = False
+        if processed_dir:
+            has_alphafold = os.path.exists(os.path.join(processed_dir, "alphafold_metrics.json"))
+            has_boltz = os.path.exists(os.path.join(processed_dir, "boltz_metrics.json"))
+        
+        both_models_available = has_alphafold and has_boltz
+        
+        # Validate model-dependent generic scores
+        generic_model_dependent_scores = [
+            "iptm", "rosetta_score", "interface_sasa", "interface_dG", 
+            "interface_delta_hbond_unsat", "packstat", "distance_score",
+            "in_binding_site", "in_binding_site_score", "peptide_plddt", 
+            "interface_peptide_plddt", "peptide_pae", "template_rmsd"
+        ]
+        
+        for score in scores_to_include:
+            if score in generic_model_dependent_scores and both_models_available:
+                alphafold_version = f"alphafold_{score}"
+                boltz_version = f"boltz_{score}"
+                raise ValueError(
+                    f"Generic score '{score}' requested but both AlphaFold and Boltz models available. "
+                    f"Use '{alphafold_version}' and/or '{boltz_version}' instead for explicit results."
+                )
+        
+        # Validate parameter dependencies
+        binding_site_scores = [
+            "in_binding_site", "in_binding_site_score",
+            "alphafold_in_binding_site", "alphafold_in_binding_site_score", 
+            "boltz_in_binding_site", "boltz_in_binding_site_score"
+        ]
+        
+        template_rmsd_scores = [
+            "template_rmsd", "alphafold_template_rmsd", "boltz_template_rmsd"
+        ]
+        
+        for score in scores_to_include:
+            if score in binding_site_scores and binding_site_residue_indices is None:
+                raise ValueError(
+                    f"Score '{score}' requires binding_site_residue_indices parameter to be provided."
+                )
+            
+            if score in template_rmsd_scores and template_pdb is None:
+                raise ValueError(
+                    f"Score '{score}' requires template_pdb parameter to be provided."
+                )
+            
+            if score == "inter_model_rmsd" and not both_models_available:
+                raise ValueError(
+                    f"Score 'inter_model_rmsd' requires both AlphaFold and Boltz models to be available."
+                )
+
         scores = {}
         
         # Determine peptide sequence
@@ -138,12 +306,6 @@ class Scorer:
         
         if not peptide_sequence:
             raise ValueError("Peptide sequence is required")
-        
-        has_alphafold = False
-        has_boltz = False
-        if processed_dir:
-            has_alphafold = os.path.exists(os.path.join(processed_dir, "alphafold_metrics.json"))
-            has_boltz = os.path.exists(os.path.join(processed_dir, "boltz_metrics.json"))
         
         # Load all data upfront
         alphafold_data = {}
@@ -387,7 +549,12 @@ class Scorer:
                 scores["template_rmsd"] = align_and_compute_rmsd(template_pdb, target_pdb_file, peptide_sequence)
             else:
                 scores["template_rmsd"] = None
-        
+
+        if "receptor_contacts" in scores_to_include:
+            scores["receptor_contacts"] = get_receptor_contacts(
+                target_pdb_file, "A", "B", binding_site_distance_threshold
+            )
+
         # Generic confidence scores (previously exclusive; now include both method-specific if both present)
         if "peptide_plddt" in scores_to_include:
             added = False
@@ -656,44 +823,29 @@ class Scorer:
                 peptide_sequence=input_value,
             )
 
-    def get_available_scores(self):
-        return self.available_scores
-
 
 if __name__ == "__main__":
-    pdb_file_path = "/home/er8813ha/bopep/examples/docking/both_docking_output/processed/4glf_NYLSELSEHV/alphafold_model_1.pdb"
-    processed_dir_path = "/home/er8813ha/bopep/examples/docking/both_docking_output/processed/4glf_NYLSELSEHV"  # Example processed directory
+    pdb_file_path = "/srv/data1/er8813ha/bopep/docked/cd14_processed/processed/4glf_NENARQQLERQNK/boltz_model_1.pdb"
     scorer = Scorer()
 
-    # Single score example
-    scores = scorer.score(scores_to_include=["rosetta_score"], pdb_file=pdb_file_path)
-    print(f"Rosetta score for {pdb_file_path}: {scores}")
-
-    # Example with processed directory (commented out as path may not exist)
-    # scores = scorer.score(
-    #     scores_to_include=[
-    #         "iptm",
-    #         "rosetta_score",
-    #         "uHrel",
-    #         "peptide_plddt",
-    #         "in_binding_site",
-    #         "in_binding_site_score",
-    #     ],
-    #     processed_dir=processed_dir_path,
-    #     binding_site_residue_indices=[
-    #         110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120,
-    #         121, 122, 123, 124, 125, 126, 127, 128,
-    #     ],
-    # )
-    # print(f"Scores for {processed_dir_path}: {scores}")
-
-    # Batch scoring example
-    peptide_sequences = ["ACDEFGH", "KLMNPQRS", "TVWY"]
-    batch_scores = scorer.score_batch(
-        scores_to_include=["molecular_weight", "gravy", "helix_fraction"],
-        inputs=peptide_sequences,
-        input_type="peptide_sequence",
-        n_jobs=3,
+    # Test dynamic available scores
+    print("All possible scores:", len(scorer.available_scores))
+    
+    # Test with binding site parameters
+    binding_site_indices = list(range(1, 70))
+    available_with_bs = scorer.get_available_scores(
+        pdb_file=pdb_file_path,
+        binding_site_residue_indices=binding_site_indices
     )
+    print("Available scores with binding site:", len(available_with_bs))
+    
+    # Test without binding site parameters
+    available_no_bs = scorer.get_available_scores(pdb_file=pdb_file_path)
+    print("Available scores without binding site:", len(available_no_bs))
 
-    print(f"Batch scores for {len(peptide_sequences)} peptides: {batch_scores}")
+    # Single score example
+    scores = scorer.score(
+        scores_to_include=["molecular_weight"], 
+        pdb_file=pdb_file_path
+    )
+    print(f"Molecular weight score: {scores}")
