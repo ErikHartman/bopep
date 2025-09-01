@@ -146,7 +146,7 @@ def get_binding_site(
         receptor_binding_site_atoms = [
             atom
             for residue in receptor_chain
-            if residue.id[1] in receptor_binding_site_residue_indices
+            if (residue.id[1] - min_receptor_residue_id) in receptor_binding_site_residue_indices
             for atom in residue.get_atoms()
         ]            
 
