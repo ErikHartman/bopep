@@ -62,7 +62,7 @@ class Scorer:
         ]
         
         self.method_specific_scores = {
-            "alphafold": [],
+            "alphafold": ["template_rmsd"],
             "boltz": [
                 "peptide_pde",
                 "confidence_score", 
@@ -73,7 +73,8 @@ class Scorer:
                 "ligand_iptm", 
                 "protein_iptm", 
                 "chain_0_ptm", 
-                "chain_1_ptm"
+                "chain_1_ptm",
+                "template_rmsd"
             ]
         }
 
@@ -262,23 +263,7 @@ class Scorer:
         
         both_models_available = has_alphafold and has_boltz
         
-        # Validate model-dependent generic scores
-        generic_model_dependent_scores = [
-            "iptm", "rosetta_score", "interface_sasa", "interface_dG", 
-            "interface_delta_hbond_unsat", "packstat", "distance_score",
-            "in_binding_site", "in_binding_site_score", "n_contacts",
-            "peptide_plddt", "interface_peptide_plddt", "peptide_pae", 
-            "template_rmsd", "receptor_contacts"
-        ]
-        
-        for score in scores_to_include:
-            if score in generic_model_dependent_scores and both_models_available:
-                alphafold_version = f"alphafold_{score}"
-                boltz_version = f"boltz_{score}"
-                raise ValueError(
-                    f"Generic score '{score}' requested but both AlphaFold and Boltz models available. "
-                    f"Use '{alphafold_version}' and/or '{boltz_version}' instead for explicit results."
-                )
+        # Note: Generic scores now automatically include both method-specific scores when both methods available
         
         # Validate parameter dependencies
         binding_site_scores = [
@@ -549,53 +534,176 @@ class Scorer:
             peptide_pde = get_peptide_pde(boltz_data.get("pde_matrix", []), boltz_model_file)
             scores["boltz_peptide_pde"] = peptide_pde
 
-        # Generic structural scores (use available PDB file)
+        # Generic structural scores (now include both method-specific when both available)
         if "rosetta_score" in scores_to_include:
-            rosetta_scorer = RosettaScorer(target_pdb_file)
-            scores["rosetta_score"] = rosetta_scorer.get_rosetta_score()
+            added = False
+            if has_alphafold and alphafold_model_file:
+                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                scores["alphafold_rosetta_score"] = rosetta_scorer.get_rosetta_score()
+                added = True
+            if has_boltz and boltz_model_file:
+                rosetta_scorer = RosettaScorer(boltz_model_file)
+                scores["boltz_rosetta_score"] = rosetta_scorer.get_rosetta_score()
+                added = True
+            if not added:
+                rosetta_scorer = RosettaScorer(target_pdb_file)
+                scores["rosetta_score"] = rosetta_scorer.get_rosetta_score()
+            elif has_alphafold ^ has_boltz:
+                scores["rosetta_score"] = scores.get("alphafold_rosetta_score") or scores.get("boltz_rosetta_score")
         
         if "interface_sasa" in scores_to_include:
-            rosetta_scorer = RosettaScorer(target_pdb_file)
-            scores["interface_sasa"] = rosetta_scorer.get_interface_sasa()
+            added = False
+            if has_alphafold and alphafold_model_file:
+                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                scores["alphafold_interface_sasa"] = rosetta_scorer.get_interface_sasa()
+                added = True
+            if has_boltz and boltz_model_file:
+                rosetta_scorer = RosettaScorer(boltz_model_file)
+                scores["boltz_interface_sasa"] = rosetta_scorer.get_interface_sasa()
+                added = True
+            if not added:
+                rosetta_scorer = RosettaScorer(target_pdb_file)
+                scores["interface_sasa"] = rosetta_scorer.get_interface_sasa()
+            elif has_alphafold ^ has_boltz:
+                scores["interface_sasa"] = scores.get("alphafold_interface_sasa") or scores.get("boltz_interface_sasa")
         
         if "interface_dG" in scores_to_include:
-            rosetta_scorer = RosettaScorer(target_pdb_file)
-            scores["interface_dG"] = rosetta_scorer.get_interface_dG()
+            added = False
+            if has_alphafold and alphafold_model_file:
+                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                scores["alphafold_interface_dG"] = rosetta_scorer.get_interface_dG()
+                added = True
+            if has_boltz and boltz_model_file:
+                rosetta_scorer = RosettaScorer(boltz_model_file)
+                scores["boltz_interface_dG"] = rosetta_scorer.get_interface_dG()
+                added = True
+            if not added:
+                rosetta_scorer = RosettaScorer(target_pdb_file)
+                scores["interface_dG"] = rosetta_scorer.get_interface_dG()
+            elif has_alphafold ^ has_boltz:
+                scores["interface_dG"] = scores.get("alphafold_interface_dG") or scores.get("boltz_interface_dG")
         
         if "interface_delta_hbond_unsat" in scores_to_include:
-            rosetta_scorer = RosettaScorer(target_pdb_file)
-            scores["interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
+            added = False
+            if has_alphafold and alphafold_model_file:
+                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                scores["alphafold_interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
+                added = True
+            if has_boltz and boltz_model_file:
+                rosetta_scorer = RosettaScorer(boltz_model_file)
+                scores["boltz_interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
+                added = True
+            if not added:
+                rosetta_scorer = RosettaScorer(target_pdb_file)
+                scores["interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
+            elif has_alphafold ^ has_boltz:
+                scores["interface_delta_hbond_unsat"] = scores.get("alphafold_interface_delta_hbond_unsat") or scores.get("boltz_interface_delta_hbond_unsat")
         
         if "packstat" in scores_to_include:
-            rosetta_scorer = RosettaScorer(target_pdb_file)
-            scores["packstat"] = rosetta_scorer.get_packstat()
+            added = False
+            if has_alphafold and alphafold_model_file:
+                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                scores["alphafold_packstat"] = rosetta_scorer.get_packstat()
+                added = True
+            if has_boltz and boltz_model_file:
+                rosetta_scorer = RosettaScorer(boltz_model_file)
+                scores["boltz_packstat"] = rosetta_scorer.get_packstat()
+                added = True
+            if not added:
+                rosetta_scorer = RosettaScorer(target_pdb_file)
+                scores["packstat"] = rosetta_scorer.get_packstat()
+            elif has_alphafold ^ has_boltz:
+                scores["packstat"] = scores.get("alphafold_packstat") or scores.get("boltz_packstat")
         
         if "distance_score" in scores_to_include:
-            scores["distance_score"] = distance_score_from_pdb(target_pdb_file)
+            added = False
+            if has_alphafold and alphafold_model_file:
+                scores["alphafold_distance_score"] = distance_score_from_pdb(alphafold_model_file)
+                added = True
+            if has_boltz and boltz_model_file:
+                scores["boltz_distance_score"] = distance_score_from_pdb(boltz_model_file)
+                added = True
+            if not added:
+                scores["distance_score"] = distance_score_from_pdb(target_pdb_file)
+            elif has_alphafold ^ has_boltz:
+                scores["distance_score"] = scores.get("alphafold_distance_score") or scores.get("boltz_distance_score")
         
         if "in_binding_site" in scores_to_include:
-            n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
-                target_pdb_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
-            scores["in_binding_site"] = in_binding_site
-            scores["n_contacts"] = n_contacts
+            added = False
+            if has_alphafold and alphafold_model_file:
+                n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
+                    alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                scores["alphafold_in_binding_site"] = in_binding_site
+                scores["alphafold_n_contacts"] = n_contacts
+                added = True
+            if has_boltz and boltz_model_file:
+                n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
+                    boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                scores["boltz_in_binding_site"] = in_binding_site
+                scores["boltz_n_contacts"] = n_contacts
+                added = True
+            if not added:
+                n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
+                    target_pdb_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                scores["in_binding_site"] = in_binding_site
+                scores["n_contacts"] = n_contacts
+            elif has_alphafold ^ has_boltz:
+                scores["in_binding_site"] = scores.get("alphafold_in_binding_site") or scores.get("boltz_in_binding_site")
+                scores["n_contacts"] = scores.get("alphafold_n_contacts") or scores.get("boltz_n_contacts")
         
         if "in_binding_site_score" in scores_to_include:
+            added = False
             if binding_site_residue_indices is not None:
-                scores["in_binding_site_score"] = smooth_peptide_binding_site_score(
-                    target_pdb_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                if has_alphafold and alphafold_model_file:
+                    scores["alphafold_in_binding_site_score"] = smooth_peptide_binding_site_score(
+                        alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                    added = True
+                if has_boltz and boltz_model_file:
+                    scores["boltz_in_binding_site_score"] = smooth_peptide_binding_site_score(
+                        boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                    added = True
+                if not added:
+                    scores["in_binding_site_score"] = smooth_peptide_binding_site_score(
+                        target_pdb_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                elif has_alphafold ^ has_boltz:
+                    scores["in_binding_site_score"] = scores.get("alphafold_in_binding_site_score") or scores.get("boltz_in_binding_site_score")
             else:
                 scores["in_binding_site_score"] = None
         
         if "template_rmsd" in scores_to_include:
-            if template_pdb is not None:
-                scores["template_rmsd"] = align_and_compute_rmsd(template_pdb, target_pdb_file, peptide_sequence)
-            else:
-                scores["template_rmsd"] = None
+            added = False
+            if has_alphafold and alphafold_model_file and template_pdb is not None:
+                scores["alphafold_template_rmsd"] = align_and_compute_rmsd(template_pdb, alphafold_model_file, peptide_sequence)
+                added = True
+            if has_boltz and boltz_model_file and template_pdb is not None:
+                scores["boltz_template_rmsd"] = align_and_compute_rmsd(template_pdb, boltz_model_file, peptide_sequence)
+                added = True
+            if not added:
+                if template_pdb is None:
+                    raise ValueError("template_rmsd requires template_pdb parameter to be provided")
+                else:
+                    raise ValueError("template_rmsd requires docking output with model file")
+            if has_alphafold ^ has_boltz:  # only one method available -> keep generic alias
+                scores["template_rmsd"] = scores.get("alphafold_template_rmsd") or scores.get("boltz_template_rmsd")
 
         if "receptor_contacts" in scores_to_include:
-            scores["receptor_contacts"] = get_receptor_contacts(
-                target_pdb_file, "A", "B", binding_site_distance_threshold
-            )
+            added = False
+            if has_alphafold and alphafold_model_file:
+                scores["alphafold_receptor_contacts"] = get_receptor_contacts(
+                    alphafold_model_file, "A", "B", binding_site_distance_threshold
+                )
+                added = True
+            if has_boltz and boltz_model_file:
+                scores["boltz_receptor_contacts"] = get_receptor_contacts(
+                    boltz_model_file, "A", "B", binding_site_distance_threshold
+                )
+                added = True
+            if not added:
+                scores["receptor_contacts"] = get_receptor_contacts(
+                    target_pdb_file, "A", "B", binding_site_distance_threshold
+                )
+            elif has_alphafold ^ has_boltz:
+                scores["receptor_contacts"] = scores.get("alphafold_receptor_contacts") or scores.get("boltz_receptor_contacts")
 
         # Generic confidence scores (previously exclusive; now include both method-specific if both present)
         if "peptide_plddt" in scores_to_include:
