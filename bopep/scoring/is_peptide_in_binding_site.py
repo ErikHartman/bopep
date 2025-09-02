@@ -100,24 +100,26 @@ def get_binding_site(
     try:
         model = structure[0]
 
-        receptor_chain = model[receptor_chain]
-        peptide_chain = model[peptide_chain]
+        receptor_chain_obj = model[receptor_chain]
+        peptide_chain_obj = model[peptide_chain]
+        
+        # Filter to only standard amino acid residues immediately after parsing
+        receptor_residues = [res for res in receptor_chain_obj.get_residues() if res.id[0] == " "]
+        peptide_residues = [res for res in peptide_chain_obj.get_residues() if res.id[0] == " "]
+        
+        if not receptor_residues or not peptide_residues:
+            return [], [], [], []
 
-        min_peptide_residue_id = min(
-            residue.id[1]
-            for residue in peptide_chain.get_residues()
-            if residue.id[0] == " "
-        )
+        receptor_residue_map = {i: res for i, res in enumerate(receptor_residues)}
+        peptide_residue_map = {i: res for i, res in enumerate(peptide_residues)}
+        
+        # Create reverse mapping from PDB residue ID to zero-based index
+        receptor_pdb_to_zero = {res.id[1]: i for i, res in enumerate(receptor_residues)}
+        peptide_pdb_to_zero = {res.id[1]: i for i, res in enumerate(peptide_residues)}
 
-        min_receptor_residue_id = min(
-            residue.id[1]
-            for residue in receptor_chain.get_residues()
-            if residue.id[0] == " "
-        )
-
-        # Get all atoms from both chains
-        receptor_atoms = list(receptor_chain.get_atoms())
-        peptide_atoms = list(peptide_chain.get_atoms())
+        # Get all atoms from filtered residues
+        receptor_atoms = [atom for res in receptor_residues for atom in res.get_atoms()]
+        peptide_atoms = [atom for res in peptide_residues for atom in res.get_atoms()]
 
         if not receptor_atoms or not peptide_atoms:
             return [], [], [], []
@@ -126,28 +128,30 @@ def get_binding_site(
         peptide_coords = np.array([atom.coord for atom in peptide_atoms])
         peptide_tree = cKDTree(peptide_coords)
 
-        # Find interacting residues
+        # Find interacting residues (using zero-based indices)
         receptor_binding_site_residue_indices = set()
         peptide_binding_site_residue_indices = set()
 
         # For each receptor atom, find peptide atoms within threshold
-        for i, atom in enumerate(receptor_atoms): # This will be 1-indexed
+        for atom in receptor_atoms:
             indices = peptide_tree.query_ball_point(atom.coord, threshold)
             if indices:
-                receptor_binding_site_residue_indices.add(
-                    atom.get_parent().id[1] - min_receptor_residue_id # TODO: We need to check if this is correct
-                ) # E4
+                # Get zero-based index for receptor residue
+                receptor_pdb_id = atom.get_parent().id[1]
+                if receptor_pdb_id in receptor_pdb_to_zero:
+                    receptor_binding_site_residue_indices.add(receptor_pdb_to_zero[receptor_pdb_id])
+                
+                # Get zero-based indices for peptide residues
                 for idx in indices:
-                    peptide_binding_site_residue_indices.add(
-                        peptide_atoms[idx].get_parent().id[1] - min_peptide_residue_id
-                    )
+                    peptide_pdb_id = peptide_atoms[idx].get_parent().id[1]
+                    if peptide_pdb_id in peptide_pdb_to_zero:
+                        peptide_binding_site_residue_indices.add(peptide_pdb_to_zero[peptide_pdb_id])
 
-        # Get the atoms from the binding site residues
+        # Get the atoms from the binding site residues (using zero-based indices)
         receptor_binding_site_atoms = [
             atom
-            for residue in receptor_chain
-            if residue.id[1] in receptor_binding_site_residue_indices
-            for atom in residue.get_atoms()
+            for zero_idx in receptor_binding_site_residue_indices
+            for atom in receptor_residue_map[zero_idx].get_atoms()
         ]            
 
 

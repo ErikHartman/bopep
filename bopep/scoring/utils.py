@@ -110,4 +110,4 @@ def match_and_truncate(ref_seq :  str, ref_coords : list, target_seq : str, targ
         i = ref_seq.index(target_seq)
         return ref_coords[i:i+len(target_seq)], target_coords
     else:
-        raise ValueError("Could not match reference and target receptor sequences for alignment.")
+        raise ValueError(f"Could not match reference and target receptor sequences for alignment. Reference sequence: {ref_seq}, Target sequence: {target_seq}")
