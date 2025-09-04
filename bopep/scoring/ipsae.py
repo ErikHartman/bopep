@@ -1,43 +1,25 @@
 import numpy as np
-from typing import Dict, Tuple, Optional, Callable, Iterable, Any
+from typing import Dict, Tuple, Optional, Callable, Any
 
-# ---------- helpers (ported from ipsae.py, lightly adapted) ----------
 
 def _ptm(x: np.ndarray, d0: float) -> np.ndarray:
     return 1.0 / (1.0 + (x / d0) ** 2.0)
 
-def _calc_d0(L: float, pair_type: str) -> float:
-    # Yang & Skolnick (2004); min 1.0 for protein, 2.0 if nucleic acid involved
-    if L < 27:
-        L = 27.0
-    min_value = 2.0 if pair_type == "nucleic_acid" else 1.0
-    d0 = 1.24 * (L - 15.0) ** (1.0 / 3.0) - 1.8
-    return max(min_value, d0)
-
 def _calc_d0_array(L: np.ndarray, pair_type: str) -> np.ndarray:
+    """
+    Calculate d0 values from counts L according to pair_type rules.
+    """
     L = np.asarray(L, dtype=float)
     L = np.maximum(27.0, L)
-    min_value = 2.0 if pair_type == "nucleic_acid" else 1.0
+    min_value = 1.0
     return np.maximum(min_value, 1.24 * (L - 15.0) ** (1.0/3.0) - 1.8)
 
 _PROT_RES = {
     "ALA","ARG","ASN","ASP","CYS","GLN","GLU","GLY","HIS","ILE",
     "LEU","LYS","MET","PHE","PRO","SER","THR","TRP","TYR","VAL"
 }
-_NA_RES = {"DA","DC","DT","DG","A","C","U","G"}
-_ALLOWED = _PROT_RES | _NA_RES
 
-def _is_na_chain(resnames: Iterable[str]) -> bool:
-    # any NA residue => NA chain
-    for r in resnames:
-        if r in _NA_RES:
-            return True
-    return False
-
-def _chain_pair_type(chain1_is_na: bool, chain2_is_na: bool) -> str:
-    return "nucleic_acid" if chain1_is_na or chain2_is_na else "protein"
-
-# ---------- main API ----------
+_ALLOWED = _PROT_RES
 
 def compute_ipsae(
     structure_or_model: Any,
@@ -113,8 +95,8 @@ def compute_ipsae(
             if residue_selector is not None:
                 keep = residue_selector(res)
             else:
-                # default: standard AAs and nucleic acids only, no waters or ligands
-                keep = (hetflag == " " and resname in _ALLOWED) or (resname in _NA_RES)
+                # default: standard AAs only, no waters or ligands
+                keep = (hetflag == " " and resname in _ALLOWED)
             if not keep:
                 continue
             tokens.append((cid, resname, int(resseq), icode if icode != " " else None))
@@ -139,11 +121,6 @@ def compute_ipsae(
     chains = np.array([t[0] for t in tokens])  # shape (N,)
     uniq = np.unique(chains)
 
-    # chain types for d0 rule
-    chain_is_na = {c: _is_na_chain(chain_to_resnames.get(c, [])) for c in uniq}
-
-    def _pair_type(c1, c2) -> str:
-        return _chain_pair_type(chain_is_na[c1], chain_is_na[c2])
 
     # 3) Compute ipSAE_d0res asym values in both directions for each chain pair
     results: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -154,7 +131,7 @@ def compute_ipsae(
                 continue  # handle each unordered pair once; compute both directions inside
 
             pair_key = (c1, c2)
-            pair_type_12 = _pair_type(c1, c2)
+            pair_type_12 = "protein"
             pair_type_21 = pair_type_12  # symmetric type
 
             # Precompute masks and valid-pair matrices for both directions
