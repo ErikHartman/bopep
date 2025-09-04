@@ -15,6 +15,7 @@ from bopep.scoring.model_overlap import align_and_compute_rmsd, compute_intra_mo
 from bopep.scoring.peptide_properties import PeptideProperties
 
 from bopep.scoring.confidence_scores import get_peptide_plddt, get_weighted_peptide_plddt, get_peptide_pae, get_peptide_pde
+from bopep.scoring.ipsae import get_ipsae_scores_from_pdb_and_pae
 from bopep.docking.utils import extract_sequence_from_pdb
 import os
 
@@ -41,7 +42,9 @@ class Scorer:
             "peptide_plddt", 
             "peptide_pae",
             "interface_peptide_plddt",
-            "receptor_contacts"
+            "receptor_contacts",
+            "ipsae_max",
+            "ipsae_min"
         ] 
         self.peptide_property_scores = [
             "peptide_properties",
@@ -436,6 +439,21 @@ class Scorer:
             peptide_pae = get_peptide_pae(alphafold_data.get("pae", []), alphafold_model_file)
             scores["alphafold_peptide_pae"] = peptide_pae
 
+        # AlphaFold IPSAE scores
+        if "alphafold_ipsae_max" in scores_to_include or "alphafold_ipsae_min" in scores_to_include:
+            pae_data = alphafold_data.get("pae", [])
+            if pae_data:
+                ipsae_scores = get_ipsae_scores_from_pdb_and_pae(alphafold_model_file, pae_data)
+                if "alphafold_ipsae_max" in scores_to_include:
+                    scores["alphafold_ipsae_max"] = ipsae_scores.get("ipsae_max")
+                if "alphafold_ipsae_min" in scores_to_include:
+                    scores["alphafold_ipsae_min"] = ipsae_scores.get("ipsae_min")
+            else:
+                if "alphafold_ipsae_max" in scores_to_include:
+                    scores["alphafold_ipsae_max"] = None
+                if "alphafold_ipsae_min" in scores_to_include:
+                    scores["alphafold_ipsae_min"] = None
+
         # Boltz docking scores
         if "boltz_iptm" in scores_to_include:
             scores["boltz_iptm"] = boltz_data.get("iptm")
@@ -533,6 +551,21 @@ class Scorer:
         if "boltz_peptide_pde" in scores_to_include:
             peptide_pde = get_peptide_pde(boltz_data.get("pde_matrix", []), boltz_model_file)
             scores["boltz_peptide_pde"] = peptide_pde
+
+        # Boltz IPSAE scores  
+        if "boltz_ipsae_max" in scores_to_include or "boltz_ipsae_min" in scores_to_include:
+            pae_data = boltz_data.get("pae_matrix", [])
+            if pae_data:
+                ipsae_scores = get_ipsae_scores_from_pdb_and_pae(boltz_model_file, pae_data)
+                if "boltz_ipsae_max" in scores_to_include:
+                    scores["boltz_ipsae_max"] = ipsae_scores.get("ipsae_max")
+                if "boltz_ipsae_min" in scores_to_include:
+                    scores["boltz_ipsae_min"] = ipsae_scores.get("ipsae_min")
+            else:
+                if "boltz_ipsae_max" in scores_to_include:
+                    scores["boltz_ipsae_max"] = None
+                if "boltz_ipsae_min" in scores_to_include:
+                    scores["boltz_ipsae_min"] = None
 
         # Generic structural scores (now include both method-specific when both available)
         if "rosetta_score" in scores_to_include:
@@ -757,6 +790,45 @@ class Scorer:
                 scores["peptide_pde"] = scores["boltz_peptide_pde"]  # always expose generic alias since single source
             else:
                 raise ValueError("peptide_pde requires Boltz output with model file")
+        
+        # Generic IPSAE scores
+        if "ipsae_max" in scores_to_include:
+            added = False
+            if has_alphafold and alphafold_model_file:
+                pae_data = alphafold_data.get("pae", [])
+                if pae_data:
+                    ipsae_scores = get_ipsae_scores_from_pdb_and_pae(alphafold_model_file, pae_data)
+                    scores["alphafold_ipsae_max"] = ipsae_scores.get("ipsae_max")
+                    added = True
+            if has_boltz and boltz_model_file:
+                pae_data = boltz_data.get("pae_matrix", [])
+                if pae_data:
+                    ipsae_scores = get_ipsae_scores_from_pdb_and_pae(boltz_model_file, pae_data)
+                    scores["boltz_ipsae_max"] = ipsae_scores.get("ipsae_max")
+                    added = True
+            if not added:
+                raise ValueError("ipsae_max requires docking output with model file and PAE data")
+            if has_alphafold ^ has_boltz:
+                scores["ipsae_max"] = scores.get("alphafold_ipsae_max") or scores.get("boltz_ipsae_max")
+        
+        if "ipsae_min" in scores_to_include:
+            added = False
+            if has_alphafold and alphafold_model_file:
+                pae_data = alphafold_data.get("pae", [])
+                if pae_data:
+                    ipsae_scores = get_ipsae_scores_from_pdb_and_pae(alphafold_model_file, pae_data)
+                    scores["alphafold_ipsae_min"] = ipsae_scores.get("ipsae_min")
+                    added = True
+            if has_boltz and boltz_model_file:
+                pae_data = boltz_data.get("pae_matrix", [])
+                if pae_data:
+                    ipsae_scores = get_ipsae_scores_from_pdb_and_pae(boltz_model_file, pae_data)
+                    scores["boltz_ipsae_min"] = ipsae_scores.get("ipsae_min")
+                    added = True
+            if not added:
+                raise ValueError("ipsae_min requires docking output with model file and PAE data")
+            if has_alphafold ^ has_boltz:
+                scores["ipsae_min"] = scores.get("alphafold_ipsae_min") or scores.get("boltz_ipsae_min")
         
         if "intra_model_rmsd" in scores_to_include:
             if not processed_dir:
