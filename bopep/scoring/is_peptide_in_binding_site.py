@@ -1,9 +1,8 @@
 from typing import Tuple
-from Bio.PDB import PDBParser
+from Bio.PDB import PDBParser, MMCIFParser
 import numpy as np
 from scipy.spatial import cKDTree
 import os
-import re
 import math
 
 
@@ -88,7 +87,10 @@ def get_binding_site(
         (receptor_binding_site_atoms, receptor_binding_site_residue_indices,
          peptide_binding_site_residue_indices, peptide_atoms)
     """
-    parser = PDBParser(QUIET=True)
+    if pdb_file.endswith('.cif'):
+        parser = MMCIFParser(QUIET=True, auth_residues=False)
+    else:
+        parser = PDBParser(QUIET=True)
     try:
         structure = parser.get_structure("docked", pdb_file)
     except Exception as e:
@@ -98,18 +100,26 @@ def get_binding_site(
     try:
         model = structure[0]
 
-        receptor_chain = model[receptor_chain]
-        peptide_chain = model[peptide_chain]
+        receptor_chain_obj = model[receptor_chain]
+        peptide_chain_obj = model[peptide_chain]
+        
+        # Filter to only standard amino acid residues immediately after parsing
+        receptor_residues = [res for res in receptor_chain_obj.get_residues() if res.id[0] == " "]
+        peptide_residues = [res for res in peptide_chain_obj.get_residues() if res.id[0] == " "]
+        
+        if not receptor_residues or not peptide_residues:
+            return [], [], [], []
 
-        min_peptide_residue_id = min(
-            residue.id[1]
-            for residue in peptide_chain.get_residues()
-            if residue.id[0] == " "
-        )
+        receptor_residue_map = {i: res for i, res in enumerate(receptor_residues)}
+        peptide_residue_map = {i: res for i, res in enumerate(peptide_residues)}
+        
+        # Create reverse mapping from PDB residue ID to zero-based index
+        receptor_pdb_to_zero = {res.id[1]: i for i, res in enumerate(receptor_residues)}
+        peptide_pdb_to_zero = {res.id[1]: i for i, res in enumerate(peptide_residues)}
 
-        # Get all atoms from both chains
-        receptor_atoms = list(receptor_chain.get_atoms())
-        peptide_atoms = list(peptide_chain.get_atoms())
+        # Get all atoms from filtered residues
+        receptor_atoms = [atom for res in receptor_residues for atom in res.get_atoms()]
+        peptide_atoms = [atom for res in peptide_residues for atom in res.get_atoms()]
 
         if not receptor_atoms or not peptide_atoms:
             return [], [], [], []
@@ -118,28 +128,30 @@ def get_binding_site(
         peptide_coords = np.array([atom.coord for atom in peptide_atoms])
         peptide_tree = cKDTree(peptide_coords)
 
-        # Find interacting residues
+        # Find interacting residues (using zero-based indices)
         receptor_binding_site_residue_indices = set()
         peptide_binding_site_residue_indices = set()
 
         # For each receptor atom, find peptide atoms within threshold
-        for i, atom in enumerate(receptor_atoms): # This will be 1-indexed
+        for atom in receptor_atoms:
             indices = peptide_tree.query_ball_point(atom.coord, threshold)
             if indices:
-                receptor_binding_site_residue_indices.add(
-                    atom.get_parent().id[1]
-                ) # E4
+                # Get zero-based index for receptor residue
+                receptor_pdb_id = atom.get_parent().id[1]
+                if receptor_pdb_id in receptor_pdb_to_zero:
+                    receptor_binding_site_residue_indices.add(receptor_pdb_to_zero[receptor_pdb_id])
+                
+                # Get zero-based indices for peptide residues
                 for idx in indices:
-                    peptide_binding_site_residue_indices.add(
-                        peptide_atoms[idx].get_parent().id[1] - min_peptide_residue_id
-                    )
+                    peptide_pdb_id = peptide_atoms[idx].get_parent().id[1]
+                    if peptide_pdb_id in peptide_pdb_to_zero:
+                        peptide_binding_site_residue_indices.add(peptide_pdb_to_zero[peptide_pdb_id])
 
-        # Get the atoms from the binding site residues
+        # Get the atoms from the binding site residues (using zero-based indices)
         receptor_binding_site_atoms = [
             atom
-            for residue in receptor_chain
-            if residue.id[1] in receptor_binding_site_residue_indices
-            for atom in residue.get_atoms()
+            for zero_idx in receptor_binding_site_residue_indices
+            for atom in receptor_residue_map[zero_idx].get_atoms()
         ]            
 
 
@@ -154,6 +166,11 @@ def get_binding_site(
         print(f"Chain not found in structure: {e}")
         return [], [], [], []
 
+def get_receptor_contacts(pdb_file: str,
+    receptor_chain: str = "A",
+    peptide_chain: str = "B",
+    threshold: float = 5.0,):
+    return get_binding_site(pdb_file, receptor_chain, peptide_chain, threshold)[1]
 
 def is_peptide_in_binding_site_pdb_file(
     pdb_file: str, binding_site_residue_indices: list = None, threshold: float = 5.0, required_n_contact_residues: int = 2
@@ -166,51 +183,62 @@ def is_peptide_in_binding_site_pdb_file(
         pdb_file, threshold=threshold
     )
 
+    nr_contact_residues = 0
     if binding_site_residue_indices is not None:
         # if any receptor_binding_site_indices is in the binding_site_residue_indices, return True
-        nr_contact_residues = 0
         for receptor_index in receptor_binding_site_indices:
             if receptor_index in binding_site_residue_indices:
                 nr_contact_residues += 1
 
     if nr_contact_residues >= required_n_contact_residues:
         return nr_contact_residues, True
-
     else:
         return nr_contact_residues, False
 
 
-def n_peptides_in_binding_site_colab_dir(
-    colab_dir: str, binding_site_residue_indices: list, threshold=5.0, required_n_contact_residues: int = 2
+def n_peptides_in_binding_site_processed_dir(
+    processed_dir: str, binding_site_residue_indices: list, threshold=5.0, required_n_contact_residues: int = 2
 ) -> Tuple[float, bool, int]:
     """
     Evaluates if the docked peptide is within a given proximity to the receptor binding site
-    across multiple models. Only considers files with pattern 'rank_00X' in their name.
+    across multiple models in a processed directory. Works with standardized model naming.
     """
+    import glob
+    
     matches_within_threshold = 0
-
-    colab_files = os.listdir(colab_dir)
-
-    top_pdb_is_in_binding_site = False
-
-    # Regex search for pdb files with rank_00X pattern in the directory
-    pdb_files = [
-        os.path.join(colab_dir, file)
-        for file in colab_files
-        if re.search(r"unrelaxed_rank_00\d+.*\.pdb$", file, re.IGNORECASE)
-    ]
+    top_model_is_in_binding_site = False
     n_contacts = 0
+
+    # Find all model files in the processed directory
+    pdb_patterns = ["*_model_*.pdb", "*_model_*.cif", "model_*.pdb", "model_*.cif"]
+    pdb_files = []
+    
+    for pattern in pdb_patterns:
+        files = glob.glob(os.path.join(processed_dir, pattern))
+        pdb_files.extend(files)
+    
+    # Remove duplicates and sort
+    pdb_files = sorted(list(set(pdb_files)))
+    
+    if not pdb_files:
+        print(f"WARNING: No model files found in {processed_dir}")
+        return 0.0, False, 0
+
     for pdb_file in pdb_files:
         n_contacts_temp, is_in_binding_site = is_peptide_in_binding_site_pdb_file(
-            pdb_file, binding_site_residue_indices, threshold=threshold, required_n_contact_residues=required_n_contact_residues
+            pdb_file, binding_site_residue_indices, threshold=threshold, 
+            required_n_contact_residues=required_n_contact_residues
         )
         if is_in_binding_site:
             matches_within_threshold += 1
-            if "rank_001" in pdb_file:
-                top_pdb_is_in_binding_site = True
+            # Check if this is the top model (model_1 or method_model_1)
+            filename = os.path.basename(pdb_file)
+            if "model_1" in filename:
+                top_model_is_in_binding_site = True
                 n_contacts = n_contacts_temp
 
-    return matches_within_threshold / len(pdb_files), top_pdb_is_in_binding_site, n_contacts
+    return matches_within_threshold / len(pdb_files), top_model_is_in_binding_site, n_contacts
+
 
 
 def smooth_peptide_binding_site_score(
@@ -266,8 +294,10 @@ def smooth_peptide_binding_site_score(
 
 
 if __name__ == "__main__":
-    docked_pdb = "/srv/data1/er8813ha/docking-peptide/output_v2/run_cd14/docked_pdbs/4glf_VHLTPEEKSAVTALWG/4glf_VHLTPEEKSAVTALWG_relaxed_rank_001_alphafold2_multimer_v3_model_2_seed_000.pdb" #"/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/docked_pdbs/4glf_LKNPDDPDMVD/4glf_LKNPDDPDMVD_relaxed_rank_001_alphafold2_multimer_v3_model_3_seed_000.pdb" #
+    docked_pdb = "/srv/data1/er8813ha/bopep/docked/cd14_processed/processed/4glf_NENARQQLERQNK/boltz_model_1.pdb"
 
+    docked_test_ = "/srv/data1/er8813ha/bopep/docked/cd14_processed/processed/4glf_NENARQQLERQNK/boltz_model_1.pdb"
+    
     bsri = [22, 23, 24, 42, 43, 44, 45, 46, 47, 48, 49, 
             50, 51, 52, 53, 69, 70, 71, 72,
                 73, 74, 75, 76, 77, 81, 82, 83, 84, 85, 86, 87, 
@@ -275,6 +305,7 @@ if __name__ == "__main__":
     
     bsri = [residue - 19 for residue in bsri]  # convert to zero-based indices
     
+    print("Testing with single PDB file:")
     print(is_peptide_in_binding_site_pdb_file(docked_pdb, binding_site_residue_indices=bsri, threshold=5.0, required_n_contact_residues=5))
 
     centroid_in_binding_site = is_peptide_near_binding_site_by_centroid(
@@ -285,3 +316,15 @@ if __name__ == "__main__":
         cutoff=20.0,
     )
     print(f"Centroid is in binding site: {centroid_in_binding_site}")
+    
+    # Test with processed directory
+    processed_dir = "/home/er8813ha/bopep/examples/docking/processed/4glf_NYLSELSEHV"
+    if os.path.exists(processed_dir):
+        print("\nTesting with processed directory:")
+        result = n_peptides_in_binding_site_processed_dir(
+            processed_dir, binding_site_residue_indices=bsri, threshold=5.0, required_n_contact_residues=5
+        )
+        print(f"Processed directory result: {result}")
+
+
+    print(get_receptor_contacts(docked_test_, "A","B", 5.0))
