@@ -260,7 +260,7 @@ def main():
             n_splits=3,
             random_state=SEED,
             hidden_dim_max=32,
-            target_fxn="nll_gaussian"
+
         )
         
         
