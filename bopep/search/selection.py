@@ -19,15 +19,16 @@ class PeptideSelector:
         method: str = "kmeans",
     ):
         """
-        Select initial peptides via one of two methods:
+        Select initial peptides via one of three methods:
           - "kmeans": MiniBatchKMeans + nearest-to-centroid
           - "kmeans++": k-means++ seeding only
+          - "random": random selection
 
         Parameters:
         - embeddings: dict {peptide: ndarray}
         - num_initial: int, how many peptides to pick
         - random_state: int, seed
-        - method: str, either "kmeans" or "kmeans++"
+        - method: str, either "kmeans", "kmeans++", or "random"
 
         Returns:
         - List of peptide sequences
@@ -94,8 +95,18 @@ class PeptideSelector:
 
             return [peptides[i] for i in centers_idx]
 
+        elif method == "random":
+            # --- pure random selection ---
+            rng = np.random.RandomState(random_state)
+            selected_indices = rng.choice(
+                len(peptides), 
+                size=min(num_initial, len(peptides)), 
+                replace=False
+            )
+            return [peptides[i] for i in selected_indices]
+
         else:
-            raise ValueError(f"Unknown method '{method}', choose 'kmeans' or 'kmeans++'")
+            raise ValueError(f"Unknown method '{method}', choose 'kmeans', 'kmeans++', or 'random'")
 
     def select_next_peptides(self, peptides, acquisition_values, n_select, embeddings):
         """
@@ -163,6 +174,9 @@ def __main__():
 
     initial_peptides = selector.select_initial_peptides(embeddings, num_initial=500, method="kmeans++")
     print("Initial peptides (kmeans++):", initial_peptides)
+
+    initial_peptides = selector.select_initial_peptides(embeddings, num_initial=500, method="random")
+    print("Initial peptides (random):", initial_peptides)
 
 if __name__ == "__main__":
     __main__()
