@@ -1,0 +1,71 @@
+BoGA Results
+==================================================
+Target: ./data/ply1.pdb
+Starting sequence: ARNPRYDGLGAMDY
+Binding site: 370-465
+Model: MLP + Deep Evidential Regression
+Objective: benchmark_objective
+
+  1. RRPRSTDLILGAMD            | 6.290284
+  2. RPRFPDILGAMDRP            | 5.846681
+  3. RPRFPDIVAMDY              | 5.222486
+  4. RRPRFPDILCAMDRY           | 5.094030
+  5. RRPRFPDWLGAMD             | 4.806446
+  6. RRPRFPDILGAMDRP           | 4.676560
+  7. RPRFPDIVAMDT              | 4.611065
+  8. RRPRFPDRLGAMY             | 4.523876
+  9. RRPRDILGAMDY              | 4.486014
+ 10. RPRFPDIGAMDY              | 4.271538
+ 11. ARNIRDGLGAMD              | 4.027457
+ 12. RRPRFPDARLGAM             | 3.504035
+ 13. RRPRDMILGAMDY             | 3.439268
+ 14. RRPRFPDILGAMDRY           | 3.358165
+ 15. RRPRFPDILGAMDY            | 3.102177
+ 16. RPRFPDIVAMSDT             | 2.887157
+ 17. RRPRFPDRLGAMR             | 2.825003
+ 18. RRAPRFPDILGDAMDRP         | 2.746174
+ 19. ARNIRCDGLGAMD             | 2.653103
+ 20. RRPRFPDILGAMY             | 2.479307
+ 21. RRPRFPDRLGAMVY            | 2.475370
+ 22. RRPRGDILGAMDY             | 2.435343
+ 23. RRPRFPRDLGAMD             | 2.426129
+ 24. RRPRFPDILGAMD             | 2.399830
+ 25. ARNPRDGLGAMD              | 2.294254
+ 26. RPRFPNDIGPMDY             | 2.283028
+ 27. RRPRSDILGAMD              | 2.218536
+ 28. RRPRFPDILGAMDRR           | 2.192266
+ 29. RRTRFPDILGAMDRP           | 2.149632
+ 30. RRRFPDILAMDRP             | 2.071858
+ 31. RRPRYDILGAMDY             | 2.011538
+ 32. RRPRDILGAMY               | 2.003694
+ 33. RCPRFPDRLGARMY            | 1.958184
+ 34. ARNIRGLGAM                | 1.914095
+ 35. RRPRSDILGAMDY             | 1.880128
+ 36. RPRFPDTIVAMDT             | 1.869918
+ 37. RRPRFPDILGAMDR            | 1.765418
+ 38. RRPRSDILGAMDD             | 1.721813
+ 39. PRFPDIVAMDY               | 1.686254
+ 40. RRPRDILGMDRM              | 1.664682
+ 41. ARNIRFDGLGAMD             | 1.576360
+ 42. RRPRFYDILGAMDY            | 1.485818
+ 43. RRPRDMILWGAMDY            | 1.463869
+ 44. RRPYDILGAMDY              | 1.419487
+ 45. RPRPDIVAMDY               | 1.374127
+ 46. ARNIDGLGAMD               | 1.355367
+ 47. RRPRFPDRLGAMRY            | 1.245566
+ 48. RRPRDILGAMDQ              | 1.097662
+ 49. ARNPRYDGLGAMDY            | 1.066992
+ 50. RRPRFPDRLGAMC             | 0.936015
+ 51. RRPRFPDILGAVMY            | 0.529860
+ 52. RQPRSDYLGAMD              | 0.345701
+ 53. RRPRDILGMDQ               | -1.000000
+ 54. ARNPRDGLGAMDY             | -1.000000
+ 55. RNPRYDILGAMDY             | -1.000000
+ 56. RRPRFPDRLGAM              | -1.000000
+ 57. RPRFQPDIVAMDY             | -1.000000
+ 58. RPRFDIVAMDY               | -1.000000
+ 59. RPRFPDIVAMDIY             | -1.000000
+ 60. RRPCRFPDILCAMDRY          | -1.000000
+ 61. RPRFPDIVAMDPY             | -1.000000
+ 62. RPRFPYDIVAMDYQ            | -1.000000
+ 63. RPWFPDIVAEDY              | -1.000000

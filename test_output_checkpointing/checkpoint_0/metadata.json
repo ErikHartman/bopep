@@ -1,0 +1,38 @@
+{
+  "timestamp": "2025-09-11T14:42:02.011266",
+  "global_iteration": 12,
+  "surrogate_model_kwargs": {
+    "network_type": "mlp",
+    "model_type": "deep_evidential",
+    "input_dim": 128
+  },
+  "target_structure_path": "data/4glf.pdb",
+  "binding_site_residue_indices": [
+    4,
+    23,
+    25,
+    30,
+    50,
+    53,
+    55,
+    63,
+    70,
+    86
+  ],
+  "docker_kwargs": {
+    "num_cores": 1
+  },
+  "hpo_kwargs": {
+    "n_trials": 3,
+    "hpo_interval": 20
+  },
+  "objective_function_kwargs": {},
+  "scoring_kwargs": {
+    "scores_to_include": [
+      "iptm",
+      "in_binding_site"
+    ]
+  },
+  "num_docked_peptides": 220,
+  "num_remaining_peptides": 280
+}

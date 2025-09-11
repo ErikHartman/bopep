@@ -5,19 +5,12 @@ import pickle
 from typing import Callable, List, Optional, Dict, Any, Union
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
-from bopep.surrogate_model import (
-    NeuralNetworkEnsemble,
-    MonteCarloDropout,
-    DeepEvidentialRegression,
-    tune_hyperparams,
-    MVE,
-)
+from bopep.surrogate_model.manager import SurrogateModelManager
 from bopep.logging.logger import Logger
 from bopep.search.acquisition_functions import AcquisitionFunction
 from bopep.search.utils import (_validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
 from bopep.search.pdb_utils import _check_binding_site_residue_indices
 from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
-from bopep.search.train_validate_utils import _compute_model_metrics, _compute_split_indices, _train_and_validate, _split_train_validation, _train_on_all
 from bopep.search.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
 import torch
@@ -80,8 +73,11 @@ class BoPep:
         self.selector = PeptideSelector()
         self.scores_to_objective = ScoresToObjective()
 
-        # Store the Optuna study for warm-starting
-        self.previous_study = None
+        # Initialize surrogate model manager
+        self.surrogate_manager = SurrogateModelManager(
+            surrogate_model_kwargs=self.surrogate_model_kwargs,
+            device=None  # Will be set automatically in run()
+        )
 
         _validate_surrogate_model_kwargs(self.surrogate_model_kwargs)
         self.log_dir = log_dir
@@ -97,13 +93,6 @@ class BoPep:
         self._copy_logs_to_checkpoint = _copy_logs_to_checkpoint.__get__(self, BoPep)
         self._setup_checkpoint_dir = _setup_checkpoint_dir.__get__(self, BoPep)
         self._rebuild_logs_from_csvs = _rebuild_logs_from_csvs.__get__(self, BoPep)
-
-        # training and validation functions
-        self._compute_model_metrics = _compute_model_metrics.__get__(self, BoPep)
-        self._compute_split_indices = _compute_split_indices.__get__(self, BoPep)
-        self._train_and_validate = _train_and_validate.__get__(self, BoPep)
-        self._split_train_validation = _split_train_validation.__get__(self, BoPep)
-        self._train_on_all = _train_on_all.__get__(self, BoPep)
 
 
     def run(
@@ -156,6 +145,9 @@ class BoPep:
         self.binding_site_residue_indices = binding_site_residue_indices
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Set device for surrogate model manager
+        self.surrogate_manager.device = self.device
 
         if not continue_from_checkpoint:
             if not embeddings:
@@ -244,10 +236,17 @@ class BoPep:
         self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
         self.all_logged_objectives = set(objectives.keys())
 
-        self._optimize_hyperparameters(
-            0, {p: self.embeddings[p] for p in self.docked_peptides}, objectives
+        # Optimize hyperparameters and initialize model using surrogate manager
+        docked_embs = {p: self.embeddings[p] for p in self.docked_peptides}
+        # Filter hpo_kwargs to only include parameters accepted by the manager
+        manager_hpo_kwargs = {k: v for k, v in self.hpo_kwargs.items() 
+                             if k in ['n_trials', 'n_splits', 'random_state']}
+        self.best_hyperparams = self.surrogate_manager.optimize_hyperparameters(
+            docked_embs, objectives, **manager_hpo_kwargs
         )
-        self._initialize_model(self.best_hyperparams)
+        
+        # Initialize the model with optimized hyperparameters
+        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs)
         
         # Save initial checkpoint
         logging.info("Creating initial checkpoint")
@@ -305,8 +304,16 @@ class BoPep:
         last_iteration = meta["global_iteration"]
         
         logging.info("Running hyperparameter optimization...")
-        self._optimize_hyperparameters(last_iteration, docked_embs, objectives)
-        self._initialize_model(self.best_hyperparams)
+        # Optimize hyperparameters and initialize model using surrogate manager
+        # Filter hpo_kwargs to only include parameters accepted by the manager
+        manager_hpo_kwargs = {k: v for k, v in self.hpo_kwargs.items() 
+                             if k in ['n_trials', 'n_splits', 'random_state']}
+        self.best_hyperparams = self.surrogate_manager.optimize_hyperparameters(
+            docked_embs, objectives, **manager_hpo_kwargs
+        )
+        
+        # Initialize the model with optimized hyperparameters
+        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs)
 
         # Save initial checkpoint for continued run
         logging.info("Creating initial checkpoint for continued run")
@@ -344,7 +351,9 @@ class BoPep:
                 )
 
                 # Initialize fresh model for each iteration
-                self._initialize_model(self.best_hyperparams)
+                # Use embeddings from current docked peptides for initialization
+                current_docked_embs = {p: self.embeddings[p] for p in self.docked_peptides}
+                self.surrogate_manager.initialize_model(self.best_hyperparams, current_docked_embs)
 
                 # Turn scores into a scalarized score dict of peptide: score
                 objectives = self.scores_to_objective.create_objective(
@@ -370,34 +379,40 @@ class BoPep:
 
                 # Run hyperparameter optimization every N steps
                 if global_iteration % self.hpo_kwargs.get("hpo_interval", 10) == 0:
-                    self._optimize_hyperparameters(
-                        global_iteration, docked_embeddings, objectives
+                    self.surrogate_manager.optimize_hyperparameters(
+                        embeddings=docked_embeddings, 
+                        objectives=objectives,
+                        n_trials=self.hpo_kwargs.get("n_trials", 20),
+                        n_splits=self.hpo_kwargs.get("n_splits", 3),
+                        random_state=self.hpo_kwargs.get("random_state", 42),
+                        iteration=global_iteration
                     )
-                    self._initialize_model(self.best_hyperparams)
+                    self.surrogate_manager.initialize_model(embeddings=docked_embeddings)
+
+                    # Log hyperparameters
+                    if self.surrogate_manager.best_hyperparams:
+                        self.logger.log_hyperparameters(
+                            global_iteration,
+                            self.surrogate_manager.best_hyperparams,
+                            model_type=self.surrogate_model_kwargs["model_type"],
+                            network_type=self.surrogate_model_kwargs["network_type"],
+                        )
 
                 logging.info(
                     f"Model will be trained (potentially validated) on {len(docked_peptides)} peptides"
                 )
 
-                # Check if we can split into train/validation
-                split = None
+                # Train the model with automatic validation split if needed
                 if n_validate is not None:
-                    split = self._compute_split_indices(
-                        len(docked_peptides), n_validate
-                    )
-
-                # If we can split, do it; otherwise, train on all
-                if split:
-                    train_emb, train_obj, val_emb, val_obj = (
-                        self._split_train_validation(
-                            docked_embeddings, objectives, split
-                        )
-                    )
-                    loss, metrics = self._train_and_validate(
-                        train_emb, train_obj, val_emb, val_obj
+                    loss, metrics = self.surrogate_manager.train_with_validation_split(
+                        embeddings=docked_embeddings,
+                        objectives=objectives,
+                        validation_size=n_validate,
+                        min_training_samples=self.MIN_TRAINING_SAMPLES,
+                        min_validation_samples=self.MIN_VALIDATION_SAMPLES
                     )
                 else:
-                    loss, metrics = self._train_on_all(docked_embeddings, objectives)
+                    loss, metrics = self.surrogate_manager.train_model(docked_embeddings, objectives)
 
                 # Log the loss and metrics
                 self.logger.log_model_metrics(loss, global_iteration, metrics)
@@ -406,9 +421,7 @@ class BoPep:
                 candidate_embeddings = {
                     p: self.embeddings[p] for p in not_docked_peptides
                 }
-                predictions = self.model.predict_dict(
-                    candidate_embeddings, device=self.device
-                )  # predictions is {peptide: (mean, std)}
+                predictions = self.surrogate_manager.predict(candidate_embeddings)
 
                 # Log predictions
                 self.logger.log_predictions(predictions, global_iteration)
@@ -566,118 +579,6 @@ class BoPep:
                         f"For mlp, each peptide embedding must be 1D. "
                         f"Peptide '{pep}' has shape {emb.shape}."
                     )
-
-    def _optimize_hyperparameters(self, iteration: int, embeddings: dict, objectives: dict):
-        """
-        Use the Hyperparameter Tuner to optimize all params.
-        Sets self.best_hyperparams to the best found hyperparameters.
-        Stores the Optuna study for future warm-starting.
-        """
-        hpo_config = self.hpo_kwargs.copy() if self.hpo_kwargs else {}
-
-        n_trials = hpo_config.get("n_trials", 20)
-        n_splits = hpo_config.get("n_splits", 3)
-        random_state = hpo_config.get("random_state", 42)
-
-        logging.info(
-            f"Starting hyperparameter optimization for {self.surrogate_model_kwargs['network_type']} {self.surrogate_model_kwargs['model_type']} model..."
-        )
-
-        if self.previous_study is not None:
-            logging.info(
-                f"Using previous study with {len(self.previous_study.trials)} trials"
-            )
-
-        self.best_hyperparams, self.previous_study = tune_hyperparams(
-            model_type=self.surrogate_model_kwargs["model_type"],
-            embedding_dict=embeddings,
-            objective_dict=objectives,
-            network_type=self.surrogate_model_kwargs["network_type"],
-            n_trials=n_trials,
-            n_splits=n_splits,
-            random_state=random_state,
-            previous_study=self.previous_study,
-        )
-
-        self.logger.log_hyperparameters(
-            iteration,
-            self.best_hyperparams,
-            model_type=self.surrogate_model_kwargs["model_type"],
-            network_type=self.surrogate_model_kwargs["network_type"],
-        )
-
-        logging.info(
-            f"Hyperparameter optimization complete. Best parameters: {self.best_hyperparams}"
-        )
-
-    def _initialize_model(self, hyperparams: dict):
-        """
-        Create model based on hyperparameters and self.surrogate_model_kwargs.
-        Sets self.model to the created model.
-        """
-
-        if hasattr(self, "model"):
-            try:
-                self.model.cpu()
-                del self.model
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except Exception as e:
-                logging.warning(f"Couldn't clean up previous model: {e}")
-
-        model_type = self.surrogate_model_kwargs["model_type"]
-        network_type = self.surrogate_model_kwargs["network_type"]
-        input_dim = self.surrogate_model_kwargs["input_dim"]
-
-        # Extract hyperparameters
-        hidden_dims = hyperparams.get("hidden_dims")
-        hidden_dim = hyperparams.get("hidden_dim")
-        num_layers = hyperparams.get("num_layers", 2)
-        uncertainty_param = hyperparams.get("uncertainty_param")
-
-        if model_type == "mve":
-            self.model = MVE(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                mve_regularization=uncertainty_param,
-            )
-        elif model_type == "deep_evidential":
-            self.model = DeepEvidentialRegression(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                evidential_regularization=uncertainty_param,
-            )
-        elif model_type == "mc_dropout":
-            self.model = MonteCarloDropout(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                dropout_rate=uncertainty_param,
-            )
-        elif model_type == "nn_ensemble":
-            self.model = NeuralNetworkEnsemble(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                n_networks=int(uncertainty_param),
-            )
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
-
-        logging.info(
-            f"Initialized {model_type} model with {network_type} network architecture"
-        )
-        self.model.to(self.device)
 
     def _print_top_performers(self, objectives: dict, top_n: int = 10):
         sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[

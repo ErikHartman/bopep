@@ -3,3 +3,4 @@ from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble as NeuralNet
 from bopep.surrogate_model.deep_evidential_regression import DeepEvidentialRegression as DeepEvidentialRegression
 from bopep.surrogate_model.mve import MVE as MVE
 from bopep.surrogate_model.hyperparameter_tuner import tune_hyperparams as tune_hyperparams
+from bopep.surrogate_model.manager import SurrogateModelManager as SurrogateModelManager

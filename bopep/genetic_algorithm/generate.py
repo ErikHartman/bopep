@@ -1,20 +1,18 @@
 import random
-from typing import List, Dict, Any, Optional, Callable, Union
+import time
+import hashlib
+from typing import List, Dict, Any, Optional, Callable, Union, Tuple
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
 from bopep.scoring.scorer import Scorer
-from bopep.surrogate_model import (
-    tune_hyperparams,
-    NeuralNetworkEnsemble,
-    MonteCarloDropout,
-    DeepEvidentialRegression,
-    MVE
-)
+from bopep.surrogate_model import SurrogateModelManager
 from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.search.utils import _validate_surrogate_model_kwargs
+from bopep.search.acquisition_functions import AcquisitionFunction
 from bopep.logging.logger import Logger
 import torch
 import numpy as np
+
 _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 class BoGA:
@@ -36,22 +34,15 @@ class BoGA:
        - Mutate selected sequences to generate new K candidate sequences
        - Evaluate candidates and update population
     5. Repeat until convergence or max generations
-
-    TODO: 
-    - Add validation of binding site indices
-    - Add more detailed logging
-    - Abstract out things from BoPep and use here (eg binding site validation, hparam opt)
     """
     def __init__(
         self,
         target_structure_path: str,
         max_sequence_length: int,
+        schedule: List[Dict[str, Any]],
         initial_sequences: Optional[Union[str, List[str]]] = None,
         min_sequence_length: int = 6,
         n_init: int = 100,
-        m_select: int = 50,
-        k_pool: int = 5_000,
-        generations: int = 100,
         surrogate_model_kwargs: Optional[Dict[str, Any]] = None,
         objective_function: Optional[Callable] = None,
         objective_function_kwargs: Optional[Dict[str, Any]] = None,
@@ -61,18 +52,18 @@ class BoGA:
         random_seed: Optional[int] = None,
         # Embedding options
         embed_method: str = 'esm',               # 'esm' or 'aaindex'
-        embed_average: bool = True,
         embed_model_path: Optional[str] = None,
         embed_batch_size: int = 128,
         embed_device: Optional[str] = None,
         # PCA reduction
-        pca_explained_variance_ratio: float = 0.95,
         pca_n_components: Optional[int] = None,
         # Hyperparameter tuning interval
         hpo_interval: int = 10,
+        # Validation options
+        n_validate: Optional[int] = None,
+        validation_split: float = 0.2,
         # Logging options
         log_dir: Optional[str] = None,
-        enable_logging: bool = True,
         # Testing options
         use_dummy_scoring: bool = False,
     ):
@@ -83,6 +74,10 @@ class BoGA:
             Path to target protein structure for docking
         max_sequence_length : int
             Maximum length of generated peptide sequences
+        schedule : List[Dict[str, Any]]
+            List of dictionaries defining the optimization phases.
+            Each dict should have 'acquisition', 'generations', 'm_select', and 'k_pool' keys.
+            Example: [{'acquisition': 'expected_improvement', 'generations': 50, 'm_select': 50, 'k_pool': 5000}]
         initial_sequences : Optional[Union[str, List[str]]], default=None
             Initial population specification:
             - None: generate n_init random sequences
@@ -97,8 +92,6 @@ class BoGA:
             Hyperparameter optimization interval (every N generations)
         log_dir : Optional[str], default=None
             Directory for logging files. If None, logging is disabled.
-        enable_logging : bool, default=True
-            Whether to enable logging (requires log_dir to be set)
         use_dummy_scoring : bool, default=False
             Whether to use dummy scoring instead of real docking for testing
         ... (other parameters)
@@ -115,22 +108,29 @@ class BoGA:
         self.max_sequence_length = max_sequence_length
         self.min_sequence_length = min_sequence_length
         self.n_init = n_init
-        self.m_select = m_select
-        self.k_pool = k_pool
-        self.generations = generations
+        self.schedule = schedule
         self.objective_function = objective_function
         self.objective_function_kwargs = objective_function_kwargs or {}
         self.scoring_kwargs = scoring_kwargs or {}
         self.mutation_rate = mutation_rate
         self.hpo_interval = hpo_interval
+        self.n_validate = n_validate
+        self.validation_split = validation_split
+
+        # Device configuration
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         # Embedding configuration
         self.embed_method = embed_method.lower()
-        self.embed_average = embed_average
+        # Auto-detect embedding averaging based on network type
+        network_type = self.surrogate_model_kwargs.get('network_type', 'mlp').lower()
+        if network_type == "mlp":
+            self.embed_average = True
+        else:
+            self.embed_average = False
         self.embed_model_path = embed_model_path
         self.embed_batch_size = embed_batch_size
         self.embed_device = embed_device
-        self.pca_explained_variance_ratio = pca_explained_variance_ratio
         self.pca_n_components = pca_n_components
 
         # Initialize components
@@ -138,22 +138,31 @@ class BoGA:
         self.scorer = Scorer()
         self.scores_to_objective = ScoresToObjective()
         self.embedder = Embedder()
+        self.acquisition_function_obj = AcquisitionFunction()
+        
+        # Initialize surrogate model manager
+        self.surrogate_manager = SurrogateModelManager(
+            surrogate_model_kwargs=self.surrogate_model_kwargs,
+            device=self.device
+        )
 
         # Initialize logging
-        self.enable_logging = enable_logging
-        if self.enable_logging and log_dir is not None:
+        if log_dir is not None:
             self.logger = Logger(log_dir=log_dir, overwrite_logs=True)
         else:
             self.logger = None
 
         # Store testing options
         self.use_dummy_scoring = use_dummy_scoring
-
-        # Placeholders for model and hyperparameters
-        self.best_hyperparams = None
-        self.previous_study = None
-        self.model = None
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        
+        # Store raw embeddings for dynamic PCA fitting
+        self.raw_embeddings_cache = {}
+        self.actual_pca_components = None  # Fixed after first embedding
+        
+        # Store fitted transformers to ensure consistent dimensionality
+        self.fitted_scaler = None
+        self.fitted_pca = None
+        self.final_input_dim = None
 
         if random_seed is not None:
             random.seed(random_seed)
@@ -168,22 +177,49 @@ class BoGA:
         """
         Prepare the initial population based on the initial_sequences parameter:
         - If None: generate n_init random sequences
-        - If single string: treat as single sequence and mutate n_init times
+        - If single string: treat as single sequence and mutate until we have n_init UNIQUE sequences
         - If list with enough sequences (>= n_init): use first n_init sequences
         - If list with few sequences (< n_init): use all + fill remainder with mutations/random
+        
+        Ensures we have enough unique sequences for PCA (at least pca_n_components if specified).
         """
+        # Determine minimum required sequences for PCA
+        # Need at least pca_n_components + 1 samples to get pca_n_components dimensions
+        min_required_for_pca = (self.pca_n_components + 1) if self.pca_n_components else 0
+        actual_target = max(self.n_init, min_required_for_pca)
+        
+        if actual_target > self.n_init:
+            print(f"Increasing initial population from {self.n_init} to {actual_target} to support {self.pca_n_components} PCA components")
+            self.n_init = actual_target  # Update n_init to ensure we generate enough
+        
         if self.initial_sequences is None:
             # No initial sequences provided - generate random
-            return self._generate_initial_sequences()
+            sequences = set()
+            while len(sequences) < self.n_init:
+                sequences.add(self._random_sequence())
+            return list(sequences)
         
         elif isinstance(self.initial_sequences, str):
-            # Single sequence provided - mutate it n_init times
+            # Single sequence provided - mutate until we have enough UNIQUE sequences
             base_sequence = self.initial_sequences
-            sequences = [base_sequence]  # Include original
-            # Generate n_init-1 mutations of the base sequence
-            for _ in range(self.n_init - 1):
-                sequences.append(self._mutate_sequence(base_sequence))
-            return sequences
+            sequences = {base_sequence}  # Use set to ensure uniqueness
+            
+            # Keep mutating until we have enough unique sequences
+            max_attempts = self.n_init * 10  # Prevent infinite loops
+            attempts = 0
+            while len(sequences) < self.n_init and attempts < max_attempts:
+                # Mutate a random sequence from our current set (more diversity)
+                parent = random.choice(list(sequences))
+                new_seq = self._mutate_sequence(parent)  # Always forces change now
+                sequences.add(new_seq)
+                attempts += 1
+            
+            # If we still don't have enough, fill with random sequences
+            while len(sequences) < self.n_init:
+                sequences.add(self._random_sequence())
+            
+            sequence_list = list(sequences)
+            return sequence_list
         
         elif isinstance(self.initial_sequences, list):
             if len(self.initial_sequences) >= self.n_init:
@@ -191,18 +227,25 @@ class BoGA:
                 return self.initial_sequences[:self.n_init]
             else:
                 # Not enough sequences - use all and fill remainder
-                sequences = list(self.initial_sequences)
-                remaining = self.n_init - len(sequences)
+                sequences = set(self.initial_sequences)  # Ensure uniqueness
                 
                 # Fill remainder with mutations of existing sequences and random sequences
-                for _ in range(remaining):
+                max_attempts = self.n_init * 10
+                attempts = 0
+                while len(sequences) < self.n_init and attempts < max_attempts:
                     if random.random() < 0.7:  # 70% chance to mutate existing sequence
-                        parent = random.choice(self.initial_sequences)
-                        sequences.append(self._mutate_sequence(parent))
+                        parent = random.choice(list(sequences))
+                        sequences.add(self._mutate_sequence(parent))
                     else:  # 30% chance to generate completely random sequence
-                        sequences.append(self._random_sequence())
+                        sequences.add(self._random_sequence())
+                    attempts += 1
                 
-                return sequences
+                # Fill any remaining with random sequences
+                while len(sequences) < self.n_init:
+                    sequences.add(self._random_sequence())
+                
+                sequence_list = list(sequences)
+                return sequence_list
         
         else:
             raise ValueError("initial_sequences must be None, a string, or a list of strings")
@@ -211,33 +254,74 @@ class BoGA:
         """
         Embed peptides (ESM or AAIndex), scale, and apply PCA reduction. Returns
         reduced embeddings directly.
+        
+        Uses cached raw embeddings and recomputes PCA on the complete dataset each time.
         """
-        # Embed
-        if self.embed_method == 'esm':
-            raw = self.embedder.embed_esm(
-                peptides,
-                average=self.embed_average,
-                model_path=self.embed_model_path,
-                batch_size=self.embed_batch_size,
-                filter=True,
-                device=self.embed_device
-            )
-        elif self.embed_method == 'aaindex':
-            raw = self.embedder.embed_aaindex(
-                peptides,
-                average=self.embed_average,
-                filter=True
-            )
+        # First, embed any new peptides that aren't in our cache
+        new_peptides = [p for p in peptides if p not in self.raw_embeddings_cache]
+        
+        if new_peptides:
+            # Embed new peptides
+            if self.embed_method == 'esm':
+                new_raw = self.embedder.embed_esm(
+                    new_peptides,
+                    average=self.embed_average,
+                    model_path=self.embed_model_path,
+                    batch_size=self.embed_batch_size,
+                    filter=True,
+                    device=self.embed_device
+                )
+            elif self.embed_method == 'aaindex':
+                new_raw = self.embedder.embed_aaindex(
+                    new_peptides,
+                    average=self.embed_average,
+                    filter=True
+                )
+            else:
+                raise ValueError("embed_method must be 'esm' or 'aaindex'")
+            
+            # Add to cache
+            self.raw_embeddings_cache.update(new_raw)
+        
+        # Get the subset of embeddings we need for this batch
+        batch_raw = {p: self.raw_embeddings_cache[p] for p in peptides}
+        
+        # Scale all embeddings in the cache (for consistency)
+        all_scaled = self.embedder.scale_embeddings(self.raw_embeddings_cache)
+        
+        # Apply PCA to all cached embeddings
+        n_samples = len(all_scaled)
+        if n_samples > 0:
+            sample_embedding = next(iter(all_scaled.values()))
+            if hasattr(sample_embedding, 'shape'):
+                if len(sample_embedding.shape) == 2:
+                    n_features = sample_embedding.shape[1]
+                else:
+                    n_features = sample_embedding.shape[0]
+            else:
+                n_features = len(sample_embedding)
+            
+            # Set PCA components once and stick with it
+            if self.actual_pca_components is None:
+                max_components = min(n_samples, n_features)
+                self.actual_pca_components = self.pca_n_components
+                
+                if self.actual_pca_components and self.actual_pca_components >= max_components:
+                    print(f"Info: Adjusting PCA components from {self.actual_pca_components} to {max_components - 1} (n_samples={n_samples}, n_features={n_features})")
+                    self.actual_pca_components = max_components - 1
+                print(f"Info: Fixed PCA components to {self.actual_pca_components} for all future embeddings")
         else:
-            raise ValueError("embed_method must be 'esm' or 'aaindex'")
-        # Scale + PCA
-        scaled = self.embedder.scale_embeddings(raw)
-        reduced = self.embedder.reduce_embeddings_pca(
-            scaled,
-            explained_variance_ratio=self.pca_explained_variance_ratio,
-            n_components=self.pca_n_components
+            self.actual_pca_components = None
+        
+        # Apply PCA to all cached embeddings
+        all_reduced = self.embedder.reduce_embeddings_pca(
+            all_scaled,
+            n_components=self.actual_pca_components
         )
-        return reduced
+        
+        # Return only the embeddings requested for this batch
+        batch_reduced = {p: all_reduced[p] for p in peptides}
+        return batch_reduced
 
     def _dock_and_score(self, sequences: List[str]) -> Dict[str, float]:
         dock_dirs = self.docker.dock_peptides(sequences)
@@ -319,155 +403,149 @@ class BoGA:
             
         return results
 
-    def _optimize_hyperparameters(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
+    def _optimize_hyperparameters(self, embeddings: Dict[str, Any], objectives: Dict[str, float], iteration: Optional[int] = None) -> None:
         """
-        Hyperparameter tuning and model training.
-        Called only when generation % hpo_interval == 0.
+        Hyperparameter tuning using the surrogate model manager.
         """
-        self.best_hyperparams, self.previous_study = tune_hyperparams(
-            model_type=self.surrogate_model_kwargs['model_type'],
-            embedding_dict=embeddings,
-            objective_dict=objectives,
-            network_type=self.surrogate_model_kwargs['network_type'],
+        self.surrogate_manager.optimize_hyperparameters(
+            embeddings=embeddings,
+            objectives=objectives,
             n_trials=self.surrogate_model_kwargs.get('n_trials', 20),
             n_splits=self.surrogate_model_kwargs.get('n_splits', 3),
             random_state=self.surrogate_model_kwargs.get('random_state', 42),
-            previous_study=self.previous_study,
-            device=self.device
+            iteration=iteration
         )
 
-    def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
-        """
-        Train with existing hyperparameters without tuning.
-        """
-        if self.model is None:
-            raise RuntimeError("Model not initialized before training")
-        self.model.fit_dict(embeddings, objectives, device=self.device)
+    def _initialize_model(self, embeddings: Dict[str, Any]) -> None:
+        """Initialize the model using the surrogate model manager."""
+        self.surrogate_manager.initialize_model(embeddings=embeddings)
 
-    def _initialize_model(self, hyperparams: Dict[str, Any]) -> None:
-        model_type = self.surrogate_model_kwargs['model_type']
-        network_type = self.surrogate_model_kwargs['network_type']
-        input_dim = hyperparams.get('input_dim')
-        hidden_dims = hyperparams.get('hidden_dims')
-        hidden_dim = hyperparams.get('hidden_dim')
-        num_layers = hyperparams.get('num_layers', 2)
-        uncertainty_param = hyperparams.get('uncertainty_param')
-
-        if model_type == 'mve':
-            self.model = MVE(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                mve_regularization=uncertainty_param
-            )
-        elif model_type == 'deep_evidential':
-            self.model = DeepEvidentialRegression(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                evidential_regularization=uncertainty_param
-            )
-        elif model_type == 'mc_dropout':
-            self.model = MonteCarloDropout(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                dropout_rate=uncertainty_param
-            )
-        elif model_type == 'nn_ensemble':
-            self.model = NeuralNetworkEnsemble(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                n_networks=int(uncertainty_param)
+    def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Tuple[float, Dict[str, Any]]:
+        """
+        Train the model with validation.
+        
+        Returns:
+            Tuple of (validation_loss, metrics_dict)
+        """
+        if self.n_validate is not None and len(embeddings) > self.n_validate:
+            return self.surrogate_manager.train_with_validation(
+                embeddings=embeddings,
+                objectives=objectives,
+                n_validate=self.n_validate,
+                validation_split=self.validation_split,
+                random_state=self.surrogate_model_kwargs.get('random_state', 42)
             )
         else:
-            raise ValueError(f"Unknown model type: {model_type}")
-        self.model.to(self.device)
+            # Not enough data for validation or validation disabled
+            self.surrogate_manager.train_model(embeddings, objectives)
+            return 0.0, {}
 
-    def _select_top(self, data: Dict[str, float], k: int) -> List[str]:
-        return [seq for seq, _ in sorted(data.items(), key=lambda x: x[1], reverse=True)[:k]]
+    def _predict(self, embeddings: Dict[str, Any]) -> Dict[str, Any]:
+        """Make predictions using the surrogate model manager."""
+        return self.surrogate_manager.predict(embeddings)
+
+    def _select_top(self, data: Dict[str, float], k: int, acquisition_function: str = "mean", predictions: Optional[Dict[str, tuple]] = None) -> List[str]:
+        """
+        Select top k sequences based on acquisition function.
+        
+        Args:
+            data: Dictionary of {sequence: objective_value} for sorting fallback
+            k: Number of sequences to select
+            acquisition_function: Acquisition function to use
+            predictions: Dictionary of {sequence: (mean, std)} predictions from model
+        
+        Returns:
+            List of selected sequences
+        """
+        if acquisition_function == "mean" or predictions is None:
+            # Fall back to simple objective-based selection
+            return [seq for seq, _ in sorted(data.items(), key=lambda x: x[1], reverse=True)[:k]]
+        
+        # Use acquisition function
+        acquisition_values = self.acquisition_function_obj.compute_acquisition(
+            predictions, acquisition_function
+        )
+        
+        # Sort by acquisition value (higher is better)
+        return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
     def _mutate_sequence(self, seq: str) -> str:
         """
         Apply substitution, insertion, or deletion to the sequence based on mutation_rate.
+        Always ensures the returned sequence is different from the input.
         """
-        seq_list = list(seq)
-        new_seq = []
-        for aa in seq_list:
-            r = random.random()
-            if r < self.mutation_rate:
-                # Choose mutation type
-                op = random.choice(['sub', 'del', 'ins'])
-                if op == 'sub':
-                    # substitution
-                    new_seq.append(random.choice(_AMINO_ACIDS))
-                elif op == 'del':
-                    # deletion: skip this residue
-                    continue
+        max_attempts = 100  # Prevent infinite loops
+        attempt = 0
+        
+        while attempt < max_attempts:
+            seq_list = list(seq)
+            new_seq = []
+            mutation_occurred = False
+            
+            for aa in seq_list:
+                r = random.random()
+                if r < self.mutation_rate or (not mutation_occurred and aa == seq_list[-1]):
+                    # Choose mutation type
+                    op = random.choice(['sub', 'del', 'ins'])
+                    if op == 'sub':
+                        # substitution
+                        new_aa = random.choice([a for a in _AMINO_ACIDS if a != aa])  # Ensure change
+                        new_seq.append(new_aa)
+                        mutation_occurred = True
+                    elif op == 'del' and len(seq_list) > self.min_sequence_length:
+                        # deletion: skip this residue (only if we won't go below min length)
+                        mutation_occurred = True
+                        continue
+                    else:
+                        # insertion: insert a random AA before current
+                        new_seq.append(random.choice(_AMINO_ACIDS))
+                        new_seq.append(aa)
+                        mutation_occurred = True
                 else:
-                    # insertion: insert a random AA before current
-                    new_seq.append(random.choice(_AMINO_ACIDS))
                     new_seq.append(aa)
-            else:
-                new_seq.append(aa)
-        # Additionally, random insertion at end
-        if random.random() < self.mutation_rate:
-            new_seq.append(random.choice(_AMINO_ACIDS))
-        # Truncate or pad to desired max_sequence_length
-        if len(new_seq) > self.max_sequence_length:
-            return ''.join(new_seq[:self.max_sequence_length])
-        else:
-            # pad by random AAs if too short
-            while len(new_seq) < self.min_sequence_length:
+            
+            # Additionally, random insertion at end
+            if random.random() < self.mutation_rate or not mutation_occurred:
                 new_seq.append(random.choice(_AMINO_ACIDS))
-            return ''.join(new_seq)
+                mutation_occurred = True
+            
+            # Ensure we have at least one change
+            if not mutation_occurred and len(new_seq) > 0:
+                # Force a substitution at a random position
+                pos = random.randint(0, len(new_seq) - 1)
+                new_seq[pos] = random.choice([a for a in _AMINO_ACIDS if a != new_seq[pos]])
+                mutation_occurred = True
+            
+            # Truncate or pad to desired length constraints
+            if len(new_seq) > self.max_sequence_length:
+                result = ''.join(new_seq[:self.max_sequence_length])
+            else:
+                # pad by random AAs if too short
+                while len(new_seq) < self.min_sequence_length:
+                    new_seq.append(random.choice(_AMINO_ACIDS))
+                result = ''.join(new_seq)
+            
+            # Check if result is different from original
+            if result != seq:
+                return result
+            
+            attempt += 1
+        
+        # Last resort fallback: substitute first amino acid
+        if len(seq) > 0:
+            result_list = list(seq)
+            result_list[0] = random.choice([a for a in _AMINO_ACIDS if a != result_list[0]])
+            return ''.join(result_list)
+        
+        return seq  # Should never reach here with valid input
 
-    def _mutate_pool(self, parents: List[str]) -> List[str]:
+    def _mutate_pool(self, parents: List[str], k_pool: int) -> List[str]:
         """Generate new pool by mutating selected parent sequences."""
         pool = []
-        for _ in range(self.k_pool):
+        for _ in range(k_pool):
             parent = random.choice(parents)
             pool.append(self._mutate_sequence(parent))
         return pool
-
-    def _calculate_model_accuracy(self, predictions: Dict[str, float], actual: Dict[str, float]) -> Dict[str, float]:
-        """Calculate model accuracy metrics by comparing predictions to actual values."""
-        if not predictions or not actual:
-            return {}
-        
-        # Find common sequences
-        common_seqs = set(predictions.keys()) & set(actual.keys())
-        if not common_seqs:
-            return {}
-        
-        pred_values = np.array([predictions[seq] for seq in common_seqs])
-        actual_values = np.array([actual[seq] for seq in common_seqs])
-        
-        # Calculate metrics
-        mse = np.mean((pred_values - actual_values) ** 2)
-        mae = np.mean(np.abs(pred_values - actual_values))
-        
-        # Correlation coefficient (if variance exists)
-        if np.var(pred_values) > 0 and np.var(actual_values) > 0:
-            correlation = np.corrcoef(pred_values, actual_values)[0, 1]
-        else:
-            correlation = 0.0
-        
-        return {
-            'mse': mse,
-            'mae': mae,
-            'correlation': correlation,
-            'n_samples': len(common_seqs)
-        }
 
     def run(self) -> Dict[str, float]:
         # Initial population and embedding/reduction
@@ -497,94 +575,102 @@ class BoGA:
         print("Optimizing initial hyperparameters...")
         self._optimize_hyperparameters(init_reduced, objectives)
 
-        for gen in range(1, self.generations + 1):
-            print(f"\n=== Generation {gen}/{self.generations} ===")
+        # Run through schedule phases
+        global_generation = 0
+        for phase_index, phase in enumerate(self.schedule, start=1):
+            acquisition_function = phase['acquisition']
+            generations = phase['generations']
+            m_select = phase['m_select']
+            k_pool = phase['k_pool']
             
-            # Init fresh model
-            self._initialize_model(self.best_hyperparams) 
-            # Embed and reduce current peptides
-            seqs = list(scores.keys())
-            reduced_embs = self._embed(seqs)
+            print(f"\n=== Phase {phase_index}: {acquisition_function} for {generations} generations ===")
+            print(f"Selection: {m_select}, Pool: {k_pool}")
 
-            # Convert scores to objectives
-            objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
-
-            # Train surrogate or model only based on interval
-            if gen % self.hpo_interval == 0:
-                print(f"Re-optimizing hyperparameters (generation {gen})")
-                self._optimize_hyperparameters(reduced_embs, objectives)
-
-            print("Training surrogate model...")
-            self.model.fit_dict(reduced_embs, objectives, device=self.device)
-
-            # Generate new pool via mutation of top M (use objectives for selection)
-            parents = self._select_top(objectives, self.m_select)
-            print(f"Selected top {len(parents)} parents for mutation")
-            
-            pool = self._mutate_pool(parents)
-            print(f"Generated candidate pool of {len(pool)} sequences")
-
-            # Embed and reduce pool
-            pool_embs = self._embed(pool)
-
-            # Predict and select top
-            preds = self.model.predict_dict(pool_embs, device=self.device)
-            candidates = self._select_top(preds, self.m_select)
-
-            print(f"Selected {len(candidates)} candidates for evaluation")
-
-            # Dock, score, and update
-            if self.use_dummy_scoring:
-                new_scores = self._dock_and_score_dummy(candidates)
-            else:
-                new_scores = self._dock_and_score(candidates)
-            scores.update(new_scores)
-            
-            # Calculate new objectives for logging
-            new_objectives = self.scores_to_objective.create_objective(new_scores, self.objective_function, **self.objective_function_kwargs)
-            
-            # Log generation data
-            if self.logger:
-                # Log new scores and objectives
-                self.logger.log_scores(new_scores, iteration=gen, acquisition_name=f"generation_{gen}")
-                self.logger.log_objectives(new_objectives, iteration=gen, acquisition_name=f"generation_{gen}")
+            for gen in range(1, generations + 1):
+                global_generation += 1
+                print(f"\n--- Generation {global_generation} (Phase {phase_index}, Gen {gen}/{generations}) ---")
                 
-                # Calculate and log model accuracy
-                accuracy_metrics = self._calculate_model_accuracy(
-                    {seq: preds[seq] for seq in candidates if seq in preds}, 
-                    new_objectives
+                # Embed and reduce current peptides
+                seqs = list(scores.keys())
+                reduced_embs = self._embed(seqs)
+
+                # Init fresh model with embeddings to determine input_dim
+                self._initialize_model(reduced_embs)
+
+                # Convert scores to objectives
+                objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
+
+                # Train surrogate or model only based on interval
+                if global_generation % self.hpo_interval == 0:
+                    print(f"Re-optimizing hyperparameters (generation {global_generation})")
+                    self._optimize_hyperparameters(reduced_embs, objectives, iteration=global_generation)
+
+                print("Training surrogate model...")
+                val_loss, metrics = self._train_model(reduced_embs, objectives)
+
+                # Generate new pool via mutation of top M
+                # For parent selection, always use objectives (exploitation)
+                parents = self._select_top(objectives, m_select)
+                print(f"Selected top {len(parents)} parents for mutation")
+                
+                pool = self._mutate_pool(parents, k_pool)
+                print(f"Generated candidate pool of {len(pool)} sequences")
+
+                # Embed and reduce pool
+                pool_embs = self._embed(pool)
+
+                # Predict on pool
+                preds = self._predict(pool_embs)
+                
+                # Convert predictions to proper format for acquisition function
+                if isinstance(list(preds.values())[0], tuple):
+                    # Uncertainty model - predictions are (mean, std) tuples
+                    pred_tuples = preds
+                else:
+                    # Non-uncertainty model - convert to (mean, 0) tuples
+                    pred_tuples = {seq: (pred, 0.0) for seq, pred in preds.items()}
+
+                # Select candidates using acquisition function
+                candidates = self._select_top(
+                    data={seq: pred_tuples[seq][0] for seq in pred_tuples},  # fallback data
+                    k=m_select,
+                    acquisition_function=acquisition_function,
+                    predictions=pred_tuples
                 )
-                if accuracy_metrics:
-                    self.logger.log_model_metrics(
-                        loss=accuracy_metrics.get('mse', 0), 
-                        iteration=gen, 
-                        metrics={
-                            'mae': accuracy_metrics.get('mae', 0),
-                            'correlation': accuracy_metrics.get('correlation', 0),
-                            'n_samples': accuracy_metrics.get('n_samples', 0)
-                        }
-                    )
-                
-                # Log hyperparameters if they were updated
-                if gen % self.hpo_interval == 0 and self.best_hyperparams:
-                    self.logger.log_hyperparameters(
-                        iteration=gen,
-                        hyperparams=self.best_hyperparams,
-                        model_type=self.surrogate_model_kwargs['model_type'],
-                        network_type=self.surrogate_model_kwargs['network_type']
-                    )
 
-            # Report generation progress
-            current_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
-            best_objective = max(current_objectives.values())
-            best_sequence = max(current_objectives.items(), key=lambda x: x[1])[0]
-            
-            print(f"Generation {gen} - Best objective: {best_objective:.4f}")
-            print(f"Best sequence so far: {best_sequence}")
-            
-            if accuracy_metrics:
-                print(f"Model accuracy - MAE: {accuracy_metrics.get('mae', 0):.4f}, "
-                      f"Correlation: {accuracy_metrics.get('correlation', 0):.4f}")
+                print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
+
+                # Dock, score, and update
+                if self.use_dummy_scoring:
+                    new_scores = self._dock_and_score_dummy(candidates)
+                else:
+                    new_scores = self._dock_and_score(candidates)
+                scores.update(new_scores)
+                
+                # Calculate new objectives for logging
+                new_objectives = self.scores_to_objective.create_objective(new_scores, self.objective_function, **self.objective_function_kwargs)
+                
+                if self.logger:
+                    # Log new scores and objectives
+                    self.logger.log_scores(new_scores, iteration=global_generation, acquisition_name=acquisition_function)
+                    self.logger.log_objectives(new_objectives, iteration=global_generation, acquisition_name=acquisition_function)
+                    
+                    # Log hyperparameters if they were updated
+                    if global_generation % self.hpo_interval == 0 and self.surrogate_manager.best_hyperparams:
+                        self.logger.log_hyperparameters(
+                            iteration=global_generation,
+                            hyperparams=self.surrogate_manager.best_hyperparams,
+                            model_type=self.surrogate_model_kwargs['model_type'],
+                            network_type=self.surrogate_model_kwargs['network_type']
+                        )
+
+                # Report generation progress
+                current_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
+                best_objective = max(current_objectives.values())
+                best_sequence = max(current_objectives.items(), key=lambda x: x[1])[0]
+                
+                print(f"Generation {global_generation} - Best objective: {best_objective:.4f}")
+                print(f"Best sequence so far: {best_sequence}")
 
         # Return final objectives instead of raw scores
         final_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)

@@ -21,7 +21,7 @@ from bopep.scoring.scores_to_objective import benchmark_objective
 
 def main():
     # File paths
-    target_structure_path = "/home/er8813ha/bopep/data/ply1.pdb"
+    target_structure_path = "./data/ply1.pdb"
     
     # Verify target file exists
     if not os.path.exists(target_structure_path):
@@ -33,25 +33,39 @@ def main():
     # Binding site residues (370-465)
     binding_site_residues = list(range(370, 466))  # 466 to include 465
     
+    # Define acquisition schedule
+    schedule = [
+        {
+            'acquisition': 'expected_improvement',
+            'generations': 3,
+            'm_select': 10,
+            'k_pool': 100
+        },
+        {
+            'acquisition': 'upper_confidence_bound', 
+            'generations': 2,
+            'm_select': 8,
+            'k_pool': 80
+        }
+    ]
+    
     # BoGA configuration
     boga = BoGA(
         # Target and sequence parameters
         target_structure_path=target_structure_path,
+        schedule=schedule,    # New schedule parameter
         initial_sequences=starting_sequence,  # Single sequence to mutate
         min_sequence_length=8,
         max_sequence_length=20,
         
         # Population and evolution parameters  
         n_init=20,           # Initial population size (reduced for testing)
-        m_select=10,         # Number of parents to select each generation
-        k_pool=100,          # Pool size for candidate generation (reduced for testing)
-        generations=5,       # Number of evolution generations (reduced for testing)
         mutation_rate=0.05,  # Higher mutation rate for exploration
         
         # Surrogate model configuration (BiGRU + DER)
         surrogate_model_kwargs={
             'model_type': 'deep_evidential',  # Deep Evidential Regression (DER)
-            'network_type': 'bigru',          # BiGRU network
+            'network_type': 'mlp',          # MLP network (will auto-detect embed_average=True)
             'n_trials': 10,                   # Hyperparameter optimization trials (reduced for testing)
             'n_splits': 3,                    # Cross-validation splits
             'random_state': 42
@@ -82,7 +96,7 @@ def main():
         # Docker configuration for docking (not used in dummy mode)
         docker_kwargs={
             'models': ['boltz'],  # Use Boltz for docking
-            'output_dir': '/home/er8813ha/bopep/examples/boga_output',
+            'output_dir': './examples/boga_output',
             'n_jobs': 1,  # Reduced for testing
             'keep_structures': False  # Don't keep structures in dummy mode
         },
@@ -93,17 +107,16 @@ def main():
         
         # Embedding configuration
         embed_method='esm',           # ESM protein language model
-        embed_average=True,           # Average over sequence length
+        # embed_average will be auto-detected: False for BiGRU, True for MLP
         embed_batch_size=32,          # Batch size for embedding
-        pca_n_components=128,        # PCA components to retain
+        pca_n_components=15,          # PCA components to retain (less than n_init)
 
         # Other parameters
         hpo_interval=5,               # Hyperparameter optimization every 5 generations
         random_seed=42,
         
         # Logging configuration
-        log_dir="/home/er8813ha/bopep/examples/boga_logs",
-        enable_logging=True,
+        log_dir="./examples/boga_logs",
         
         # Testing configuration - use dummy scoring for quick testing
         use_dummy_scoring=True,
@@ -116,12 +129,14 @@ def main():
     print(f"Starting sequence: {starting_sequence}")
     print(f"Binding site residues: {min(binding_site_residues)}-{max(binding_site_residues)}")
     print(f"Required contacts: 5")
-    print(f"Surrogate model: BiGRU + Deep Evidential Regression")
+    print(f"Surrogate model: MLP + Deep Evidential Regression")
     print(f"Objective function: benchmark_objective")
     print(f"Initial population: {boga.n_init} sequences")
-    print(f"Generations: {boga.generations}")
+    print(f"Schedule phases: {len(boga.schedule)}")
+    for i, phase in enumerate(boga.schedule, 1):
+        print(f"  Phase {i}: {phase['acquisition']} for {phase['generations']} generations (m_select={phase['m_select']}, k_pool={phase['k_pool']})")
     print(f"Dummy scoring mode: {boga.use_dummy_scoring}")
-    print(f"Logging enabled: {boga.enable_logging}")
+    print(f"Logging enabled: {boga.logger is not None}")
     if boga.logger:
         print(f"Log directory: {boga.logger.log_dir}")
     print("="*60)
@@ -147,14 +162,14 @@ def main():
     print(f"Best sequence: {sorted_results[0][0]}")
     
     # Save results
-    output_file = "/home/er8813ha/bopep/examples/boga_results.txt"
+    output_file = "./examples/boga_results.txt"
     with open(output_file, 'w') as f:
         f.write("BoGA Results\n")
         f.write("="*50 + "\n")
         f.write(f"Target: {target_structure_path}\n")
         f.write(f"Starting sequence: {starting_sequence}\n")
         f.write(f"Binding site: {min(binding_site_residues)}-{max(binding_site_residues)}\n")
-        f.write(f"Model: BiGRU + Deep Evidential Regression\n")
+        f.write(f"Model: MLP + Deep Evidential Regression\n")
         f.write(f"Objective: benchmark_objective\n\n")
         
         for i, (sequence, objective) in enumerate(sorted_results, 1):
