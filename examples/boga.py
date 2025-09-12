@@ -44,8 +44,8 @@ def main():
         {
             'acquisition': 'upper_confidence_bound', 
             'generations': 2,
-            'm_select': 8,
-            'k_pool': 80
+            'm_select': 10,
+            'k_pool': 200
         }
     ]
     
