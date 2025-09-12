@@ -81,7 +81,7 @@ def main():
         # Docker configuration for docking (not used in dummy mode)
         docker_kwargs={
             'models': ['alphafold'],  # Use AlphaFold for docking
-            'output_dir': './examples/boga_output_docking',
+            'output_dir': '../boga_output_docking',
             'num_models': 2,            # Number of docking models to generate
             'num_recycles': 1,          # Number of recycles in AlphaFold
         },
@@ -101,8 +101,8 @@ def main():
         random_seed=42,
         
         # Logging configuration
-        log_dir="./examples/boga_logs",
-        
+        log_dir="../boga_logs",
+
         # Testing configuration - use dummy scoring for quick testing
         use_dummy_scoring=False,
     )
@@ -147,7 +147,7 @@ def main():
     print(f"Best sequence: {sorted_results[0][0]}")
     
     # Save results
-    output_file = "./examples/boga_results.txt"
+    output_file = "../boga_results.txt"
     with open(output_file, 'w') as f:
         f.write("BoGA Results\n")
         f.write("="*50 + "\n")
