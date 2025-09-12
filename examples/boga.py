@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""
-BoGA (Bayesian Optimization Genetic Algorithm) Example - DUMMY MODE
-
-This script demonstrates how to use the BoGA class for peptide binder discovery
-using surrogate modeling and genetic algorithms.
-
-DUMMY MODE: This example uses dummy docking and scoring to quickly test the 
-BoGA workflow without running actual molecular docking simulations.
-Set use_dummy_scoring=False to run with real docking.
-
-Target: ply1.pdb from /data directory
-Starting sequence: ARNPRYDGLGAMDY
-Binding site: residues 370-465
-Surrogate model: BiGRU + Deep Evidential Regression (DER)
-"""
 
 import os
 from bopep.genetic_algorithm.generate import BoGA
@@ -37,15 +22,15 @@ def main():
     schedule = [
         {
             'acquisition': 'expected_improvement',
-            'generations': 3,
-            'm_select': 10,
-            'k_pool': 100
+            'generations': 5,
+            'm_select': 5,
+            'k_pool': 10_000
         },
         {
             'acquisition': 'upper_confidence_bound', 
-            'generations': 2,
-            'm_select': 10,
-            'k_pool': 200
+            'generations': 5,
+            'm_select': 5,
+            'k_pool': 10_000
         }
     ]
     
@@ -56,10 +41,10 @@ def main():
         schedule=schedule,    # New schedule parameter
         initial_sequences=starting_sequence,  # Single sequence to mutate
         min_sequence_length=8,
-        max_sequence_length=20,
+        max_sequence_length=25,
         
         # Population and evolution parameters  
-        n_init=20,           # Initial population size (reduced for testing)
+        n_init=10,           # Initial population size (reduced for testing)
         mutation_rate=0.05,  # Higher mutation rate for exploration
         
         # Surrogate model configuration (BiGRU + DER)
@@ -90,15 +75,15 @@ def main():
             'binding_site_residue_indices': binding_site_residues,
             'required_n_contact_residues': 5,  # Number of contacts as requested
             'binding_site_distance_threshold': 5.0,
-            'n_jobs': 4  # Parallel scoring jobs
+            'n_jobs': 12  # Parallel scoring jobs
         },
         
         # Docker configuration for docking (not used in dummy mode)
         docker_kwargs={
-            'models': ['boltz'],  # Use Boltz for docking
-            'output_dir': './examples/boga_output',
-            'n_jobs': 1,  # Reduced for testing
-            'keep_structures': False  # Don't keep structures in dummy mode
+            'models': ['alphafold'],  # Use AlphaFold for docking
+            'output_dir': './examples/boga_output_docking',
+            'num_models': 2,            # Number of docking models to generate
+            'num_recycles': 1,          # Number of recycles in AlphaFold
         },
         
         # Objective function - use benchmark objective
@@ -109,17 +94,17 @@ def main():
         embed_method='esm',           # ESM protein language model
         # embed_average will be auto-detected: False for BiGRU, True for MLP
         embed_batch_size=32,          # Batch size for embedding
-        pca_n_components=15,          # PCA components to retain (less than n_init)
+        pca_n_components=10,          # PCA components to retain (less than n_init)
 
         # Other parameters
-        hpo_interval=5,               # Hyperparameter optimization every 5 generations
+        hpo_interval=5,               # Hyperparameter optimization every 10 generations
         random_seed=42,
         
         # Logging configuration
         log_dir="./examples/boga_logs",
         
         # Testing configuration - use dummy scoring for quick testing
-        use_dummy_scoring=True,
+        use_dummy_scoring=False,
     )
     
     print("="*60)

@@ -1,6 +1,4 @@
 import random
-import time
-import hashlib
 from typing import List, Dict, Any, Optional, Callable, Union, Tuple
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
@@ -11,38 +9,24 @@ from bopep.search.utils import _validate_surrogate_model_kwargs
 from bopep.search.acquisition_functions import AcquisitionFunction
 from bopep.logging.logger import Logger
 import torch
-import numpy as np
 
 _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 class BoGA:
     """
     Genetic algorithm for peptide binder discovery using surrogate modeling.
-
-    In BoGA, we specify a target and binding site, then:
-
-    1. Generate/prepare initial population of N sequences:
-       - If initial_sequences is None: generate N random sequences
-       - If initial_sequences is a string: treat as single sequence and generate N mutations
-       - If initial_sequences is a list with ≥N sequences: use first N sequences
-       - If initial_sequences is a list with <N sequences: use all + fill remainder with mutations/random
-
-    2. Dock and score initial population
-    3. Train surrogate model on scores
-    4. For each generation:
-       - Select M best sequences based on predicted affinity
-       - Mutate selected sequences to generate new K candidate sequences
-       - Evaluate candidates and update population
-    5. Repeat until convergence or max generations
     """
     def __init__(
         self,
         target_structure_path: str,
-        max_sequence_length: int,
         schedule: List[Dict[str, Any]],
-        initial_sequences: Optional[Union[str, List[str]]] = None,
+        initial_sequences: Union[str, List[str]],
+
+        n_init : int = 50,
+
         min_sequence_length: int = 6,
-        n_init: int = 100,
+        max_sequence_length: int = 40,
+        
         surrogate_model_kwargs: Optional[Dict[str, Any]] = None,
         objective_function: Optional[Callable] = None,
         objective_function_kwargs: Optional[Dict[str, Any]] = None,
@@ -64,40 +48,11 @@ class BoGA:
         validation_split: float = 0.2,
         # Logging options
         log_dir: Optional[str] = None,
-        # Testing options
-        use_dummy_scoring: bool = False,
     ):
-        """
-        Parameters
-        ----------
-        target_structure_path : str
-            Path to target protein structure for docking
-        max_sequence_length : int
-            Maximum length of generated peptide sequences
-        schedule : List[Dict[str, Any]]
-            List of dictionaries defining the optimization phases.
-            Each dict should have 'acquisition', 'generations', 'm_select', and 'k_pool' keys.
-            Example: [{'acquisition': 'expected_improvement', 'generations': 50, 'm_select': 50, 'k_pool': 5000}]
-        initial_sequences : Optional[Union[str, List[str]]], default=None
-            Initial population specification:
-            - None: generate n_init random sequences
-            - str: single sequence to mutate n_init times  
-            - List[str]: list of sequences (truncated to n_init if too many, 
-              extended with mutations/random if too few)
-        min_sequence_length : int, default=6
-            Minimum length of generated peptide sequences
-        n_init : int, default=100
-            Size of initial population
-        hpo_interval : int, default=10
-            Hyperparameter optimization interval (every N generations)
-        log_dir : Optional[str], default=None
-            Directory for logging files. If None, logging is disabled.
-        use_dummy_scoring : bool, default=False
-            Whether to use dummy scoring instead of real docking for testing
-        ... (other parameters)
-        """
+
         
         self.initial_sequences = initial_sequences
+        
 
         # Validate surrogate model config
         self.surrogate_model_kwargs = surrogate_model_kwargs or {}
@@ -135,6 +90,7 @@ class BoGA:
 
         # Initialize components
         self.docker = Docker(docker_kwargs or {})
+        self.docker.set_target_structure(self.target_structure_path)
         self.scorer = Scorer()
         self.scores_to_objective = ScoresToObjective()
         self.embedder = Embedder()
@@ -152,8 +108,7 @@ class BoGA:
         else:
             self.logger = None
 
-        # Store testing options
-        self.use_dummy_scoring = use_dummy_scoring
+        self._evaluated_sequences: set[str] = set()
         
         # Store raw embeddings for dynamic PCA fitting
         self.raw_embeddings_cache = {}
@@ -283,9 +238,6 @@ class BoGA:
             # Add to cache
             self.raw_embeddings_cache.update(new_raw)
         
-        # Get the subset of embeddings we need for this batch
-        batch_raw = {p: self.raw_embeddings_cache[p] for p in peptides}
-        
         # Scale all embeddings in the cache (for consistency)
         all_scaled = self.embedder.scale_embeddings(self.raw_embeddings_cache)
         
@@ -325,83 +277,17 @@ class BoGA:
 
     def _dock_and_score(self, sequences: List[str]) -> Dict[str, float]:
         dock_dirs = self.docker.dock_peptides(sequences)
-        return self.scorer.score_batch(
+        scores =  self.scorer.score_batch(
             scores_to_include=self.scoring_kwargs.get('scores_to_include', []),
             inputs=dock_dirs,
-            input_type='colab_dir',
+            input_type='processed_dir',
             binding_site_residue_indices=self.scoring_kwargs.get('binding_site_residue_indices'),
             n_jobs=self.scoring_kwargs.get('n_jobs', 12),
             binding_site_distance_threshold=self.scoring_kwargs.get('binding_site_distance_threshold', 5),
             required_n_contact_residues=self.scoring_kwargs.get('required_n_contact_residues', 5),
         )
-
-    def _dock_and_score_dummy(self, sequences: List[str]) -> Dict[str, Dict[str, Any]]:
-        """
-        Dummy docking and scoring for testing purposes.
-        Generates realistic-looking fake scores based on sequence properties.
-        """
-        import hashlib
-        import time
-        
-        print(f"  [DUMMY] Docking and scoring {len(sequences)} sequences...")
-        time.sleep(0.5)  # Simulate some processing time
-        
-        results = {}
-        for seq in sequences:
-            # Use sequence hash for reproducible "random" scores
-            hash_val = int(hashlib.md5(seq.encode()).hexdigest()[:8], 16)
-            np.random.seed(hash_val % 2**31)  # Ensure reproducible results
-            
-            # Generate realistic score ranges based on typical values
-            seq_len = len(seq)
-            
-            # Rosetta score: typically -1000 to 400
-            rosetta_score = np.random.uniform(-800, 200) - seq_len * 10
-            
-            # Interface dG: typically -100 to 20 
-            interface_dG = np.random.uniform(-80, 10) + np.random.normal(0, 15)
-            
-            # Distance score: typically 5 to 8
-            distance_score = np.random.uniform(5.5, 7.5)
-            
-            # IPTM: typically 0.1 to 0.95
-            iptm = np.random.beta(2, 3) * 0.85 + 0.1
-            
-            # Peptide PAE: typically 3 to 30
-            peptide_pae = np.random.gamma(2, 3) + 3
-            if peptide_pae > 30:
-                peptide_pae = 30
-                
-            # Interface SASA: typically 0 to 2000
-            interface_sasa = np.random.exponential(400)
-            if interface_sasa > 2000:
-                interface_sasa = 2000
-                
-            # Number of contacts: typically 0 to 20
-            n_contacts = np.random.poisson(5)
-            if n_contacts > 20:
-                n_contacts = 20
-                
-            # Peptide plDDT: typically 40 to 90
-            peptide_plddt = np.random.normal(70, 15)
-            peptide_plddt = max(40, min(90, peptide_plddt))
-            
-            # In binding site: make it sequence-dependent but mostly true
-            in_binding_site = (hash_val % 10) < 8  # 80% chance of being in binding site
-            
-            results[seq] = {
-                'rosetta_score': rosetta_score,
-                'interface_dG': interface_dG,
-                'distance_score': distance_score,
-                'iptm': iptm,
-                'peptide_pae': peptide_pae,
-                'interface_sasa': interface_sasa,
-                'n_contacts': n_contacts,
-                'peptide_plddt': peptide_plddt,
-                'in_binding_site': in_binding_site
-            }
-            
-        return results
+        self._evaluated_sequences.update(sequences)
+        return scores
 
     def _optimize_hyperparameters(self, embeddings: Dict[str, Any], objectives: Dict[str, float], iteration: Optional[int] = None) -> None:
         """
@@ -447,34 +333,20 @@ class BoGA:
     def _select_top(self, data: Dict[str, float], k: int, acquisition_function: str = "mean", predictions: Optional[Dict[str, tuple]] = None) -> List[str]:
         """
         Select top k sequences based on acquisition function.
-        
-        Args:
-            data: Dictionary of {sequence: objective_value} for sorting fallback
-            k: Number of sequences to select
-            acquisition_function: Acquisition function to use
-            predictions: Dictionary of {sequence: (mean, std)} predictions from model
-        
-        Returns:
-            List of selected sequences
         """
-        if acquisition_function == "mean" or predictions is None:
-            # Fall back to simple objective-based selection
-            return [seq for seq, _ in sorted(data.items(), key=lambda x: x[1], reverse=True)[:k]]
-        
-        # Use acquisition function
         acquisition_values = self.acquisition_function_obj.compute_acquisition(
             predictions, acquisition_function
         )
-        
-        # Sort by acquisition value (higher is better)
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
     def _mutate_sequence(self, seq: str) -> str:
         """
         Apply substitution, insertion, or deletion to the sequence based on mutation_rate.
         Always ensures the returned sequence is different from the input.
+
+        Additionally ensures the new sequence has not been previously docked/evaluated.
         """
-        max_attempts = 100  # Prevent infinite loops
+        max_attempts = 10_000  # Prevent infinite loops
         attempt = 0
         
         while attempt < max_attempts:
@@ -525,27 +397,33 @@ class BoGA:
                     new_seq.append(random.choice(_AMINO_ACIDS))
                 result = ''.join(new_seq)
             
-            # Check if result is different from original
-            if result != seq:
+            # Check if result is different from original AND not previously evaluated
+            if result != seq and result not in self._evaluated_sequences:
                 return result
             
             attempt += 1
         
-        # Last resort fallback: substitute first amino acid
-        if len(seq) > 0:
-            result_list = list(seq)
-            result_list[0] = random.choice([a for a in _AMINO_ACIDS if a != result_list[0]])
-            return ''.join(result_list)
-        
-        return seq  # Should never reach here with valid input
+        return seq
+
 
     def _mutate_pool(self, parents: List[str], k_pool: int) -> List[str]:
-        """Generate new pool by mutating selected parent sequences."""
-        pool = []
-        for _ in range(k_pool):
+        """
+        - m_select: how many top-performing *parents* are selected from the evaluated set.
+        - k_pool:   how many *offspring candidates* to generate in this mutation step.
+        """
+        # Generate a unique pool and avoid sequences we’ve already evaluated
+        pool: set[str] = set()
+        attempts = 0
+        max_attempts = max(k_pool * 20, 10_000)
+
+        while len(pool) < k_pool and attempts < max_attempts:
             parent = random.choice(parents)
-            pool.append(self._mutate_sequence(parent))
-        return pool
+            child = self._mutate_sequence(parent)
+            if child not in self._evaluated_sequences:
+                pool.add(child)
+            attempts += 1
+
+        return list(pool)
 
     def run(self) -> Dict[str, float]:
         # Initial population and embedding/reduction
@@ -556,10 +434,7 @@ class BoGA:
 
         # Dock and score initial
         print("Docking and scoring initial population...")
-        if self.use_dummy_scoring:
-            scores = self._dock_and_score_dummy(init_seqs)
-        else:
-            scores = self._dock_and_score(init_seqs)
+        scores = self._dock_and_score(init_seqs)
 
         # Convert initial scores to objectives
         objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
@@ -569,7 +444,7 @@ class BoGA:
             self.logger.log_scores(scores, iteration=0, acquisition_name="initial")
             self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
 
-        print(f"Initial population - Best objective: {max(objectives.values()):.4f}")
+        print(f"Initial population - best objective: {max(objectives.values()):.4f}")
 
         # Initial hyperparameter tuning
         print("Optimizing initial hyperparameters...")
@@ -641,10 +516,7 @@ class BoGA:
                 print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
 
                 # Dock, score, and update
-                if self.use_dummy_scoring:
-                    new_scores = self._dock_and_score_dummy(candidates)
-                else:
-                    new_scores = self._dock_and_score(candidates)
+                new_scores = self._dock_and_score(candidates)
                 scores.update(new_scores)
                 
                 # Calculate new objectives for logging
