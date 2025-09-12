@@ -1,5 +1,7 @@
 import random
 from typing import List, Dict, Any, Optional, Callable, Union, Tuple
+
+import numpy as np
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
 from bopep.scoring.scorer import Scorer
@@ -49,13 +51,10 @@ class BoGA:
         # Logging options
         log_dir: Optional[str] = None,
     ):
-
-        
         self.initial_sequences = initial_sequences
         
-
         # Validate surrogate model config
-        self.surrogate_model_kwargs = surrogate_model_kwargs or {}
+        self.surrogate_model_kwargs = surrogate_model_kwargs
         _validate_surrogate_model_kwargs(self.surrogate_model_kwargs)
 
         # Store GA parameters
@@ -65,8 +64,8 @@ class BoGA:
         self.n_init = n_init
         self.schedule = schedule
         self.objective_function = objective_function
-        self.objective_function_kwargs = objective_function_kwargs or {}
-        self.scoring_kwargs = scoring_kwargs or {}
+        self.objective_function_kwargs = objective_function_kwargs
+        self.scoring_kwargs = scoring_kwargs
         self.mutation_rate = mutation_rate
         self.hpo_interval = hpo_interval
         self.n_validate = n_validate
@@ -89,7 +88,7 @@ class BoGA:
         self.pca_n_components = pca_n_components
 
         # Initialize components
-        self.docker = Docker(docker_kwargs or {})
+        self.docker = Docker(docker_kwargs)
         self.docker.set_target_structure(self.target_structure_path)
         self.scorer = Scorer()
         self.scores_to_objective = ScoresToObjective()
@@ -108,16 +107,10 @@ class BoGA:
         else:
             self.logger = None
 
-        self._evaluated_sequences: set[str] = set()
+        self._evaluated_sequences  = set()
         
         # Store raw embeddings for dynamic PCA fitting
         self.raw_embeddings_cache = {}
-        self.actual_pca_components = None  # Fixed after first embedding
-        
-        # Store fitted transformers to ensure consistent dimensionality
-        self.fitted_scaler = None
-        self.fitted_pca = None
-        self.final_input_dim = None
 
         if random_seed is not None:
             random.seed(random_seed)
@@ -223,14 +216,14 @@ class BoGA:
                     average=self.embed_average,
                     model_path=self.embed_model_path,
                     batch_size=self.embed_batch_size,
-                    filter=True,
+                    filter=False,
                     device=self.embed_device
                 )
             elif self.embed_method == 'aaindex':
                 new_raw = self.embedder.embed_aaindex(
                     new_peptides,
                     average=self.embed_average,
-                    filter=True
+                    filter=False
                 )
             else:
                 raise ValueError("embed_method must be 'esm' or 'aaindex'")
@@ -242,33 +235,9 @@ class BoGA:
         all_scaled = self.embedder.scale_embeddings(self.raw_embeddings_cache)
         
         # Apply PCA to all cached embeddings
-        n_samples = len(all_scaled)
-        if n_samples > 0:
-            sample_embedding = next(iter(all_scaled.values()))
-            if hasattr(sample_embedding, 'shape'):
-                if len(sample_embedding.shape) == 2:
-                    n_features = sample_embedding.shape[1]
-                else:
-                    n_features = sample_embedding.shape[0]
-            else:
-                n_features = len(sample_embedding)
-            
-            # Set PCA components once and stick with it
-            if self.actual_pca_components is None:
-                max_components = min(n_samples, n_features)
-                self.actual_pca_components = self.pca_n_components
-                
-                if self.actual_pca_components and self.actual_pca_components >= max_components:
-                    print(f"Info: Adjusting PCA components from {self.actual_pca_components} to {max_components - 1} (n_samples={n_samples}, n_features={n_features})")
-                    self.actual_pca_components = max_components - 1
-                print(f"Info: Fixed PCA components to {self.actual_pca_components} for all future embeddings")
-        else:
-            self.actual_pca_components = None
-        
-        # Apply PCA to all cached embeddings
         all_reduced = self.embedder.reduce_embeddings_pca(
             all_scaled,
-            n_components=self.actual_pca_components
+            n_components=self.pca_n_components
         )
         
         # Return only the embeddings requested for this batch
@@ -309,9 +278,6 @@ class BoGA:
     def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Tuple[float, Dict[str, Any]]:
         """
         Train the model with validation.
-        
-        Returns:
-            Tuple of (validation_loss, metrics_dict)
         """
         if self.n_validate is not None and len(embeddings) > self.n_validate:
             return self.surrogate_manager.train_with_validation(
@@ -331,7 +297,7 @@ class BoGA:
         print(f"Performing inference on candidate pool consisting of {len(embeddings)} sequences...")
         return self.surrogate_manager.predict(embeddings)
 
-    def _select_top(self, data: Dict[str, float], k: int, acquisition_function: str = "mean", predictions: Optional[Dict[str, tuple]] = None) -> List[str]:
+    def _select_top(self, predictions: Optional[Dict[str, tuple]], k: int, acquisition_function: str = "mean") -> List[str]:
         """
         Select top k sequences based on acquisition function.
         """
@@ -342,70 +308,69 @@ class BoGA:
 
     def _mutate_sequence(self, seq: str) -> str:
         """
-        Apply substitution, insertion, or deletion to the sequence based on mutation_rate.
-        Always ensures the returned sequence is different from the input.
-
-        Additionally ensures the new sequence has not been previously docked/evaluated.
+        - n_edits ~ Poisson(len(seq) * mutation_rate), min 1
+        - ops: substitution, deletion, insertion
+        - respects min/max length at every step
+        - guarantees a novel child not seen in _evaluated_sequences
         """
-        max_attempts = 10_000  # Prevent infinite loops
-        attempt = 0
-        
-        while attempt < max_attempts:
-            seq_list = list(seq)
-            new_seq = []
-            mutation_occurred = False
-            
-            for aa in seq_list:
-                r = random.random()
-                if r < self.mutation_rate or (not mutation_occurred and aa == seq_list[-1]):
-                    # Choose mutation type
-                    op = random.choice(['sub', 'del', 'ins'])
-                    if op == 'sub':
-                        # substitution
-                        new_aa = random.choice([a for a in _AMINO_ACIDS if a != aa])  # Ensure change
-                        new_seq.append(new_aa)
-                        mutation_occurred = True
-                    elif op == 'del' and len(seq_list) > self.min_sequence_length:
-                        # deletion: skip this residue (only if we won't go below min length)
-                        mutation_occurred = True
-                        continue
-                    else:
-                        # insertion: insert a random AA before current
-                        new_seq.append(random.choice(_AMINO_ACIDS))
-                        new_seq.append(aa)
-                        mutation_occurred = True
-                else:
-                    new_seq.append(aa)
-            
-            # Additionally, random insertion at end
-            if random.random() < self.mutation_rate or not mutation_occurred:
-                new_seq.append(random.choice(_AMINO_ACIDS))
-                mutation_occurred = True
-            
-            # Ensure we have at least one change
-            if not mutation_occurred and len(new_seq) > 0:
-                # Force a substitution at a random position
-                pos = random.randint(0, len(new_seq) - 1)
-                new_seq[pos] = random.choice([a for a in _AMINO_ACIDS if a != new_seq[pos]])
-                mutation_occurred = True
-            
-            # Truncate or pad to desired length constraints
-            if len(new_seq) > self.max_sequence_length:
-                result = ''.join(new_seq[:self.max_sequence_length])
-            else:
-                # pad by random AAs if too short
-                while len(new_seq) < self.min_sequence_length:
-                    new_seq.append(random.choice(_AMINO_ACIDS))
-                result = ''.join(new_seq)
-            
-            # Check if result is different from original AND not previously evaluated
-            if result != seq and result not in self._evaluated_sequences:
-                return result
-            
-            attempt += 1
-        
-        return seq
+        max_attempts = 10_000
+        ops_space = np.array(["sub", "del", "ins"], dtype=object)
 
+        for _ in range(max_attempts):
+            child = list(seq)
+
+            lam = max(1e-9, len(child) * self.mutation_rate)
+            n_edits = int(np.random.poisson(lam))
+            if n_edits < 1:
+                n_edits = 1
+
+            for _ in range(n_edits):
+                can_del = len(child) > self.min_sequence_length
+                can_ins = len(child) < self.max_sequence_length
+
+                # probabilities for [sub, del, ins], normalized
+                probs = np.array([1.0, 1.0 if can_del else 0.0, 1.0 if can_ins else 0.0], dtype=float)
+                probs /= probs.sum()  # if both del/ins illegal, this becomes [1,0,0]
+
+                op = np.random.choice(ops_space, p=probs)
+
+                if op == "sub":
+                    i = np.random.randint(len(child))
+                    old = child[i]
+                    # choose a different amino acid
+                    # fast path avoids while-loop
+                    choices = [a for a in _AMINO_ACIDS if a != old]
+                    child[i] = choices[np.random.randint(len(choices))]
+
+                elif op == "del":
+                    if len(child) <= self.min_sequence_length:
+                        # degrade to substitution
+                        i = np.random.randint(len(child))
+                        old = child[i]
+                        choices = [a for a in _AMINO_ACIDS if a != old]
+                        child[i] = choices[np.random.randint(len(choices))]
+                    else:
+                        i = np.random.randint(len(child))
+                        del child[i]
+
+                else:  # "ins"
+                    if len(child) >= self.max_sequence_length:
+                        # degrade to substitution
+                        i = np.random.randint(len(child))
+                        old = child[i]
+                        choices = [a for a in _AMINO_ACIDS if a != old]
+                        child[i] = choices[np.random.randint(len(choices))]
+                    else:
+                        # insert at a random gap [0..len]
+                        i = np.random.randint(len(child) + 1)
+                        child.insert(i, _AMINO_ACIDS[np.random.randint(len(_AMINO_ACIDS))])
+
+            result = "".join(child)
+            if self.min_sequence_length <= len(result) <= self.max_sequence_length \
+            and result != seq and result not in self._evaluated_sequences:
+                return result
+
+        return seq
 
     def _mutate_pool(self, parents: List[str], k_pool: int) -> List[str]:
         """
@@ -486,7 +451,7 @@ class BoGA:
 
                 # Generate new pool via mutation of top M
                 # For parent selection, always use objectives (exploitation)
-                parents = self._select_top(objectives, m_select)
+                parents = self._select_top(objectives, m_select, "mean")
                 print(f"Selected top {len(parents)} parents for mutation")
                 
                 pool = self._mutate_pool(parents, k_pool)
@@ -498,20 +463,12 @@ class BoGA:
                 # Predict on pool
                 preds = self._predict(pool_embs)
                 
-                # Convert predictions to proper format for acquisition function
-                if isinstance(list(preds.values())[0], tuple):
-                    # Uncertainty model - predictions are (mean, std) tuples
-                    pred_tuples = preds
-                else:
-                    # Non-uncertainty model - convert to (mean, 0) tuples
-                    pred_tuples = {seq: (pred, 0.0) for seq, pred in preds.items()}
-
                 # Select candidates using acquisition function
                 candidates = self._select_top(
-                    data={seq: pred_tuples[seq][0] for seq in pred_tuples},  # fallback data
+                    predictions=preds,
                     k=m_select,
                     acquisition_function=acquisition_function,
-                    predictions=pred_tuples
+                    
                 )
 
                 print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
@@ -520,11 +477,11 @@ class BoGA:
                 new_scores = self._dock_and_score(candidates)
                 scores.update(new_scores)
                 
-                # Calculate new objectives for logging
                 new_objectives = self.scores_to_objective.create_objective(new_scores, self.objective_function, **self.objective_function_kwargs)
                 
                 if self.logger:
                     # Log new scores and objectives
+                    self.logger.log_model_metrics(val_loss, iteration=global_generation, metrics=metrics)
                     self.logger.log_scores(new_scores, iteration=global_generation, acquisition_name=acquisition_function)
                     self.logger.log_objectives(new_objectives, iteration=global_generation, acquisition_name=acquisition_function)
                     
@@ -539,11 +496,12 @@ class BoGA:
 
                 # Report generation progress
                 current_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
-                best_objective = max(current_objectives.values())
-                best_sequence = max(current_objectives.items(), key=lambda x: x[1])[0]
-                
-                print(f"Generation {global_generation} - Best objective: {best_objective:.4f}")
-                print(f"Best sequence so far: {best_sequence}")
+
+                print(f"Generation {global_generation} leaderboard:")
+                sorted_leaderboard = sorted(current_objectives.items(), key=lambda x: x[1], reverse=True)[:5]
+                for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
+                    print(f"  {rank}. {seq} - Objective: {obj:.4f}")
+
 
         # Return final objectives instead of raw scores
         final_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
