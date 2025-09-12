@@ -328,6 +328,7 @@ class BoGA:
 
     def _predict(self, embeddings: Dict[str, Any]) -> Dict[str, Any]:
         """Make predictions using the surrogate model manager."""
+        print(f"Performing inference on candidate pool consisting of {len(embeddings)} sequences...")
         return self.surrogate_manager.predict(embeddings)
 
     def _select_top(self, data: Dict[str, float], k: int, acquisition_function: str = "mean", predictions: Optional[Dict[str, tuple]] = None) -> List[str]:
