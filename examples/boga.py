@@ -78,7 +78,6 @@ def main():
             'n_jobs': 12  # Parallel scoring jobs
         },
         
-        # Docker configuration for docking (not used in dummy mode)
         docker_kwargs={
             'models': ['alphafold'],  # Use AlphaFold for docking
             'output_dir': '../boga_output_docking',
@@ -102,9 +101,6 @@ def main():
         
         # Logging configuration
         log_dir="../boga_logs",
-
-        # Testing configuration - use dummy scoring for quick testing
-        use_dummy_scoring=False,
     )
     
     print("="*60)
@@ -120,7 +116,7 @@ def main():
     print(f"Schedule phases: {len(boga.schedule)}")
     for i, phase in enumerate(boga.schedule, 1):
         print(f"  Phase {i}: {phase['acquisition']} for {phase['generations']} generations (m_select={phase['m_select']}, k_pool={phase['k_pool']})")
-    print(f"Dummy scoring mode: {boga.use_dummy_scoring}")
+
     print(f"Logging enabled: {boga.logger is not None}")
     if boga.logger:
         print(f"Log directory: {boga.logger.log_dir}")
