@@ -1,7 +1,6 @@
 import random
 from typing import List, Dict, Any, Optional, Callable, Union, Tuple
 
-import numpy as np
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
 from bopep.scoring.scorer import Scorer
@@ -10,9 +9,8 @@ from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.search.utils import _validate_surrogate_model_kwargs
 from bopep.search.acquisition_functions import AcquisitionFunction
 from bopep.logging.logger import Logger
+from bopep.genetic_algorithm.mutate import PeptideMutator
 import torch
-
-_AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 class BoGA:
     """
@@ -95,6 +93,14 @@ class BoGA:
         self.embedder = Embedder()
         self.acquisition_function_obj = AcquisitionFunction()
         
+        # Initialize peptide mutator
+        self.mutator = PeptideMutator(
+            min_sequence_length=self.min_sequence_length,
+            max_sequence_length=self.max_sequence_length,
+            mutation_rate=self.mutation_rate,
+            random_seed=random_seed
+        )
+        
         # Initialize surrogate model manager
         self.surrogate_manager = SurrogateModelManager(
             surrogate_model_kwargs=self.surrogate_model_kwargs,
@@ -116,7 +122,7 @@ class BoGA:
             random.seed(random_seed)
 
     def _random_sequence(self) -> str:
-        return ''.join(random.choice(_AMINO_ACIDS) for _ in range(random.randint(self.min_sequence_length, self.max_sequence_length)))
+        return self.mutator.generate_random_sequence()
 
     def _generate_initial_sequences(self) -> List[str]:
         return [self._random_sequence() for _ in range(self.n_init)]
@@ -158,7 +164,7 @@ class BoGA:
             while len(sequences) < self.n_init and attempts < max_attempts:
                 # Mutate a random sequence from our current set (more diversity)
                 parent = random.choice(list(sequences))
-                new_seq = self._mutate_sequence(parent)  # Always forces change now
+                new_seq = self.mutator.mutate_sequence(parent, self._evaluated_sequences)  # Always forces change now
                 sequences.add(new_seq)
                 attempts += 1
             
@@ -183,7 +189,7 @@ class BoGA:
                 while len(sequences) < self.n_init and attempts < max_attempts:
                     if random.random() < 0.7:  # 70% chance to mutate existing sequence
                         parent = random.choice(list(sequences))
-                        sequences.add(self._mutate_sequence(parent))
+                        sequences.add(self.mutator.mutate_sequence(parent, self._evaluated_sequences))
                     else:  # 30% chance to generate completely random sequence
                         sequences.add(self._random_sequence())
                     attempts += 1
@@ -302,71 +308,11 @@ class BoGA:
         acquisition_values = self.acquisition_function_obj.compute_acquisition(predictions, acquisition_function)
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
-    def _mutate_sequence(self, seq: str) -> str:
+    def _mutate_pool(self, parents: List[str], k_pool: int) -> List[str]:
         """
-        - n_edits ~ Poisson(len(seq) * mutation_rate), min 1
-        - ops: substitution, deletion, insertion
-        - respects min/max length at every step
-        - guarantees a novel child not seen in _evaluated_sequences
+        Generate a pool of mutated offspring using the peptide mutator.
         """
-        max_attempts = 10_000
-        ops_space = np.array(["sub", "del", "ins"], dtype=object)
-
-        for _ in range(max_attempts):
-            child = list(seq)
-
-            lam = max(1e-9, len(child) * self.mutation_rate)
-            n_edits = int(np.random.poisson(lam))
-            if n_edits < 1:
-                n_edits = 1
-
-            for _ in range(n_edits):
-                can_del = len(child) > self.min_sequence_length
-                can_ins = len(child) < self.max_sequence_length
-
-                # probabilities for [sub, del, ins], normalized
-                probs = np.array([1.0, 1.0 if can_del else 0.0, 1.0 if can_ins else 0.0], dtype=float)
-                probs /= probs.sum()  # if both del/ins illegal, this becomes [1,0,0]
-
-                op = np.random.choice(ops_space, p=probs)
-
-                if op == "sub":
-                    i = np.random.randint(len(child))
-                    old = child[i]
-                    # choose a different amino acid
-                    # fast path avoids while-loop
-                    choices = [a for a in _AMINO_ACIDS if a != old]
-                    child[i] = choices[np.random.randint(len(choices))]
-
-                elif op == "del":
-                    if len(child) <= self.min_sequence_length:
-                        # degrade to substitution
-                        i = np.random.randint(len(child))
-                        old = child[i]
-                        choices = [a for a in _AMINO_ACIDS if a != old]
-                        child[i] = choices[np.random.randint(len(choices))]
-                    else:
-                        i = np.random.randint(len(child))
-                        del child[i]
-
-                else:  # "ins"
-                    if len(child) >= self.max_sequence_length:
-                        # degrade to substitution
-                        i = np.random.randint(len(child))
-                        old = child[i]
-                        choices = [a for a in _AMINO_ACIDS if a != old]
-                        child[i] = choices[np.random.randint(len(choices))]
-                    else:
-                        # insert at a random gap [0..len]
-                        i = np.random.randint(len(child) + 1)
-                        child.insert(i, _AMINO_ACIDS[np.random.randint(len(_AMINO_ACIDS))])
-
-            result = "".join(child)
-            if self.min_sequence_length <= len(result) <= self.max_sequence_length \
-            and result != seq and result not in self._evaluated_sequences:
-                return result
-
-        return seq
+        return self.mutator.mutate_pool(parents, k_pool, self._evaluated_sequences)
 
     def _mutate_pool(self, parents: List[str], k_pool: int) -> List[str]:
         """
