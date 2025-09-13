@@ -293,17 +293,13 @@ class BoGA:
             return 0.0, {}
 
     def _predict(self, embeddings: Dict[str, Any]) -> Dict[str, Any]:
-        """Make predictions using the surrogate model manager."""
-        print(f"Performing inference on candidate pool consisting of {len(embeddings)} sequences...")
         return self.surrogate_manager.predict(embeddings)
 
-    def _select_top(self, predictions: Optional[Dict[str, tuple]], k: int, acquisition_function: str = "mean") -> List[str]:
-        """
-        Select top k sequences based on acquisition function.
-        """
-        acquisition_values = self.acquisition_function_obj.compute_acquisition(
-            predictions, acquisition_function
-        )
+    def _select_top_objectives(self, objectives: Dict[str, float], k: int) -> List[str]:
+        return [seq for seq, _ in sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:k]]
+
+    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str) -> List[str]:
+        acquisition_values = self.acquisition_function_obj.compute_acquisition(predictions, acquisition_function)
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
     def _mutate_sequence(self, seq: str) -> str:
@@ -398,12 +394,18 @@ class BoGA:
 
         init_reduced = self._embed(init_seqs)
 
-        # Dock and score initial
+        # Dock and score initial population
         print("Docking and scoring initial population...")
         scores = self._dock_and_score(init_seqs)
+        
+        print("Initial scores:")
+        print(scores)
 
         # Convert initial scores to objectives
         objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
+
+        print("Initial objectives:")
+        print(objectives)
 
         # Log initial population
         if self.logger:
@@ -451,7 +453,7 @@ class BoGA:
 
                 # Generate new pool via mutation of top M
                 # For parent selection, always use objectives (exploitation)
-                parents = self._select_top(objectives, m_select, "mean")
+                parents = self._select_top_objectives(objectives, m_select)
                 print(f"Selected top {len(parents)} parents for mutation")
                 
                 pool = self._mutate_pool(parents, k_pool)
@@ -464,12 +466,7 @@ class BoGA:
                 preds = self._predict(pool_embs)
                 
                 # Select candidates using acquisition function
-                candidates = self._select_top(
-                    predictions=preds,
-                    k=m_select,
-                    acquisition_function=acquisition_function,
-                    
-                )
+                candidates = self._select_top_predictions(preds, m_select, acquisition_function)
 
                 print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
 
