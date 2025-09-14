@@ -25,7 +25,6 @@ class PeptideMutator:
         lam: float = 0.3,      # weight on elite prior in blosum_elite mode
         p_ins: float = 0.10,
         p_del: float = 0.10,
-        p_shakeup: float = 0.05,  # chance to ignore mode and use uniform once
     ):
         self.min_sequence_length = min_sequence_length
         self.max_sequence_length = max_sequence_length
@@ -36,7 +35,6 @@ class PeptideMutator:
         self.lam = float(lam)
         self.p_ins = float(p_ins)
         self.p_del = float(p_del)
-        self.p_shakeup = float(p_shakeup)
 
         # Build a symmetric 20x20 BLOSUM matrix if available
         self._blosum = self._build_blosum_matrix() if _BLOSUM62 is not None else None
@@ -45,6 +43,7 @@ class PeptideMutator:
         self._elite_prior = np.full(20, 1.0 / 20.0, dtype=float)
 
     def set_mode(self, mode: str):
+        """We should have more of this."""
         assert mode in {"uniform", "blosum", "blosum_elite"}
         self.mode = mode
 
@@ -60,7 +59,7 @@ class PeptideMutator:
             self._elite_prior[:] = 1.0 / 20.0
         else:
             p = counts / counts.sum()
-            self._elite_prior = (1 - alpha) * p + alpha * (1.0 / 20.0)
+            self._elite_prior = (1 - alpha) * p + alpha * (1.0 / 20.0) # smooth
 
     def generate_random_sequence(self) -> str:
         L = random.randint(self.min_sequence_length, self.max_sequence_length)
@@ -99,24 +98,13 @@ class PeptideMutator:
                     child[i] = self._sample_sub(old)
 
                 elif op == "del":
-                    if len(child) <= self.min_sequence_length:
-                        i = np.random.randint(len(child))
-                        old = child[i]
-                        child[i] = self._sample_sub(old)
-                    else:
-                        i = np.random.randint(len(child))
-                        del child[i]
+                    i = np.random.randint(len(child))
+                    del child[i]
 
                 else:  # "ins"
-                    if len(child) >= self.max_sequence_length:
-                        i = np.random.randint(len(child))
-                        old = child[i]
-                        child[i] = self._sample_sub(old)
-                    else:
-                        i = np.random.randint(len(child) + 1)
-                        # bias insertions with elite prior a bit
-                        aa = np.random.choice(_AMINO_ACIDS, p=self._elite_prior)
-                        child.insert(i, aa)
+                    i = np.random.randint(len(child) + 1)
+                    aa = np.random.choice(_AMINO_ACIDS, p=self._elite_prior)  # bias insertions with elite prior
+                    child.insert(i, aa)
 
             result = "".join(child)
             if (self.min_sequence_length <= len(result) <= self.max_sequence_length
@@ -158,8 +146,8 @@ class PeptideMutator:
 
 
     def _sample_sub(self, old: str) -> str:
-        # occasional uniform shakeup
-        if random.random() < self.p_shakeup or self.mode == "uniform":
+
+        if self.mode == "uniform":
             probs = np.ones(20, dtype=float)
             probs[_AA2IDX[old]] = 0.0
             probs /= probs.sum()

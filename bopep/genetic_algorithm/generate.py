@@ -33,7 +33,6 @@ class BoGA:
         scoring_kwargs: Optional[Dict[str, Any]] = None,
         docker_kwargs: Optional[Dict[str, Any]] = None,
         mutation_rate: float = 0.01,
-        random_seed: Optional[int] = None,
         # Embedding options
         embed_method: str = 'esm',               # 'esm' or 'aaindex'
         embed_model_path: Optional[str] = None,
@@ -45,7 +44,7 @@ class BoGA:
         hpo_interval: int = 10,
         # Validation options
         n_validate: Optional[int] = None,
-        validation_split: float = 0.2,
+        validation_split: Optional[float] = 0.2,
         # Logging options
         log_dir: Optional[str] = None,
     ):
@@ -98,7 +97,6 @@ class BoGA:
             min_sequence_length=self.min_sequence_length,
             max_sequence_length=self.max_sequence_length,
             mutation_rate=self.mutation_rate,
-            random_seed=random_seed
         )
         
         # Initialize surrogate model manager
@@ -118,8 +116,6 @@ class BoGA:
         # Store raw embeddings for dynamic PCA fitting
         self.raw_embeddings_cache = {}
 
-        if random_seed is not None:
-            random.seed(random_seed)
 
     def _random_sequence(self) -> str:
         return self.mutator.generate_random_sequence()
@@ -273,7 +269,6 @@ class BoGA:
             objectives=objectives,
             n_trials=self.surrogate_model_kwargs.get('n_trials', 20),
             n_splits=self.surrogate_model_kwargs.get('n_splits', 3),
-            random_state=self.surrogate_model_kwargs.get('random_state', 42),
             iteration=iteration
         )
 
@@ -284,18 +279,21 @@ class BoGA:
     def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Tuple[float, Dict[str, Any]]:
         """
         Train the model with validation.
+
+        TODO: Fix validation logic.
         """
+        self.n_validate = int(self.validation_split * len(embeddings)) if self.n_validate is None else self.n_validate
         if self.n_validate is not None and len(embeddings) > self.n_validate:
             return self.surrogate_manager.train_with_validation(
                 embeddings=embeddings,
                 objectives=objectives,
                 n_validate=self.n_validate,
                 validation_split=self.validation_split,
-                random_state=self.surrogate_model_kwargs.get('random_state', 42)
             )
         else:
             # Not enough data for validation or validation disabled
             self.surrogate_manager.train_model(embeddings, objectives)
+            # TODO: in this case, metrics should be computed on training data
             return 0.0, {}
 
     def _select_top_objectives(self, objectives: Dict[str, float], k: int) -> List[str]:
