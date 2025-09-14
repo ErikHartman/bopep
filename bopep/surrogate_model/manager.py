@@ -2,8 +2,7 @@ import torch
 import numpy as np
 from typing import Dict, Any, Optional, Tuple
 import logging
-from sklearn.model_selection import KFold
-
+from sklearn.metrics import r2_score, mean_absolute_error
 from bopep.surrogate_model import (
     tune_hyperparams,
     NeuralNetworkEnsemble,
@@ -337,7 +336,7 @@ class SurrogateModelManager:
         actual = np.array([objectives[p] for p in peptides])
         predicted = np.array([predictions_dict[p][0] for p in peptides])
         
-        from sklearn.metrics import r2_score, mean_absolute_error
+        
         r2 = r2_score(actual, predicted)
         mae = mean_absolute_error(actual, predicted)
 
