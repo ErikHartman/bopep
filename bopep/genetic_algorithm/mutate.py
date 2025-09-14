@@ -19,6 +19,7 @@ class PeptideMutator:
         
         if random_seed is not None:
             random.seed(random_seed)
+            np.random.seed(random_seed)
 
     def generate_random_sequence(self) -> str:
         return ''.join(random.choice(_AMINO_ACIDS) for _ in range(random.randint(self.min_sequence_length, self.max_sequence_length)))

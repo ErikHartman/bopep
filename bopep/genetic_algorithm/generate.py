@@ -298,40 +298,12 @@ class BoGA:
             self.surrogate_manager.train_model(embeddings, objectives)
             return 0.0, {}
 
-    def _predict(self, embeddings: Dict[str, Any]) -> Dict[str, Any]:
-        return self.surrogate_manager.predict(embeddings)
-
     def _select_top_objectives(self, objectives: Dict[str, float], k: int) -> List[str]:
         return [seq for seq, _ in sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:k]]
 
     def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str) -> List[str]:
         acquisition_values = self.acquisition_function_obj.compute_acquisition(predictions, acquisition_function)
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
-
-    def _mutate_pool(self, parents: List[str], k_pool: int) -> List[str]:
-        """
-        Generate a pool of mutated offspring using the peptide mutator.
-        """
-        return self.mutator.mutate_pool(parents, k_pool, self._evaluated_sequences)
-
-    def _mutate_pool(self, parents: List[str], k_pool: int) -> List[str]:
-        """
-        - m_select: how many top-performing *parents* are selected from the evaluated set.
-        - k_pool:   how many *offspring candidates* to generate in this mutation step.
-        """
-        # Generate a unique pool and avoid sequences we’ve already evaluated
-        pool: set[str] = set()
-        attempts = 0
-        max_attempts = max(k_pool * 20, 10_000)
-
-        while len(pool) < k_pool and attempts < max_attempts:
-            parent = random.choice(parents)
-            child = self._mutate_sequence(parent)
-            if child not in self._evaluated_sequences:
-                pool.add(child)
-            attempts += 1
-
-        return list(pool)
 
     def run(self) -> Dict[str, float]:
         # Initial population and embedding/reduction
@@ -402,15 +374,15 @@ class BoGA:
                 parents = self._select_top_objectives(objectives, m_select)
                 print(f"Selected top {len(parents)} parents for mutation")
                 
-                pool = self._mutate_pool(parents, k_pool)
+                pool = self.mutator.mutate_pool(parents, k_pool, self._evaluated_sequences)
                 print(f"Generated candidate pool of {len(pool)} sequences")
 
                 # Embed and reduce pool
                 pool_embs = self._embed(pool)
 
                 # Predict on pool
-                preds = self._predict(pool_embs)
-                
+                preds = self.surrogate_manager.predict(pool_embs)
+
                 # Select candidates using acquisition function
                 candidates = self._select_top_predictions(preds, m_select, acquisition_function)
 
