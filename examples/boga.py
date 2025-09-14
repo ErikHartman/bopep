@@ -2,7 +2,7 @@
 
 import os
 from bopep.genetic_algorithm.generate import BoGA
-from bopep.scoring.scores_to_objective import benchmark_objective
+from bopep.scoring.scores_to_objective import bopep_objective_v1
 
 def main():
     # File paths
@@ -59,7 +59,7 @@ def main():
         # Scoring configuration
         scoring_kwargs={
             'scores_to_include': [
-                # Required scores for benchmark_objective function
+                # Required scores for bopep_objective_v1 function
                 'rosetta_score',           # Rosetta energy score
                 'interface_dG',            # Binding free energy
                 'distance_score',          # Distance-based score  
@@ -86,8 +86,8 @@ def main():
         },
         
         # Objective function - use benchmark objective
-        objective_function=benchmark_objective,
-        objective_function_kwargs={},  # benchmark_objective doesn't need additional kwargs
+        objective_function=bopep_objective_v1,
+        objective_function_kwargs={},  # bopep_objective_v1 doesn't need additional kwargs
         
         # Embedding configuration
         embed_method='esm',           # ESM protein language model
@@ -111,7 +111,7 @@ def main():
     print(f"Binding site residues: {min(binding_site_residues)}-{max(binding_site_residues)}")
     print(f"Required contacts: 5")
     print(f"Surrogate model: MLP + Deep Evidential Regression")
-    print(f"Objective function: benchmark_objective")
+    print(f"Objective function: bopep_objective_v1")
     print(f"Initial population: {boga.n_init} sequences")
     print(f"Schedule phases: {len(boga.schedule)}")
     for i, phase in enumerate(boga.schedule, 1):
@@ -151,7 +151,7 @@ def main():
         f.write(f"Starting sequence: {starting_sequence}\n")
         f.write(f"Binding site: {min(binding_site_residues)}-{max(binding_site_residues)}\n")
         f.write(f"Model: MLP + Deep Evidential Regression\n")
-        f.write(f"Objective: benchmark_objective\n\n")
+        f.write(f"Objective: bopep_objective_v1\n\n")
         
         for i, (sequence, objective) in enumerate(sorted_results, 1):
             f.write(f"{i:3d}. {sequence:25s} | {objective:.6f}\n")

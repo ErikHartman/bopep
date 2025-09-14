@@ -29,11 +29,11 @@ class ScoresToObjective:
             dict: A mapping of peptide -> scalarized objective value
         """
         if objective_function is None:
-            objective_function = bopep_objective
+            objective_function = bopep_objective_v1
         return objective_function(scores, **kwargs)
     
     
-def benchmark_objective(scores: dict) -> dict:
+def bopep_objective_v1(scores: dict) -> dict:
     """
     regression_equation_string = "-rosetta_score - (distance_score + 3.0185924)*(interface_dG - 2.4250882)"
     classification_equation_string = "-iptm*(peptide_pae - 1.2075188)"
@@ -74,7 +74,7 @@ def benchmark_objective(scores: dict) -> dict:
     return objectives
 
 
-def bopep_objective(
+def bopep_objective_v0(
     scores: dict, objective_weights: dict = None, invert_keys: set = None
 ) -> dict:
     """
@@ -172,5 +172,5 @@ if __name__ == "__main__":
     }
 
     objective = ScoresToObjective()
-    result = objective.create_objective(example_scores, benchmark_objective)
+    result = objective.create_objective(example_scores, bopep_objective_v1)
     print(result)
