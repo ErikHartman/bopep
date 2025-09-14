@@ -1,5 +1,5 @@
 import random
-from typing import List, Set, Optional
+from typing import List, Set
 import numpy as np
 
 _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
@@ -11,15 +11,11 @@ class PeptideMutator:
         min_sequence_length: int = 6,
         max_sequence_length: int = 40,
         mutation_rate: float = 0.01,
-        random_seed: Optional[int] = None
     ):
         self.min_sequence_length = min_sequence_length
         self.max_sequence_length = max_sequence_length
         self.mutation_rate = mutation_rate
-        
-        if random_seed is not None:
-            random.seed(random_seed)
-            np.random.seed(random_seed)
+
 
     def generate_random_sequence(self) -> str:
         return ''.join(random.choice(_AMINO_ACIDS) for _ in range(random.randint(self.min_sequence_length, self.max_sequence_length)))
