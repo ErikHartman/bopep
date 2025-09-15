@@ -402,17 +402,14 @@ class BoPep:
                     f"Model will be trained (potentially validated) on {len(docked_peptides)} peptides"
                 )
 
-                # Train the model with automatic validation split if needed
-                if n_validate is not None:
-                    loss, metrics = self.surrogate_manager.train_with_validation_split(
-                        embeddings=docked_embeddings,
-                        objectives=objectives,
-                        validation_size=n_validate,
-                        min_training_samples=self.MIN_TRAINING_SAMPLES,
-                        min_validation_samples=self.MIN_VALIDATION_SAMPLES
-                    )
-                else:
-                    loss, metrics = self.surrogate_manager.train_model(docked_embeddings, objectives)
+                # Train the model with automatic (optional) validation split
+                loss, metrics = self.surrogate_manager.train_with_validation_split(
+                    embeddings=docked_embeddings,
+                    objectives=objectives,
+                    validation_size=n_validate,
+                    min_training_samples=self.MIN_TRAINING_SAMPLES,
+                    min_validation_samples=self.MIN_VALIDATION_SAMPLES
+                )
 
                 # Log the loss and metrics
                 self.logger.log_model_metrics(loss, global_iteration, metrics)

@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Union
 import logging
 from sklearn.metrics import r2_score, mean_absolute_error
 from bopep.surrogate_model import (
@@ -20,10 +20,6 @@ class SurrogateModelManager:
     def __init__(self, surrogate_model_kwargs: Dict[str, Any], device: Optional[str] = None):
         """
         Initialize the surrogate model manager.
-        
-        Args:
-            surrogate_model_kwargs: Configuration for the surrogate model
-            device: Device to use for training ('cuda', 'cpu', or None for auto-detect)
         """
         self.surrogate_model_kwargs = surrogate_model_kwargs or {}
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
@@ -42,17 +38,8 @@ class SurrogateModelManager:
     ) -> Dict[str, Any]:
         """
         Optimize hyperparameters using Optuna.
-        
-        Args:
-            embeddings: Dictionary of embeddings {peptide: embedding}
-            objectives: Dictionary of objectives {peptide: objective_value}
-            n_trials: Number of optimization trials
-            n_splits: Number of cross-validation splits
-            random_state: Random state for reproducibility
-            iteration: Current iteration (for logging)
-            
-        Returns:
-            Best hyperparameters dictionary
+
+        Returns the best hyperparameters found.
         """
         model_type = self.surrogate_model_kwargs['model_type']
         network_type = self.surrogate_model_kwargs['network_type']
@@ -83,10 +70,8 @@ class SurrogateModelManager:
     def initialize_model(self, hyperparams: Optional[Dict[str, Any]] = None, embeddings: Optional[Dict[str, Any]] = None) -> None:
         """
         Initialize the surrogate model with given hyperparameters.
-        
-        Args:
-            hyperparams: Hyperparameters to use (defaults to self.best_hyperparams)
-            embeddings: Embeddings to infer input_dim from (required if not in surrogate_model_kwargs)
+
+        Sets self.model to the initialized model instance.
         """
         if hyperparams is None:
             hyperparams = self.best_hyperparams
@@ -163,90 +148,18 @@ class SurrogateModelManager:
         self.model.to(self.device)
         logging.info(f"Initialized {model_type} model with {network_type} network architecture")
     
-    def train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
+    def train(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
         """
         Train the model on all provided data.
-        
-        Args:
-            embeddings: Dictionary of embeddings {peptide: embedding}
-            objectives: Dictionary of objectives {peptide: objective_value}
         """
         if self.model is None:
             raise RuntimeError("Model not initialized. Call initialize_model first.")
         
         self.model.fit_dict(embeddings, objectives, device=self.device)
     
-    def train_with_validation(
-        self, 
-        embeddings: Dict[str, Any], 
-        objectives: Dict[str, float],
-        n_validate: Optional[int] = None,
-        validation_split: float = 0.2,
-        random_state: int = 42
-    ) -> Tuple[float, Dict[str, Any]]:
-        """
-        Train the model with validation split.
-        
-        Args:
-            embeddings: Dictionary of embeddings {peptide: embedding}
-            objectives: Dictionary of objectives {peptide: objective_value}
-            n_validate: Number of samples to use for validation (overrides validation_split)
-            validation_split: Fraction of data to use for validation
-            random_state: Random state for reproducibility
-            
-        Returns:
-            Tuple of (validation_loss, metrics_dict)
-        """
-        if self.model is None:
-            raise RuntimeError("Model not initialized. Call initialize_model first.")
-        
-        peptides = list(embeddings.keys())
-        n_samples = len(peptides)
-        
-        if n_validate is None:
-            n_validate = max(1, int(n_samples * validation_split))
-        
-        # Ensure we have enough data for validation
-        if n_validate >= n_samples:
-            logging.warning(f"Not enough data for validation ({n_samples} samples, {n_validate} requested). Training on all data.")
-            self.train_model(embeddings, objectives)
-            return 0.0, {}
-        
-        # Create validation split
-        np.random.seed(random_state)
-        indices = np.random.permutation(n_samples)
-        val_indices = indices[:n_validate]
-        train_indices = indices[n_validate:]
-        
-        # Split data
-        val_peptides = [peptides[i] for i in val_indices]
-        train_peptides = [peptides[i] for i in train_indices]
-        
-        train_embeddings = {p: embeddings[p] for p in train_peptides}
-        train_objectives = {p: objectives[p] for p in train_peptides}
-        val_embeddings = {p: embeddings[p] for p in val_peptides}
-        val_objectives = {p: objectives[p] for p in val_peptides}
-        
-        # Train on training set
-        self.model.fit_dict(train_embeddings, train_objectives, device=self.device)
-        
-        # Validate on validation set
-        val_predictions = self.model.predict_dict(val_embeddings, device=self.device)
-        
-        # Calculate metrics
-        val_loss, metrics = self._calculate_validation_metrics(val_predictions, val_objectives)
-        
-        return val_loss, metrics
-    
     def predict(self, embeddings: Dict[str, Any]) -> Dict[str, Any]:
         """
         Make predictions on the provided embeddings.
-        
-        Args:
-            embeddings: Dictionary of embeddings {peptide: embedding}
-            
-        Returns:
-            Dictionary of predictions {peptide: (mean, std)} or {peptide: mean}
         """
         if self.model is None:
             raise RuntimeError("Model not initialized. Call initialize_model first.")
@@ -266,6 +179,94 @@ class SurrogateModelManager:
             finally:
                 self.model = None
     
+    
+    def train_with_validation_split(
+        self, 
+        embeddings: dict, 
+        objectives: dict, 
+        validation_size: int = 5,
+        min_training_samples: int = 10,
+        min_validation_samples: int = 3
+    ) -> Tuple[float, dict]:
+        """
+        Train model with automatic train/validation split.
+        """
+        if not self.model:
+            raise RuntimeError("Model must be initialized before training")
+            
+        total_samples = len(embeddings)
+        
+        # Determine if we should split
+        num_validate = self._compute_split_indices(
+            total_samples, validation_size, min_training_samples, min_validation_samples
+        )
+        
+        if num_validate is None:
+            # Train on all data
+            return self._train_on_all(embeddings, objectives) # returns loss, metrics
+        else:
+            # Split and train with validation
+            train_emb, train_obj, val_emb, val_obj = self._split_train_validation(
+                embeddings, objectives, num_validate
+            )
+            return self._train_and_validate(train_emb, train_obj, val_emb, val_obj) # returns loss, metrics
+
+    def _train_and_validate(self, train_emb: dict, train_obj: dict, val_emb: dict, val_obj: dict) -> Tuple[float, dict]:
+        """Train on train set, evaluate on both splits."""
+        if not self.best_hyperparams:
+            raise RuntimeError("Hyperparameters must be optimized before training")
+            
+        loss = self.model.fit_dict(
+            embedding_dict=train_emb,
+            objective_dict=train_obj,
+            val_embedding_dict=val_emb,
+            val_objective_dict=val_obj,
+            epochs=self.best_hyperparams.get("epochs", 100),
+            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
+            batch_size=self.best_hyperparams.get("batch_size", 16),
+            device=self.device,
+        )
+        
+        train_pred = self.model.predict_dict(train_emb, device=self.device)
+        val_pred = self.model.predict_dict(val_emb, device=self.device)
+        train_m = self._compute_model_metrics(train_pred, train_obj)
+        val_m = self._compute_model_metrics(val_pred, val_obj)
+
+        metrics = {
+            "train_r2": train_m["r2"],
+            "train_mae": train_m["mae"],
+            "val_r2": val_m["r2"],
+            "val_mae": val_m["mae"],
+        }
+        
+        logging.info(
+            f"Loss {loss:.4f}, train R2 {train_m['r2']:.4f}, "
+            f"val R2 {val_m['r2']:.4f} "
+            f"(N_train={len(train_emb)}, N_val={len(val_emb)})"
+        )
+        return loss, metrics
+
+    def _train_on_all(self, embeddings: dict, objectives: dict) -> Tuple[float, dict]:
+        """Train on the entire dataset (no validation)."""
+        if not self.best_hyperparams:
+            raise RuntimeError("Hyperparameters must be optimized before training")
+            
+        loss = self.model.fit_dict(
+            embedding_dict=embeddings,
+            objective_dict=objectives,
+            epochs=self.best_hyperparams.get("epochs", 100),
+            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
+            batch_size=self.best_hyperparams.get("batch_size", 16),
+            device=self.device,
+        )
+        
+        preds = self.model.predict_dict(embeddings, device=self.device)
+        m = self._compute_model_metrics(preds, objectives)
+        metrics = {"r2": m["r2"], "mae": m["mae"]}
+        
+        logging.info(f"Loss {loss:.4f}, R2 {m['r2']:.4f}, N={len(embeddings)}")
+        return loss, metrics
+
     def _calculate_validation_metrics(
         self, 
         predictions: Dict[str, Any], 
@@ -273,13 +274,6 @@ class SurrogateModelManager:
     ) -> Tuple[float, Dict[str, Any]]:
         """
         Calculate validation metrics comparing predictions to actual values.
-        
-        Args:
-            predictions: Model predictions {peptide: prediction}
-            actual: Actual objective values {peptide: value}
-            
-        Returns:
-            Tuple of (loss, metrics_dict)
         """
         if not predictions or not actual:
             return 0.0, {}
@@ -343,10 +337,13 @@ class SurrogateModelManager:
         return {"r2": r2, "mae": mae}
 
     def _compute_split_indices(
-        self, total_samples: int, n_validate: int, min_training_samples: int = 10, 
+        self, total_samples: int, n_validate: Optional[Union[int, float]], min_training_samples: int = 10, 
         min_validation_samples: int = 3
     ) -> Optional[int]:
         """Return num_validate or None if split is infeasible."""
+        if n_validate is None:
+            return None
+            
         if isinstance(n_validate, float) and n_validate < 1:
             num = int(total_samples * n_validate)
         else:
@@ -384,100 +381,3 @@ class SurrogateModelManager:
         )
 
         return train_embeddings, train_objectives, val_embeddings, val_objectives
-
-    def train_with_validation_split(
-        self, 
-        embeddings: dict, 
-        objectives: dict, 
-        validation_size: int = 5,
-        min_training_samples: int = 10,
-        min_validation_samples: int = 3
-    ) -> Tuple[float, dict]:
-        """
-        Train model with automatic train/validation split.
-        
-        Args:
-            embeddings: Dictionary of embeddings {peptide: embedding}
-            objectives: Dictionary of objectives {peptide: objective_value}
-            validation_size: Number or fraction of samples to use for validation
-            min_training_samples: Minimum samples required for training
-            min_validation_samples: Minimum samples required for validation
-            
-        Returns:
-            Tuple of (loss, metrics_dict)
-        """
-        if not self.model:
-            raise RuntimeError("Model must be initialized before training")
-            
-        total_samples = len(embeddings)
-        
-        # Determine if we should split
-        num_validate = self._compute_split_indices(
-            total_samples, validation_size, min_training_samples, min_validation_samples
-        )
-        
-        if num_validate is None:
-            # Train on all data
-            return self._train_on_all(embeddings, objectives)
-        else:
-            # Split and train with validation
-            train_emb, train_obj, val_emb, val_obj = self._split_train_validation(
-                embeddings, objectives, num_validate
-            )
-            return self._train_and_validate(train_emb, train_obj, val_emb, val_obj)
-
-    def _train_and_validate(self, train_emb: dict, train_obj: dict, val_emb: dict, val_obj: dict) -> Tuple[float, dict]:
-        """Train on train set, evaluate on both splits."""
-        if not self.best_hyperparams:
-            raise RuntimeError("Hyperparameters must be optimized before training")
-            
-        loss = self.model.fit_dict(
-            embedding_dict=train_emb,
-            objective_dict=train_obj,
-            val_embedding_dict=val_emb,
-            val_objective_dict=val_obj,
-            epochs=self.best_hyperparams.get("epochs", 100),
-            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
-            batch_size=self.best_hyperparams.get("batch_size", 16),
-            device=self.device,
-        )
-        
-        train_pred = self.model.predict_dict(train_emb, device=self.device)
-        val_pred = self.model.predict_dict(val_emb, device=self.device)
-        train_m = self._compute_model_metrics(train_pred, train_obj)
-        val_m = self._compute_model_metrics(val_pred, val_obj)
-
-        metrics = {
-            "train_r2": train_m["r2"],
-            "train_mae": train_m["mae"],
-            "val_r2": val_m["r2"],
-            "val_mae": val_m["mae"],
-        }
-        
-        logging.info(
-            f"Loss {loss:.4f}, train R2 {train_m['r2']:.4f}, "
-            f"val R2 {val_m['r2']:.4f} "
-            f"(N_train={len(train_emb)}, N_val={len(val_emb)})"
-        )
-        return loss, metrics
-
-    def _train_on_all(self, embeddings: dict, objectives: dict) -> Tuple[float, dict]:
-        """Train on the entire dataset (no validation)."""
-        if not self.best_hyperparams:
-            raise RuntimeError("Hyperparameters must be optimized before training")
-            
-        loss = self.model.fit_dict(
-            embedding_dict=embeddings,
-            objective_dict=objectives,
-            epochs=self.best_hyperparams.get("epochs", 100),
-            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
-            batch_size=self.best_hyperparams.get("batch_size", 16),
-            device=self.device,
-        )
-        
-        preds = self.model.predict_dict(embeddings, device=self.device)
-        m = self._compute_model_metrics(preds, objectives)
-        metrics = {"r2": m["r2"], "mae": m["mae"]}
-        
-        logging.info(f"Loss {loss:.4f}, R2 {m['r2']:.4f}, N={len(embeddings)}")
-        return loss, metrics

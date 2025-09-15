@@ -1,4 +1,6 @@
 import random
+import logging
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Union, Tuple
 
 from bopep.docking.docker import Docker
@@ -22,7 +24,7 @@ class BoGA:
         schedule: List[Dict[str, Any]],
         initial_sequences: Union[str, List[str]],
 
-        n_init : int = 50,
+        n_init : int = 130,
 
         min_sequence_length: int = 6,
         max_sequence_length: int = 40,
@@ -39,14 +41,17 @@ class BoGA:
         embed_batch_size: int = 128,
         embed_device: Optional[str] = None,
         # PCA reduction
-        pca_n_components: Optional[int] = None,
+        pca_n_components: int = 128,
         # Hyperparameter tuning interval
-        hpo_interval: int = 10,
+        hpo_interval: int = 20,
         # Validation options
-        n_validate: Optional[int] = None,
-        validation_split: Optional[float] = 0.2,
+        n_validate: Optional[Union[float, int]] = None,  # Number (int) or fraction (float<1) for validation. None=no validation
+        min_validation_samples: int = 20,
+        min_training_samples: int = 100,
         # Logging options
         log_dir: Optional[str] = None,
+        # Continuation options
+        continue_from_logs: Optional[str] = None,
     ):
         self.initial_sequences = initial_sequences
         
@@ -61,12 +66,14 @@ class BoGA:
         self.n_init = n_init
         self.schedule = schedule
         self.objective_function = objective_function
-        self.objective_function_kwargs = objective_function_kwargs
+        self.objective_function_kwargs = objective_function_kwargs or {}
         self.scoring_kwargs = scoring_kwargs
         self.mutation_rate = mutation_rate
         self.hpo_interval = hpo_interval
         self.n_validate = n_validate
-        self.validation_split = validation_split
+        self.min_validation_samples = min_validation_samples
+        self.min_training_samples = min_training_samples
+        self.continue_from_logs = continue_from_logs
 
         # Device configuration
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -83,6 +90,13 @@ class BoGA:
         self.embed_batch_size = embed_batch_size
         self.embed_device = embed_device
         self.pca_n_components = pca_n_components
+        
+        # Enforce fixed PCA dimensions for consistent neural network training
+        if self.pca_n_components is None:
+            raise ValueError(
+                "pca_n_components must be specified to ensure dimensional consistency. "
+                "Use a fixed value (e.g., pca_n_components=20) for stable neural network training."
+            )
 
         # Initialize components
         self.docker = Docker(docker_kwargs)
@@ -126,10 +140,9 @@ class BoGA:
     def _prepare_initial_population(self) -> List[str]:
         """
         Prepare the initial population based on the initial_sequences parameter:
-        - If None: generate n_init random sequences
         - If single string: treat as single sequence and mutate until we have n_init UNIQUE sequences
         - If list with enough sequences (>= n_init): use first n_init sequences
-        - If list with few sequences (< n_init): use all + fill remainder with mutations/random
+        - If list with few sequences (< n_init): use all + fill remainder with mutations
         
         Ensures we have enough unique sequences for PCA (at least pca_n_components if specified).
         """
@@ -143,11 +156,7 @@ class BoGA:
             self.n_init = actual_target  # Update n_init to ensure we generate enough
         
         if self.initial_sequences is None:
-            # No initial sequences provided - generate random
-            sequences = set()
-            while len(sequences) < self.n_init:
-                sequences.add(self._random_sequence())
-            return list(sequences)
+            raise ValueError("initial_sequences cannot be None. Please provide a sequence or list of sequences.")
         
         elif isinstance(self.initial_sequences, str):
             # Single sequence provided - mutate until we have enough UNIQUE sequences
@@ -278,23 +287,15 @@ class BoGA:
 
     def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Tuple[float, Dict[str, Any]]:
         """
-        Train the model with validation.
-
-        TODO: Fix validation logic.
+        Train the model with automatic validation split. Manager decides whether to validate based on sample size.
         """
-        self.n_validate = int(self.validation_split * len(embeddings)) if self.n_validate is None else self.n_validate
-        if self.n_validate is not None and len(embeddings) > self.n_validate:
-            return self.surrogate_manager.train_with_validation(
-                embeddings=embeddings,
-                objectives=objectives,
-                n_validate=self.n_validate,
-                validation_split=self.validation_split,
-            )
-        else:
-            # Not enough data for validation or validation disabled
-            self.surrogate_manager.train_model(embeddings, objectives)
-            # TODO: in this case, metrics should be computed on training data
-            return 0.0, {}
+        return self.surrogate_manager.train_with_validation_split(
+            embeddings=embeddings,
+            objectives=objectives,
+            validation_size=self.n_validate,
+            min_training_samples=self.min_training_samples,
+            min_validation_samples=self.min_validation_samples
+        )
 
     def _select_top_objectives(self, objectives: Dict[str, float], k: int) -> List[str]:
         return [seq for seq, _ in sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:k]]
@@ -303,36 +304,87 @@ class BoGA:
         acquisition_values = self.acquisition_function_obj.compute_acquisition(predictions, acquisition_function)
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
-    def run(self) -> Dict[str, float]:
-        # Initial population and embedding/reduction
-        init_seqs = self._prepare_initial_population()
-        print(f"Generated initial population of {len(init_seqs)} sequences")
-
-        init_reduced = self._embed(init_seqs)
-
-        # Dock and score initial population
-        print("Docking and scoring initial population...")
-        scores = self._dock_and_score(init_seqs)
+    def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set]:
+        """
+        Load scores and evaluated sequences from existing log files.
         
-        print("Initial scores:")
-        print(scores)
+        Args:
+            log_dir: Path to directory containing log files
+            
+        Returns:
+            Tuple of (scores dict, evaluated sequences set)
+        """
+        import pandas as pd
+        
+        log_path = Path(log_dir)
+        scores_file = log_path / "scores.csv"
+        
+        if not scores_file.exists():
+            raise FileNotFoundError(f"No scores.csv found in {log_dir}")
+        
+        print(f"Loading scores from {scores_file}")
+        df = pd.read_csv(scores_file)
+        
+        scores = {}
+        for _, row in df.iterrows():
+            sequence = row['peptide']  # Column is 'peptide', not 'sequence'
+            # Reconstruct score dict from CSV columns (excluding metadata columns)
+            score_columns = [col for col in df.columns 
+                           if col not in ['peptide', 'iteration', 'phase', 'timestamp']]
+            scores[sequence] = {col: row[col] for col in score_columns}
+
+        evaluated_sequences = set(scores.keys())
+        print(f"Loaded {len(scores)} previously evaluated sequences")
+        
+        return scores, evaluated_sequences
+
+    def run(self) -> Dict[str, float]:
+        # Check if continuing from existing logs
+        if self.continue_from_logs:
+            print(f"Loading previous results from {self.continue_from_logs}")
+            scores, self._evaluated_sequences = self._load_from_logs(self.continue_from_logs)
+            print("Skipping initial population generation - using loaded sequences")
+        else:
+            # Fresh start - initial population and embedding/reduction
+            init_seqs = self._prepare_initial_population()
+            print(f"Generated initial population of {len(init_seqs)} sequences")
+
+            init_reduced = self._embed(init_seqs)
+
+            # Dock and score initial population
+            print("Docking and scoring initial population...")
+            scores = self._dock_and_score(init_seqs)
+            
+            print("Initial scores:")
+            print(scores)
 
         # Convert initial scores to objectives
         objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
-        print("Initial objectives:")
-        print(objectives)
+        if not self.continue_from_logs:
+            print("Initial objectives:")
+            print(objectives)
 
-        # Log initial population
-        if self.logger:
-            self.logger.log_scores(scores, iteration=0, acquisition_name="initial")
-            self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
+            # Log initial population for fresh runs only
+            if self.logger:
+                self.logger.log_scores(scores, iteration=0, acquisition_name="initial")
+                self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
 
-        print(f"Initial population - best objective: {max(objectives.values()):.4f}")
+            print(f"Initial population - best objective: {max(objectives.values()):.4f}")
 
-        # Initial hyperparameter tuning
-        print("Optimizing initial hyperparameters...")
-        self._optimize_hyperparameters(init_reduced, objectives)
+            # Initial hyperparameter tuning for fresh runs
+            init_reduced = self._embed(list(scores.keys()))
+            print("Optimizing initial hyperparameters...")
+            self._optimize_hyperparameters(init_reduced, objectives)
+        else:
+            print("Loaded objectives:")
+            print(f"Total sequences: {len(objectives)}")
+            print(f"Best existing objective: {max(objectives.values()):.4f}")
+            
+            # For continued runs, optimize hyperparameters on existing data
+            existing_reduced = self._embed(list(scores.keys()))
+            print("Optimizing hyperparameters on existing data...")
+            self._optimize_hyperparameters(existing_reduced, objectives)
 
         # Run through schedule phases
         global_generation = 0
