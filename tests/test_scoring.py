@@ -100,7 +100,7 @@ class TestScoresToObjective:
         converter = ScoresToObjective()
         assert converter is not None
 
-    @patch('bopep.scoring.scores_to_objective.bopep_objective')
+    @patch('bopep.scoring.scores_to_objective.bopep_objective_v1')
     def test_create_objective_basic(self, mock_objective):
         """Test basic objective creation"""
         mock_objective.return_value = {"ACDEF": 0.8, "GHIKL": 0.6}

@@ -21,7 +21,7 @@ class ScoresToObjective:
             scores: dict
                 A mapping of peptide -> {objective_name: value, ..., "is_in_binding_site": bool}
             objective_function: callable
-                The function to use for objective calculation, defaults to bopep_objective
+                The function to use for objective calculation, defaults to bopep_objective_v1
             **kwargs:
                 Additional arguments to pass to the objective function (e.g., objective_weights, invert_keys)
 
