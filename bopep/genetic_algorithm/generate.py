@@ -42,8 +42,6 @@ class BoGA:
         embed_device: Optional[str] = None,
         # PCA reduction
         pca_n_components: int = 128,
-        # Hyperparameter tuning interval
-        hpo_interval: int = 20,
         # Validation options
         n_validate: Optional[Union[float, int]] = None,  # Number (int) or fraction (float<1) for validation. None=no validation
         min_validation_samples: int = 20,
@@ -69,7 +67,6 @@ class BoGA:
         self.objective_function_kwargs = objective_function_kwargs or {}
         self.scoring_kwargs = scoring_kwargs
         self.mutation_rate = mutation_rate
-        self.hpo_interval = hpo_interval
         self.n_validate = n_validate
         self.min_validation_samples = min_validation_samples
         self.min_training_samples = min_training_samples
@@ -412,7 +409,7 @@ class BoGA:
                 objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
                 # Train surrogate or model only based on interval
-                if global_generation % self.hpo_interval == 0:
+                if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0:
                     print(f"Re-optimizing hyperparameters (generation {global_generation})")
                     self._optimize_hyperparameters(reduced_embs, objectives, iteration=global_generation)
 
