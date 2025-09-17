@@ -10,8 +10,8 @@ from typing import List, Optional, Tuple, Dict, Any
 
 import pandas as pd
 from Bio import PDB
-from Bio.PDB import PDBParser
 from Bio.SeqUtils import seq1
+from bopep.structure.parser import parse_structure
 import concurrent.futures
 
 class MPNNFastRelax:
@@ -136,9 +136,8 @@ class MPNNFastRelax:
         Optional[Dict[str, Any]]
             Dictionary containing peptide information or None if failed.
         """
-        parser = PDBParser(QUIET=True)
         try:
-            structure = parser.get_structure("structure", pdb_file)
+            structure = parse_structure(pdb_file, structure_id="structure")
             chain = next((c for c in structure.get_chains() if c.id == "A"), None)
             if chain is None:
                 chain = next(structure.get_chains(), None)

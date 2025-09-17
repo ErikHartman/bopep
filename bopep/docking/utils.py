@@ -1,4 +1,4 @@
-from Bio.PDB import PDBParser, MMCIFParser
+from bopep.structure.parser import parse_structure
 import os
 import glob
 
@@ -14,13 +14,7 @@ def extract_sequence_from_pdb(pdb_file: str, chain_id: str = "A"):
     Returns:
     - Extracted sequence as a string.
     """
-    # Choose parser based on file extension
-    if pdb_file.lower().endswith('.cif'):
-        parser = MMCIFParser(QUIET=True)
-    else:
-        parser = PDBParser(QUIET=True)
-    
-    structure = parser.get_structure("target", pdb_file)
+    structure = parse_structure(pdb_file, structure_id="target")
     aa_dict = {
         "ALA": "A",
         "CYS": "C",

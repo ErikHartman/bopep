@@ -1,5 +1,5 @@
 from typing import Tuple
-from Bio.PDB import PDBParser, MMCIFParser
+from bopep.structure.parser import parse_structure
 import numpy as np
 from scipy.spatial import cKDTree
 import os
@@ -24,8 +24,8 @@ def is_peptide_near_binding_site_by_centroid(
     binding_site_residue_indices: zero-based positions in the chain
       (0→first residue, 1→second, …)
     """
-    parser = PDBParser(QUIET=True)
-    model  = parser.get_structure("docked", pdb_file)[0]
+    structure = parse_structure(pdb_file, structure_id="docked")
+    model = structure[0]
 
     R = model[receptor_chain]
     P = model[peptide_chain]
@@ -87,12 +87,8 @@ def get_binding_site(
         (receptor_binding_site_atoms, receptor_binding_site_residue_indices,
          peptide_binding_site_residue_indices, peptide_atoms)
     """
-    if pdb_file.endswith('.cif'):
-        parser = MMCIFParser(QUIET=True, auth_residues=False)
-    else:
-        parser = PDBParser(QUIET=True)
     try:
-        structure = parser.get_structure("docked", pdb_file)
+        structure = parse_structure(pdb_file, structure_id="docked", auth_residues=False)
     except Exception as e:
         print(f"Error parsing PDB file: {e}")
         return [], [], [], []
@@ -257,8 +253,8 @@ def smooth_peptide_binding_site_score(
         pdb_file, threshold=binding_site_threshold
     )
 
-    parser = PDBParser(QUIET=True)
-    model = parser.get_structure("docked", pdb_file)[0]
+    structure = parse_structure(pdb_file, structure_id="docked")
+    model = structure[0]
     receptor_chain = model["A"]
 
     # figure out absolute numbering for the chain

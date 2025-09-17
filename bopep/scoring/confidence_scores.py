@@ -6,7 +6,7 @@ from matrices/vectors extracted from AlphaFold and Boltz predictions.
 """
 
 from typing import Dict, Any, Optional, Tuple, List
-from Bio.PDB import PDBParser
+from bopep.structure.parser import parse_structure
 from Bio.PDB import Selection, NeighborSearch
 
 def get_peptide_plddt(
@@ -78,8 +78,7 @@ def get_weighted_peptide_plddt(
         return None
     
     # Parse PDB structure for contact analysis
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure('structure', pdb_file)
+    structure = parse_structure(pdb_file, structure_id='structure')
     
     # Find chains
     chain_a = None

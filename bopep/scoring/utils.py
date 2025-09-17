@@ -1,6 +1,6 @@
-from Bio.PDB import PDBParser, MMCIFParser
 from Bio.PDB.Polypeptide import is_aa
 from Bio.Data.IUPACData import protein_letters_3to1
+from bopep.structure.parser import parse_structure
 import os
 import json
 import re
@@ -35,11 +35,7 @@ def parse_pdb(pdb_file_path : str, receptor_chain : str="A", peptide_chain : str
         peptide_coords: list of (x, y, z),
     )
     """
-    if pdb_file_path.endswith('.cif'):
-        parser = MMCIFParser(QUIET=True, auth_residues=False)
-    else:
-        parser = PDBParser(QUIET=True)
-    structure = parser.get_structure("complex", pdb_file_path)
+    structure = parse_structure(pdb_file_path, structure_id="complex", auth_residues=False)
 
     receptor_coords = []
     peptide_coords = []
@@ -92,11 +88,7 @@ def get_plDDT_from_dir(colab_dir : str, rank_num : int = 1):
         return None
 
 def get_chain_sequences(pdb_file : str):
-     if pdb_file.endswith('.cif'):
-         parser = MMCIFParser(QUIET=True)
-     else:
-         parser = PDBParser(QUIET=True)
-     structure = parser.get_structure('struct', pdb_file)
+     structure = parse_structure(pdb_file, structure_id='struct')
      return {chain.id: ''.join([
          protein_letters_3to1.get(residue.get_resname().capitalize(), 'X')
          for residue in chain if residue.id[0] == ' '
