@@ -1,5 +1,5 @@
 import math
-from bopep.scoring.utils import get_receptor_peptide_coords
+from bopep.structure.parser import get_chain_coordinates
 
 """
 Distance-based loss function for protein-peptide interactions.
@@ -11,8 +11,11 @@ def distance_score_from_structure(structure_file_path : str, receptor_chain : st
     1) Parses the structure file (PDB/CIF) to get coordinates/bfactors
     2) Computes the distance-based score
     """
-    receptor_coords, peptide_coords = get_receptor_peptide_coords(
-        structure_file_path, receptor_chain=receptor_chain, peptide_chain=peptide_chain
+    receptor_coords = get_chain_coordinates(
+        structure_file_path, receptor_chain
+    )
+    peptide_coords = get_chain_coordinates(
+        structure_file_path, peptide_chain
     )
     if not receptor_coords or not peptide_coords:
         return 0.0

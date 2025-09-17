@@ -1,30 +1,4 @@
-from bopep.docking.utils import extract_sequence_from_structure
-from bopep.structure.parser import parse_structure
-
-def check_starting_index_in_structure(structure_file: str) -> int:
-    """
-    Parses structure file (PDB/CIF) and checks what the starting residue index is. 
-    Some structure files are not 0-indexed.
-    """
-    try:
-        structure = parse_structure(structure_file, structure_id="check_index")
-        model = structure[0]
-        
-        for chain in model:
-            for residue in chain:
-                # Skip non-amino acid residues
-                if residue.id[0] == ' ':
-                    return residue.id[1]  # Return the residue sequence number
-        
-        return None
-        
-    except FileNotFoundError:
-        print(f"Error: structure file {structure_file} not found.")
-        return None
-    except Exception as e:
-        print(f"Error reading structure file: {e}")
-        return None
-    
+from bopep.structure.parser import extract_sequence_from_structure, check_starting_index_in_structure
 
 def _check_binding_site_residue_indices(
     binding_site_residue_indices,

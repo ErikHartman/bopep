@@ -2,8 +2,7 @@ import random
 import string
 from bopep.docking.alphafold_docker import AlphaFoldDocker
 from bopep.docking.boltz_docker import BoltzDocker
-from bopep.docking.utils import extract_sequence_from_structure
-from bopep.structure.parser import parse_structure
+from bopep.structure.parser import extract_sequence_from_structure, parse_structure
 import os
 from Bio.PDB import PDBIO, Select
 import tempfile

@@ -9,7 +9,7 @@ from bopep.surrogate_model.manager import SurrogateModelManager
 from bopep.logging.logger import Logger
 from bopep.search.acquisition_functions import AcquisitionFunction
 from bopep.search.utils import (_validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
-from bopep.search.pdb_utils import _check_binding_site_residue_indices
+from bopep.search.structure_utils import _check_binding_site_residue_indices
 from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
 from bopep.search.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective

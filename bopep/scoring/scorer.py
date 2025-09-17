@@ -16,7 +16,7 @@ from bopep.scoring.peptide_properties import PeptideProperties
 
 from bopep.scoring.confidence_scores import get_peptide_plddt, get_weighted_peptide_plddt, get_peptide_pae, get_peptide_pde
 from bopep.scoring.ipsae import get_ipsae_scores_from_structure_and_pae
-from bopep.docking.utils import extract_sequence_from_structure
+from bopep.structure.parser import extract_sequence_from_structure
 import os
 
 class Scorer:

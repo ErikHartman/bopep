@@ -1,6 +1,7 @@
 import numpy as np
 from Bio.SVDSuperimposer import SVDSuperimposer
-from bopep.scoring.utils import get_receptor_peptide_coords, get_chain_sequences, match_and_truncate
+from bopep.scoring.utils import match_and_truncate
+from bopep.structure.parser import get_chain_sequences, get_chain_coordinates
 import os
 import glob
 from itertools import combinations
@@ -39,8 +40,10 @@ def align_and_compute_rmsd(
         else:
             raise ValueError("The peptide sequence found in reference chains does not match the new peptide sequence.")
 
-        ref_rec_coords, ref_pep_coords = map(np.array, get_receptor_peptide_coords(ref_structure_file, ref_rec_chain_id, ref_pep_chain_id))
-        new_rec_coords, new_pep_coords = map(np.array, get_receptor_peptide_coords(structure_file, "A", "B"))
+        ref_rec_coords = np.array(get_chain_coordinates(ref_structure_file, ref_rec_chain_id))
+        ref_pep_coords = np.array(get_chain_coordinates(ref_structure_file, ref_pep_chain_id))
+        new_rec_coords = np.array(get_chain_coordinates(structure_file, "A"))
+        new_pep_coords = np.array(get_chain_coordinates(structure_file, "B"))
         new_rec_seq = new_chain_seqs.get("A", "")
 
         ref_rec_coords_trunc, new_rec_coords_trunc = match_and_truncate(ref_rec_seq, ref_rec_coords, new_rec_seq, new_rec_coords)

@@ -6,7 +6,7 @@ from matrices/vectors extracted from AlphaFold and Boltz predictions.
 """
 
 from typing import Dict, Any, Optional, Tuple, List
-from bopep.structure.parser import parse_structure
+from bopep.structure.parser import parse_structure, get_structure_residues
 from Bio.PDB import Selection, NeighborSearch
 
 def get_peptide_plddt(
@@ -27,7 +27,7 @@ def get_peptide_plddt(
     """
 
     # Get residue chain mapping from structure file
-    residue_chain_list = _parse_structure_residues(structure_file)
+    residue_chain_list = get_structure_residues(structure_file)
     if not residue_chain_list:
         return None
     
@@ -73,7 +73,7 @@ def get_weighted_peptide_plddt(
     """
 
     # Get residue chain mapping from structure file
-    residue_chain_list = _parse_structure_residues(structure_file)
+    residue_chain_list = get_structure_residues(structure_file)
     if not residue_chain_list:
         return None
     
@@ -159,7 +159,7 @@ def get_peptide_pae(
         Average PAE for peptide chain or None if error
 """
     # Get residue chain mapping from structure file
-    residue_chain_list = _parse_structure_residues(structure_file)
+    residue_chain_list = get_structure_residues(structure_file)
     if not residue_chain_list:
         return None
     
@@ -199,7 +199,7 @@ def get_peptide_pde(
     """
 
     # Get residue chain mapping from structure file
-    residue_chain_list = _parse_structure_residues(structure_file)
+    residue_chain_list = get_structure_residues(structure_file)
     if not residue_chain_list:
         return None
     
@@ -221,30 +221,6 @@ def get_peptide_pde(
     return sum(all_pde_values) / len(all_pde_values) if all_pde_values else None
     
 
-
-def _parse_structure_residues(structure_file: str) -> List[Tuple[str, str]]:
-    """
-    Parse structure file (PDB/CIF) to build residue chain list in order.
-    """
-    residue_chain_list = []
-    
-    try:
-        with open(structure_file, "r") as f:
-            last_chain_resid = None
-            for line in f:
-                if line.startswith("ATOM"):
-                    chain_id = line[21]
-                    residue_num = line[22:26].strip()
-                    
-                    chain_resid = (chain_id, residue_num)
-                    if chain_resid != last_chain_resid:
-                        residue_chain_list.append(chain_resid)
-                        last_chain_resid = chain_resid
-                        
-    except IOError as e:
-        print(f"Error reading PDB file: {e}")
-        
-    return residue_chain_list
 
 if __name__ == "__main__":
     # Example usage

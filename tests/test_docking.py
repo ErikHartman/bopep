@@ -1,6 +1,6 @@
 import pytest
 from bopep.docking.docker import Docker
-from bopep.docking.utils import extract_sequence_from_structure
+from bopep.structure.parser import extract_sequence_from_structure
 
 
 class TestDocker:

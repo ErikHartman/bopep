@@ -1,4 +1,4 @@
-from bopep.docking.utils import extract_sequence_from_structure
+from bopep.structure.parser import extract_sequence_from_structure
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import numpy as np
 _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
