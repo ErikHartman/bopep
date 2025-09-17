@@ -122,14 +122,14 @@ class MPNNFastRelax:
         
         return sorted(pdbs)
     
-    def _extract_peptide_from_pdb(self, pdb_file: str) -> Optional[Dict[str, Any]]:
+    def _extract_peptide_from_structure(self, structure_file: str) -> Optional[Dict[str, Any]]:
         """
-        Extract peptide information from PDB file.
+        Extract peptide information from structure file (PDB/CIF).
         
         Parameters
         ----------
-        pdb_file : str
-            Path to PDB file.
+        structure_file : str
+            Path to structure file (PDB/CIF).
         
         Returns
         -------
@@ -137,13 +137,13 @@ class MPNNFastRelax:
             Dictionary containing peptide information or None if failed.
         """
         try:
-            structure = parse_structure(pdb_file, structure_id="structure")
+            structure = parse_structure(structure_file, structure_id="structure")
             chain = next((c for c in structure.get_chains() if c.id == "A"), None)
             if chain is None:
                 chain = next(structure.get_chains(), None)
             
             if chain is None:
-                logging.warning(f"No chain in {pdb_file}")
+                logging.warning(f"No chain in {structure_file}")
                 return None
             
             seq = "".join(
@@ -151,19 +151,19 @@ class MPNNFastRelax:
                 for res in chain
             )
             
-            sample_id_match = re.search(r"sample_(\d+)", pdb_file)
+            sample_id_match = re.search(r"sample_(\d+)", structure_file)
             sample_id = int(sample_id_match.group(1)) if sample_id_match else None
             
             return {
-                "pdb_file": os.path.basename(pdb_file),
+                "pdb_file": os.path.basename(structure_file),
                 "sample_id": sample_id,
                 "chain_ids": chain.id,
                 "sequence": seq,
                 "length": len(seq),
-                "full_path": pdb_file,
+                "full_path": structure_file,
             }
         except Exception as exc:
-            logging.warning(f"Error reading {pdb_file}: {exc}")
+            logging.warning(f"Error reading {structure_file}: {exc}")
             return None
     
     def _run_single_mpnn(self, pdb: str, temperature: float) -> bool:

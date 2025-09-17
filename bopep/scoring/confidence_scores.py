@@ -11,7 +11,7 @@ from Bio.PDB import Selection, NeighborSearch
 
 def get_peptide_plddt(
     plddt_vector: List[float], 
-    pdb_file: str, 
+    structure_file: str, 
     peptide_chain: str = "B"
 ) -> Optional[float]:
     """
@@ -19,15 +19,15 @@ def get_peptide_plddt(
     
     Args:
         plddt_vector: Vector of pLDDT values per residue
-        pdb_file: Path to PDB file for residue mapping
+        structure_file: Path to structure file (PDB/CIF) for residue mapping
         peptide_chain: Chain ID of the peptide (default: "B")
         
     Returns:
         Average pLDDT for peptide chain or None if error
     """
 
-    # Get residue chain mapping from PDB
-    residue_chain_list = _parse_pdb_residues(pdb_file)
+    # Get residue chain mapping from structure file
+    residue_chain_list = _parse_structure_residues(structure_file)
     if not residue_chain_list:
         return None
     
@@ -50,7 +50,7 @@ def get_peptide_plddt(
 
 def get_weighted_peptide_plddt(
     plddt_vector: List[float],
-    pdb_file: str,
+    structure_file: str,
     peptide_chain: str = "B",
     protein_chain: str = "A",
     distance_threshold: float = 5.0
@@ -63,7 +63,7 @@ def get_weighted_peptide_plddt(
     
     Args:
         plddt_vector: Vector of pLDDT values per residue
-        pdb_file: Path to PDB file for contact analysis
+        structure_file: Path to structure file (PDB/CIF) for contact analysis
         peptide_chain: Chain ID of the peptide (default: "B")
         protein_chain: Chain ID of the protein (default: "A")
         distance_threshold: Distance threshold for defining contacts (default: 5.0 Å)
@@ -72,13 +72,13 @@ def get_weighted_peptide_plddt(
         Interface peptide pLDDT (contact-weighted average) or None if error
     """
 
-    # Get residue chain mapping from PDB
-    residue_chain_list = _parse_pdb_residues(pdb_file)
+    # Get residue chain mapping from structure file
+    residue_chain_list = _parse_structure_residues(structure_file)
     if not residue_chain_list:
         return None
     
-    # Parse PDB structure for contact analysis
-    structure = parse_structure(pdb_file, structure_id='structure')
+    # Parse structure for contact analysis
+    structure = parse_structure(structure_file, structure_id='structure')
     
     # Find chains
     chain_a = None
@@ -144,7 +144,7 @@ def get_weighted_peptide_plddt(
 
 def get_peptide_pae(
     pae_matrix: List[List[float]],
-    pdb_file: str,
+    structure_file: str,
     peptide_chain: str = "B"
 ) -> Optional[float]:
     """
@@ -152,14 +152,14 @@ def get_peptide_pae(
     
     Args:
         pae_matrix: 2D matrix of PAE values (residue x residue)
-        pdb_file: Path to PDB file for residue mapping
+        structure_file: Path to structure file (PDB/CIF) for residue mapping
         peptide_chain: Chain ID of the peptide (default: "B")
         
     Returns:
         Average PAE for peptide chain or None if error
 """
-    # Get residue chain mapping from PDB
-    residue_chain_list = _parse_pdb_residues(pdb_file)
+    # Get residue chain mapping from structure file
+    residue_chain_list = _parse_structure_residues(structure_file)
     if not residue_chain_list:
         return None
     
@@ -183,7 +183,7 @@ def get_peptide_pae(
 
 def get_peptide_pde(
     pde_matrix: List[List[float]],
-    pdb_file: str,
+    structure_file: str,
     peptide_chain: str = "B"
 ) -> Optional[float]:
     """
@@ -191,15 +191,15 @@ def get_peptide_pde(
     
     Args:
         pde_matrix: 2D matrix of PDE values (residue x residue)
-        pdb_file: Path to PDB file for residue mapping
+        structure_file: Path to structure file (PDB/CIF) for residue mapping
         peptide_chain: Chain ID of the peptide (default: "B")
         
     Returns:
         Average PDE for peptide chain or None if error
     """
 
-    # Get residue chain mapping from PDB
-    residue_chain_list = _parse_pdb_residues(pdb_file)
+    # Get residue chain mapping from structure file
+    residue_chain_list = _parse_structure_residues(structure_file)
     if not residue_chain_list:
         return None
     
@@ -222,14 +222,14 @@ def get_peptide_pde(
     
 
 
-def _parse_pdb_residues(pdb_file: str) -> List[Tuple[str, str]]:
+def _parse_structure_residues(structure_file: str) -> List[Tuple[str, str]]:
     """
-    Parse PDB file to build residue chain list in order.
+    Parse structure file (PDB/CIF) to build residue chain list in order.
     """
     residue_chain_list = []
     
     try:
-        with open(pdb_file, "r") as f:
+        with open(structure_file, "r") as f:
             last_chain_resid = None
             for line in f:
                 if line.startswith("ATOM"):

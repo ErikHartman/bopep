@@ -1,18 +1,18 @@
 import math
-from bopep.scoring.utils import parse_pdb
+from bopep.scoring.utils import get_receptor_peptide_coords
 
 """
 Distance-based loss function for protein-peptide interactions.
 """
 
 
-def distance_score_from_pdb(pdb_file_path : str, receptor_chain : str ="A", peptide_chain : str ="B", threshold : float = 8.0):
+def distance_score_from_structure(structure_file_path : str, receptor_chain : str ="A", peptide_chain : str ="B", threshold : float = 8.0):
     """
-    1) Parses the PDB to get coordinates/bfactors
+    1) Parses the structure file (PDB/CIF) to get coordinates/bfactors
     2) Computes the distance-based score
     """
-    receptor_coords, peptide_coords = parse_pdb(
-        pdb_file_path, receptor_chain=receptor_chain, peptide_chain=peptide_chain
+    receptor_coords, peptide_coords = get_receptor_peptide_coords(
+        structure_file_path, receptor_chain=receptor_chain, peptide_chain=peptide_chain
     )
     if not receptor_coords or not peptide_coords:
         return 0.0
@@ -45,6 +45,6 @@ def distance_score_from_pdb(pdb_file_path : str, receptor_chain : str ="A", pept
 
 
 if __name__ == "__main__":
-    pdb_file_path = "./data/1ssc.pdb"
-    score = distance_score_from_pdb(pdb_file_path)
-    print(f"Distance score for {pdb_file_path}: {score}")
+    structure_file_path = "./data/1ssc.pdb"
+    score = distance_score_from_structure(structure_file_path)
+    print(f"Distance score for {structure_file_path}: {score}")

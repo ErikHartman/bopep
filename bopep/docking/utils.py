@@ -3,18 +3,11 @@ import os
 import glob
 
 
-def extract_sequence_from_pdb(pdb_file: str, chain_id: str = "A"):
+def extract_sequence_from_structure(structure_file: str, chain_id: str = "A"):
     """
-    Extracts the sequence from a PDB or CIF file for a given chain.
-
-    Parameters:
-    - pdb_file: Path to the PDB or CIF file.
-    - chain_id: The chain ID to extract the sequence from (default is 'A').
-
-    Returns:
-    - Extracted sequence as a string.
+    Extracts the sequence from a structure file (PDB or CIF format) for a given chain.
     """
-    structure = parse_structure(pdb_file, structure_id="target")
+    structure = parse_structure(structure_file, structure_id="target")
     aa_dict = {
         "ALA": "A",
         "CYS": "C",
@@ -42,10 +35,23 @@ def extract_sequence_from_pdb(pdb_file: str, chain_id: str = "A"):
     # Use only the first model to avoid repeated sequences for NMR/multi-model structures
     model = structure[0]
     sequence = "".join(
-        aa_dict.get(residue.get_resname(), "X")
+        aa_dict.get(res.get_resname(), "X")
         for chain in model
         if chain.id == chain_id
-        for residue in chain
-        if residue.id[0] == " "
+        for res in chain
+        if res.get_id()[0] == " "  # Standard amino acids only
     )
     return sequence
+
+
+def get_pdb_files_in_dir(directory_path: str) -> list:
+    """
+    Get all PDB files in a directory.
+
+    Parameters:
+    - directory_path: Path to directory to search.
+
+    Returns:
+    - List of PDB file paths.
+    """
+    return glob.glob(os.path.join(directory_path, "*.pdb"))

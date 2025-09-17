@@ -2,7 +2,7 @@ import random
 import string
 from bopep.docking.alphafold_docker import AlphaFoldDocker
 from bopep.docking.boltz_docker import BoltzDocker
-from bopep.docking.utils import extract_sequence_from_pdb
+from bopep.docking.utils import extract_sequence_from_structure
 from bopep.structure.parser import parse_structure
 import os
 from Bio.PDB import PDBIO, Select
@@ -131,7 +131,7 @@ class Docker:
             # If no processing needed, use the original path
             self.target_structure_path = target_structure_path
         
-        self.target_sequence = extract_sequence_from_pdb(self.target_structure_path, chain_id=keep_chains[0])
+        self.target_sequence = extract_sequence_from_structure(self.target_structure_path, chain_id=keep_chains[0])
         logging.info(f"Target is set to: {self.original_target_path}")
         if self.temp_pdb_path:
             logging.info(f"Using cleaned version: {self.temp_pdb_path}")

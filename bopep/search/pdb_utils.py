@@ -1,33 +1,28 @@
-from bopep.docking.utils import extract_sequence_from_pdb
+from bopep.docking.utils import extract_sequence_from_structure
+from bopep.structure.parser import parse_structure
 
-def check_starting_index_in_pdb(pdb_file: str) -> int:
+def check_starting_index_in_structure(structure_file: str) -> int:
     """
-    Parses PDB file and checks what the starting residue index is. 
-    Some PDB files are not 0-indexed.
-    
-    Args:
-        pdb_file: Path to the PDB file
-        
-    Returns:
-        The starting residue index (usually 1 for standard PDB files), 
-        or None if no valid residue is found
+    Parses structure file (PDB/CIF) and checks what the starting residue index is. 
+    Some structure files are not 0-indexed.
     """
     try:
-        with open(pdb_file, 'r') as f:
-            for line in f:
-                if line.startswith("ATOM  "):
-                    residue_number = line[22:26].strip()
-                    try:
-                        return int(residue_number)
-                    except ValueError:
-                        continue         
+        structure = parse_structure(structure_file, structure_id="check_index")
+        model = structure[0]
+        
+        for chain in model:
+            for residue in chain:
+                # Skip non-amino acid residues
+                if residue.id[0] == ' ':
+                    return residue.id[1]  # Return the residue sequence number
+        
         return None
         
     except FileNotFoundError:
-        print(f"Error: PDB file {pdb_file} not found.")
+        print(f"Error: structure file {structure_file} not found.")
         return None
     except Exception as e:
-        print(f"Error reading PDB file: {e}")
+        print(f"Error reading structure file: {e}")
         return None
     
 
@@ -44,9 +39,9 @@ def _check_binding_site_residue_indices(
 
     Return a visualization of the residues that are selected as binding site residues.
     """
-    starting_index = check_starting_index_in_pdb(target_structure_path)
-    print("PDB chain starts at residue", starting_index)
-    protein_sequence = extract_sequence_from_pdb(target_structure_path)
+    starting_index = check_starting_index_in_structure(target_structure_path)
+    print("Structure chain starts at residue", starting_index)
+    protein_sequence = extract_sequence_from_structure(target_structure_path)
     
     if binding_site_residue_indices is None:
         return None
@@ -169,4 +164,3 @@ if __name__ == "__main__":
     pdb_path = "/home/er8813ha/bopep/data/4glf.pdb"
     binding_site_indices = [23, 42]
     _check_binding_site_residue_indices(binding_site_indices, pdb_path)
-    # This will print the binding site residues and their context in the sequence

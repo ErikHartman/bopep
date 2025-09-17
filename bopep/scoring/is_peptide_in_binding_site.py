@@ -11,7 +11,7 @@ def centroid(coords: np.ndarray) -> np.ndarray:
     return coords.mean(axis=0)
 
 def is_peptide_near_binding_site_by_centroid(
-    pdb_file: str,
+    structure_file: str,
     binding_site_residue_indices: list[int],
     receptor_chain: str = "A",
     peptide_chain: str   = "B",
@@ -24,7 +24,7 @@ def is_peptide_near_binding_site_by_centroid(
     binding_site_residue_indices: zero-based positions in the chain
       (0→first residue, 1→second, …)
     """
-    structure = parse_structure(pdb_file, structure_id="docked")
+    structure = parse_structure(structure_file, structure_id="docked")
     model = structure[0]
 
     R = model[receptor_chain]
@@ -62,7 +62,7 @@ def is_peptide_near_binding_site_by_centroid(
     return dist, dist <= cutoff
 
 def get_binding_site(
-    pdb_file: str,
+    structure_file: str,
     receptor_chain: str = "A",
     peptide_chain: str = "B",
     threshold: float = 5.0,
@@ -72,7 +72,8 @@ def get_binding_site(
 
     Parameters
     ----------
-    pdb_file : str
+    structure_file : str
+        Path to structure file (PDB/CIF)
         Path to the PDB file
     receptor_chain : str, optional
         Chain ID for the receptor (default "A")
@@ -88,9 +89,9 @@ def get_binding_site(
          peptide_binding_site_residue_indices, peptide_atoms)
     """
     try:
-        structure = parse_structure(pdb_file, structure_id="docked", auth_residues=False)
+        structure = parse_structure(structure_file, structure_id="docked", auth_residues=False)
     except Exception as e:
-        print(f"Error parsing PDB file: {e}")
+        print(f"Error parsing structure file: {e}")
         return [], [], [], []
 
     try:
@@ -162,21 +163,21 @@ def get_binding_site(
         print(f"Chain not found in structure: {e}")
         return [], [], [], []
 
-def get_receptor_contacts(pdb_file: str,
+def get_receptor_contacts(structure_file: str,
     receptor_chain: str = "A",
     peptide_chain: str = "B",
     threshold: float = 5.0,):
-    return get_binding_site(pdb_file, receptor_chain, peptide_chain, threshold)[1]
+    return get_binding_site(structure_file, receptor_chain, peptide_chain, threshold)[1]
 
 def is_peptide_in_binding_site_pdb_file(
-    pdb_file: str, binding_site_residue_indices: list = None, threshold: float = 5.0, required_n_contact_residues: int = 2
+    structure_file: str, binding_site_residue_indices: list = None, threshold: float = 5.0, required_n_contact_residues: int = 2
 ) -> Tuple[int, bool]:
     """
-    Determines if the peptide in the given PDB content is within the threshold distance
+    Determines if the peptide in the given structure file is within the threshold distance
     to the receptor's binding site.
     """
     _, receptor_binding_site_indices, _, _ = get_binding_site(
-        pdb_file, threshold=threshold
+        structure_file, threshold=threshold
     )
 
     nr_contact_residues = 0
@@ -238,7 +239,7 @@ def n_peptides_in_binding_site_processed_dir(
 
 
 def smooth_peptide_binding_site_score(
-    pdb_file: str,
+    structure_file: str,
     binding_site_residue_indices: list[int],
     threshold: float = 10.0,
     alpha: float = 0.5,
@@ -250,10 +251,10 @@ def smooth_peptide_binding_site_score(
     # get the peptide atoms and identify binding site by contact
     binding_site_threshold = max(threshold * 2, 10.0)
     _, _, _, peptide_atoms = get_binding_site(
-        pdb_file, threshold=binding_site_threshold
+        structure_file, threshold=binding_site_threshold
     )
 
-    structure = parse_structure(pdb_file, structure_id="docked")
+    structure = parse_structure(structure_file, structure_id="docked")
     model = structure[0]
     receptor_chain = model["A"]
 

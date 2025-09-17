@@ -1,41 +1,19 @@
-from Bio.PDB.Polypeptide import is_aa
 from Bio.Data.IUPACData import protein_letters_3to1
-from bopep.structure.parser import parse_structure
-import os
-import json
-import re
+from bopep.structure.parser import parse_structure as _parse_structure
 
-def find_relaxed_pdb_file(colab_dir : str):
+def get_receptor_peptide_coords(structure_file_path : str, receptor_chain : str="A", peptide_chain : str="B"):
     """
-    Finds the relaxed rank_001 PDB file in the colab directory.
-    
-    :param colab_dir: Path to the colab directory containing PDB files.
-    
-    :return: Path to the first matching PDB file or None if not found.
-    """
-    pdb_pattern = re.compile(r".*_relaxed_rank_001_.*\.pdb")
-    for root, _, files in os.walk(colab_dir):
-        for file in files:
-            if pdb_pattern.search(file):
-                return os.path.join(root, file)
-    return None
+    Extracts alpha carbon coordinates for receptor and peptide chains from a structure file.
 
-
-def parse_pdb(pdb_file_path : str, receptor_chain : str="A", peptide_chain : str="B"):
-    """
-    Parses a PDB file using BioPython and returns coordinates & B-factors
-    for receptor and peptide atoms separately.
-
-    :param pdb_file_path: Path to the PDB file
+    :param structure_file_path: Path to the structure file (.pdb, .cif, .pdbx, .mmcif)
     :param receptor_chain: Chain ID for the receptor
     :param peptide_chain: Chain ID for the peptide
-
-    :return: (
+    :return: tuple (
         receptor_coords: list of (x, y, z),
         peptide_coords: list of (x, y, z),
     )
     """
-    structure = parse_structure(pdb_file_path, structure_id="complex", auth_residues=False)
+    structure = _parse_structure(structure_file_path, structure_id="complex", auth_residues=False)
 
     receptor_coords = []
     peptide_coords = []
@@ -44,51 +22,24 @@ def parse_pdb(pdb_file_path : str, receptor_chain : str="A", peptide_chain : str
     for chain in model:
         chain_id = chain.id
         for residue in chain:
-            if not is_aa(residue, standard=True):
+            # Only consider amino acid residues (skip ligands, waters, etc.)
+            if residue.id[0] != ' ':
                 continue
-            for atom in residue:
-                # if atom == alpha carbon
-                atom_type = atom.get_id()
-                if atom_type != "CA":
-                    continue    
-                x, y, z = atom.coord
+            
+            # Get alpha carbon coordinates
+            if 'CA' in residue:
+                ca_atom = residue['CA']
+                coords = ca_atom.get_coord()
+                
                 if chain_id == receptor_chain:
-                    receptor_coords.append((x, y, z))
+                    receptor_coords.append(coords)
                 elif chain_id == peptide_chain:
-                    peptide_coords.append((x, y, z))
+                    peptide_coords.append(coords)
 
     return receptor_coords, peptide_coords
 
-
-def get_plDDT_from_dir(colab_dir : str, rank_num : int = 1):
-    """
-    Extracts the plDDT score from an unzipped docking result directory.
-    """
-    if not os.path.isdir(colab_dir):
-        print(f"Directory {colab_dir} does not exist.")
-        return None
-
-    json_pattern = re.compile(fr".*_scores_rank_00{rank_num}_.*\.json")
-    json_files = []
-
-    for root, _, files in os.walk(colab_dir):
-        json_files.extend(
-            [os.path.join(root, f) for f in files if json_pattern.search(f)]
-        )
-
-    if not json_files:
-        print(f"No matching JSON file found in {colab_dir}")
-        return None
-
-    try:
-        with open(json_files[0], "r") as f:
-            return json.load(f).get("plDDT")
-    except (IOError, json.JSONDecodeError) as e:
-        print(f"Error reading JSON file: {e}")
-        return None
-
-def get_chain_sequences(pdb_file : str):
-     structure = parse_structure(pdb_file, structure_id='struct')
+def get_chain_sequences(structure_file : str):
+     structure = _parse_structure(structure_file, structure_id='struct')
      return {chain.id: ''.join([
          protein_letters_3to1.get(residue.get_resname().capitalize(), 'X')
          for residue in chain if residue.id[0] == ' '
