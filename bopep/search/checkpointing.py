@@ -34,7 +34,7 @@ def _save_checkpoint(self, global_iteration: int, force_embeddings: bool = False
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
     # Save model and metadata (always updated)
-    _save_model(str(checkpoint_dir / "model.pt"), model=self.model, surrogate_model_kwargs=self.surrogate_model_kwargs, best_hyperparams=self.best_hyperparams)
+    _save_model(str(checkpoint_dir / "model.pt"), model=self.surrogate_manager.model, surrogate_model_kwargs=self.surrogate_model_kwargs, best_hyperparams=self.best_hyperparams)
     meta_json_path = checkpoint_dir / "metadata.json"
     
     meta = {

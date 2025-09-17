@@ -17,7 +17,7 @@ class Embedder:
         self.esm_model = None
         self.alphabet = None
 
-    def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True, device = Optional[str]) -> dict:
+    def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True, device : Optional[str] = None) -> dict:
         if filter:
             peptides = filter_peptides(peptides)
 

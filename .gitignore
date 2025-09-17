@@ -13,7 +13,8 @@ __pycache__/
 *$py.class
 
 slurm.sh
-
+examples/boga_output_docking/
+examples/boga_logs/
 examples/docking
 !examples/docking/multi_model_docking_example.py
 
