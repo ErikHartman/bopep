@@ -1,7 +1,7 @@
 from typing import Optional
 from Bio.PDB import PDBParser, MMCIFParser, Structure
 import os
-from Bio.Data.IUPACData import protein_letters_3to1
+from Bio.SeqUtils import seq1
 
 class StructureParser:
     """
@@ -144,8 +144,11 @@ def extract_sequence_from_structure(structure_file: str, chain_id: str = "A") ->
                 # Only consider standard amino acid residues
                 if residue.id[0] == ' ':
                     resname = residue.get_resname()
-                    # Use BioPython's standard mapping with fallback to 'X' for unknown
-                    aa_letter = protein_letters_3to1.get(resname, 'X')
+                    # Use BioPython's seq1 function with fallback to 'X' for unknown
+                    try:
+                        aa_letter = seq1(resname)
+                    except KeyError:
+                        aa_letter = 'X'
                     sequence += aa_letter
             break
     
@@ -171,7 +174,6 @@ def get_chain_sequences(structure_file: str) -> dict:
     >>> sequences = get_chain_sequences("protein.pdb")
     >>> print(sequences)  # {'A': 'MKLAVF...', 'B': 'EILVGD...'}
     """
-    from Bio.Data.IUPACData import protein_letters_3to1
     
     structure = parse_structure(structure_file, structure_id="chain_sequences")
     
@@ -183,8 +185,11 @@ def get_chain_sequences(structure_file: str) -> dict:
                 # Only consider standard amino acid residues
                 if residue.id[0] == ' ':
                     resname = residue.get_resname()
-                    # Use BioPython's standard mapping with fallback to 'X' for unknown
-                    aa_letter = protein_letters_3to1.get(resname, 'X')
+                    # Use BioPython's seq1 function with fallback to 'X' for unknown
+                    try:
+                        aa_letter = seq1(resname)
+                    except KeyError:
+                        aa_letter = 'X'
                     sequence += aa_letter
             
             if sequence:  # Only add chains that have amino acid residues

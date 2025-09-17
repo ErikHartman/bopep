@@ -122,5 +122,3 @@ if __name__ == "__main__":
     distance_matrix = align_and_compute_rmsd(ref_structure_file=structure_file_path, structure_file=structure_file_path, peptide_sequence=seq_dict["B"])
     print(f"Distance matrix for {structure_file_path}:")
     print(distance_matrix)
-
-    print(compute_intra_model_rmsd(processed_dir="/home/er8813ha/bopep/examples/docking/both_docking_output/processed/4glf_NYLSELSEHV", peptide_sequence="NYLSELSEHV"))
