@@ -467,7 +467,7 @@ class BoGA:
                     self.logger.log_objectives(new_objectives, iteration=global_generation, acquisition_name=acquisition_function)
                     
                     # Log hyperparameters if they were updated
-                    if global_generation % self.hpo_interval == 0 and self.surrogate_manager.best_hyperparams:
+                    if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0 and self.surrogate_manager.best_hyperparams:
                         self.logger.log_hyperparameters(
                             iteration=global_generation,
                             hyperparams=self.surrogate_manager.best_hyperparams,
