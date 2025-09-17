@@ -1,8 +1,8 @@
 import random
-import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Union, Tuple
-
+import pandas as pd
+        
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
 from bopep.scoring.scorer import Scorer
@@ -108,6 +108,9 @@ class BoGA:
             min_sequence_length=self.min_sequence_length,
             max_sequence_length=self.max_sequence_length,
             mutation_rate=self.mutation_rate,
+            mode="uniform",  # Default mode, will be set per phase
+            tau=1.0,         # Default tau
+            lam=0.3,         # Default lam
         )
         
         # Initialize surrogate model manager
@@ -301,18 +304,31 @@ class BoGA:
         acquisition_values = self.acquisition_function_obj.compute_acquisition(predictions, acquisition_function)
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
+    def _configure_mutation_for_phase(self, phase: Dict[str, Any], phase_index: int, objectives: Dict[str, float]) -> None:
+        """
+        Validate and configure mutation parameters for a phase.
+        """
+        mutation_mode = phase["mutation_mode"]
+        mutation_tau = phase.get('mutation_tau', 1.0)  # Default tau
+        mutation_lam = phase.get('mutation_lam', 0.3)  # Default lam
+        
+        # Update mutator parameters
+        self.mutator.set_mode(mutation_mode)
+        self.mutator.tau = max(1e-6, float(mutation_tau))
+        self.mutator.lam = float(mutation_lam)
+        
+        print(f"Mutation: mode={mutation_mode}, tau={mutation_tau:.3f}, lam={mutation_lam:.3f}")
+  
+        if mutation_mode == 'blosum_elite' and len(objectives) > 0:
+            top_sequences = self._select_top_objectives(objectives, min(50, len(objectives)))
+            self.mutator.set_elite_prior_from_sequences(top_sequences)
+            print(f"Updated elite prior from top {len(top_sequences)} sequences")
+
     def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set]:
         """
         Load scores and evaluated sequences from existing log files.
-        
-        Args:
-            log_dir: Path to directory containing log files
-            
-        Returns:
-            Tuple of (scores dict, evaluated sequences set)
         """
-        import pandas as pd
-        
+
         log_path = Path(log_dir)
         scores_file = log_path / "scores.csv"
         
@@ -390,6 +406,9 @@ class BoGA:
             generations = phase['generations']
             m_select = phase['m_select']
             k_pool = phase['k_pool']
+            
+            # Configure mutation parameters for this phase
+            self._configure_mutation_for_phase(phase, phase_index, objectives)
             
             print(f"\n=== Phase {phase_index}: {acquisition_function} for {generations} generations ===")
             print(f"Selection: {m_select}, Pool: {k_pool}")
