@@ -2,9 +2,9 @@ import random
 import string
 from bopep.docking.alphafold_docker import AlphaFoldDocker
 from bopep.docking.boltz_docker import BoltzDocker
-from bopep.docking.utils import extract_sequence_from_pdb
+from bopep.structure.parser import extract_sequence_from_structure, parse_structure
 import os
-from Bio.PDB import PDBParser, PDBIO, Select
+from Bio.PDB import PDBIO, Select
 import tempfile
 import logging
 
@@ -110,8 +110,7 @@ class Docker:
                     return 1
             
             # Parse the PDB file
-            parser = PDBParser(QUIET=True)
-            structure = parser.get_structure("target", target_structure_path)
+            structure = parse_structure(target_structure_path, structure_id="target")
             
             # Create a temporary file for the cleaned structure
             # Generate a 4-character PDB-style ID
@@ -131,7 +130,7 @@ class Docker:
             # If no processing needed, use the original path
             self.target_structure_path = target_structure_path
         
-        self.target_sequence = extract_sequence_from_pdb(self.target_structure_path, chain_id=keep_chains[0])
+        self.target_sequence = extract_sequence_from_structure(self.target_structure_path, chain_id=keep_chains[0])
         logging.info(f"Target is set to: {self.original_target_path}")
         if self.temp_pdb_path:
             logging.info(f"Using cleaned version: {self.temp_pdb_path}")

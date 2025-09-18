@@ -1,6 +1,6 @@
 class RosettaScorer:
-    def __init__(self, pdb_file : str):
-        self.pdb_file = pdb_file
+    def __init__(self, structure_file : str):
+        self.structure_file = structure_file
         self.initialized = False
         self.scorefxn = None
         self.pose = None
@@ -23,7 +23,7 @@ class RosettaScorer:
                 except Exception:
                     pyrosetta.init("-mute all")
                 self.scorefxn = pyrosetta.get_fa_scorefxn()
-                self.pose = pose_from_pdb(self.pdb_file)
+                self.pose = pose_from_pdb(self.structure_file)
                 self.rosetta_score = self.scorefxn(self.pose)
                 self.ia = InterfaceAnalyzerMover()
                 self.ia.set_compute_packstat(True)

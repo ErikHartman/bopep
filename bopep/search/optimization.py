@@ -9,7 +9,7 @@ from bopep.surrogate_model.manager import SurrogateModelManager
 from bopep.logging.logger import Logger
 from bopep.search.acquisition_functions import AcquisitionFunction
 from bopep.search.utils import (_validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
-from bopep.search.pdb_utils import _check_binding_site_residue_indices
+from bopep.search.structure_utils import _check_binding_site_residue_indices
 from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
 from bopep.search.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
@@ -108,7 +108,7 @@ class BoPep:
         initial_method: str = "kmeans",
         assume_zero_indexed: Optional[bool] = None,
         checkpoint_path: Optional[str] = None,
-        template_pdbs: Optional[Dict[str, str]] = None,
+        template_structures: Optional[Dict[str, str]] = None,
     ):
         """
         Runs Bayesian optimization on peptide sequences.
@@ -128,11 +128,11 @@ class BoPep:
             assume_zero_indexed: If True, assumes residue indices are zero-indexed.
             checkpoint_path: Path to a checkpoint directory to continue from. If none is provided,
                 a fresh optimization will be started.
-            template_pdbs: Optional dictionary mapping peptide sequences to template PDB paths.
+            template_structures: Optional dictionary mapping peptide sequences to template PDB paths.
 
         """
         continue_from_checkpoint = False if checkpoint_path is None else True
-        self.template_pdbs = template_pdbs
+        self.template_structures = template_structures
         self.checkpoint_path = checkpoint_path
         self._setup_checkpoint_dir(continue_from_checkpoint)
         self.logger = Logger(log_dir=self.log_dir, overwrite_logs=self.overwrite_logs, continue_from_checkpoint=continue_from_checkpoint)
@@ -537,7 +537,7 @@ class BoPep:
                     n_jobs=1,
                     binding_site_distance_threshold=binding_site_distance_threshold,
                     required_n_contact_residues=required_n_contact_residues,
-                    template_pdbs=self.template_pdbs
+                    template_structures=self.template_structures
                 )
                 new_scores.update(peptide_scores)
         else:
@@ -549,7 +549,7 @@ class BoPep:
                 n_jobs=self.scoring_kwargs.get("n_jobs", 1), # Default to 1 job unless specified (not safe otherwise)
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 required_n_contact_residues=required_n_contact_residues,
-                template_pdbs=self.template_pdbs,
+                template_structures=self.template_structures,
             )
 
         return new_scores

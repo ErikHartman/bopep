@@ -207,19 +207,19 @@ def compute_ipsae(
     return results
 
 
-def get_ipsae_scores_from_pdb_and_pae(
-    pdb_file: str, 
+def get_ipsae_scores_from_structure_and_pae(
+    structure_file: str, 
     pae_data: np.ndarray, 
     pae_cutoff: float = 10.0,
     residue_selector: Optional[Callable[[Any], bool]] = None
 ) -> Dict[str, float]:
     """
-    Compute IPSAE scores from PDB file and PAE data.
+    Compute IPSAE scores from structure file (PDB/CIF) and PAE data.
     
     Parameters
     ----------
-    pdb_file : str
-        Path to PDB file
+    structure_file : str
+        Path to structure file (PDB/CIF)
     pae_data : np.ndarray
         PAE matrix or flat array
     pae_cutoff : float, default 10.0
@@ -232,13 +232,9 @@ def get_ipsae_scores_from_pdb_and_pae(
     dict
         Dictionary containing 'ipsae_max' and 'ipsae_min' scores
     """
-    try:
-        from Bio.PDB import PDBParser
-    except ImportError:
-        raise ImportError("BioPython is required for IPSAE scoring")
+    from bopep.structure.parser import parse_structure
     
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure("model", pdb_file)
+    structure = parse_structure(structure_file, structure_id="model")
     
     results = compute_ipsae(
         structure, 
@@ -280,15 +276,14 @@ def get_ipsae_scores_from_pdb_and_pae(
 
 if __name__ == "__main__":
     # Example usage
-    from Bio.PDB import PDBParser
+    from bopep.structure.parser import parse_structure
     import sys
     import json
 
     pdb_file = "/srv/data1/er8813ha/bopep/docked/cd14/4glf_NYLSELSEHV/4glf_NYLSELSEHV_relaxed_rank_001_alphafold2_multimer_v3_model_5_seed_000.pdb"
     pae_file = "/srv/data1/er8813ha/bopep/docked/cd14/4glf_NYLSELSEHV/4glf_NYLSELSEHV_predicted_aligned_error_v1.json"
 
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure("model", pdb_file)
+    structure = parse_structure(pdb_file, structure_id="model")
 
     pae_data = json.load(open(pae_file))["predicted_aligned_error"]
 
@@ -303,9 +298,8 @@ if __name__ == "__main__":
     import numpy as np
 
     pae_data = np.load(f"{root_path}/pae_4glf_NYLSELSEHV_model_0.npz")["pae"]
-    parser = PDBParser(QUIET=True)
     pdb_file = f"{root_path}/4glf_NYLSELSEHV_model_0.pdb"
-    structure2 = parser.get_structure("model", pdb_file)
+    structure2 = parse_structure(pdb_file, structure_id="model")
     print("Boltz")
 
     results = compute_ipsae(structure2, pae_data, pae_cutoff=10.0)

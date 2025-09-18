@@ -1,6 +1,6 @@
 import pytest
 from bopep.docking.docker import Docker
-from bopep.docking.utils import extract_sequence_from_pdb
+from bopep.structure.parser import extract_sequence_from_structure
 
 
 class TestDocker:
@@ -52,7 +52,7 @@ class TestDocker:
 class TestDockingUtils:
     """Test docking utility functions"""
 
-    def test_extract_sequence_from_pdb_nonexistent_file(self):
+    def test_extract_sequence_from_structure_nonexistent_file(self):
         """Test sequence extraction from nonexistent file"""
         with pytest.raises(FileNotFoundError):
-            extract_sequence_from_pdb("nonexistent.pdb")
+            extract_sequence_from_structure("nonexistent.pdb")
