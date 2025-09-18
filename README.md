@@ -1,12 +1,36 @@
 <p align="center">
-  <img src="bopep_header_image.png" width="350", alt="BoPep">
+  <img src="assets/bopep_header_image.png" width="350", alt="BoPep">
 </p>
 
-## *Mining for peptide binders in large-scale data with Bayesian Optimization*
+## *Bayesian Optimization for peptide binder mining and design*
 
-This repository contains the code for `BoPep`, a package for identifying peptide binders to a protein from a large set of candidate peptides.
+This repository contains the code for `BoPep`, a framework for identifying and generating peptide binders against a target protein using Bayesian Optimization. We have currently implemented three different methods in the BoPep framework:
 
-## Installation for running locally
+- **BoPep search**: This is the core method for BoPep, which uses Bayesian Optimization to navigate through large datasets in search for peptide binders.
+- **BoRF**: A design module for generating a large dataset using a diffusion pipeline.
+- **BoGA**: A module which allows you to generate binders using an evolutionary algorithm from a biological prior.
+
+
+## Search datasets (BoPep)
+The core of the BoPep framework lies in searching large datasets for binders. It does so by training a surrogate model to predict whether a peptide will bind or not, based on embeddings and previous docking experiments. During the search, the peptide dataset is navigated with the help of surrogate models. 
+
+<p align="center">
+  <img src="assets/bopep.png" width="500", alt="BoPep">
+</p>
+
+## Generation with diffusion (BoRF)
+We also provide a way to generate large candidate datasets using an RFdiffusion + ProteinMPNN + FastRelax pipeline. By sampling lengths and hotspots we generate a large diverse dataset of candidate peptides. We can then apply the BoPep search on the datasets, leading to less computationally expensive design of peptide binders.
+<p align="center">
+  <img src="assets/borf.png" width="500", alt="BoPep">
+</p>
+
+## Generation with evolutionary algorithm (BoGA)
+The surrogate models can also be leveraged from design. The BoGA algorithm uses the surrogate models in an evolutionary algorithm to generate a binder from a biological prior. The prior can be either a single sequence or a set of sequences.
+<p align="center">
+  <img src="assets/boga.png" width="500", alt="BoPep">
+</p>
+
+## Installation
 
 To run `bopep` locally, you will need to clone this repository, install **LocalColabFold** and **PyRosetta** as well as other dependencies using pip. Follow the steps below to set up your environment:
 
@@ -58,8 +82,10 @@ This should work if you follow the instructions in the LocalColabFold git repo.
    ```bash
    python -c 'import pyrosetta_installer; pyrosetta_installer.install_pyrosetta(skip_if_installed=True)'
    ```
+3. **OPTIONAL: Install RFdiffusion and ProteinMPNN**: 
+    If you wish to run BoRF you need to install RFdiffusion and ProteinMPNN. To install these packages, follow the instructions in their respective repositories: [ProteinMPNN](https://github.com/dauparas/ProteinMPNN) and [RFdiffusion](https://github.com/RosettaCommons/RFdiffusion).
 
-3. **Install Remaining Dependencies**:
+4. **Install Remaining Dependencies**:
    Finally, install any additional dependencies required for `bopep`:
 
    ```bash
@@ -70,11 +96,17 @@ This should work if you follow the instructions in the LocalColabFold git repo.
 
 Details on running can be found in [examples](examples/how_to_run/README.md).
 
+## Cite
+
+If you use this paper, please cite:
+
+If you use BoGA, please cite:
+
+Additionally, please cite the relevant papers below for your use case: 
+
 ## Credits
 
-Credits go out to those who have created great packages and tools such as ESM, LocalColabFold, PyRosetta, torch, optuna and other modules.
-
-Cite these modules:
+Credits go out to those who have created great packages and tools such as ESM, LocalColabFold, PyRosetta, torch, optuna and other modules:
 
 ```bib
 @article{Mirdita2022,
@@ -91,7 +123,8 @@ Cite these modules:
   month = may,
   pages = {679–682}
 }
-
+```
+```bib
 @article{Evans2021,
   title = {Protein complex prediction with AlphaFold-Multimer},
   url = {http://dx.doi.org/10.1101/2021.10.04.463034},
@@ -101,7 +134,8 @@ Cite these modules:
   year = {2021},
   month = oct 
 }
-
+```
+```bib
 @article{Chaudhury2010,
   title = {PyRosetta: a script-based interface for implementing molecular modeling algorithms using Rosetta},
   volume = {26},
@@ -116,7 +150,8 @@ Cite these modules:
   month = jan,
   pages = {689–691}
 }
-
+```
+```bib
 @misc{akiba2019optunanextgenerationhyperparameteroptimization,
       title={Optuna: A Next-generation Hyperparameter Optimization Framework}, 
       author={Takuya Akiba and Shotaro Sano and Toshihiko Yanase and Takeru Ohta and Masanori Koyama},
@@ -126,7 +161,8 @@ Cite these modules:
       primaryClass={cs.LG},
       url={https://arxiv.org/abs/1907.10902}, 
 }
-
+```
+```bib
 @article{Lin2023,
   title = {Evolutionary-scale prediction of atomic-level protein structure with a language model},
   volume = {379},
