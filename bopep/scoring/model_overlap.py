@@ -3,7 +3,6 @@ from Bio.SVDSuperimposer import SVDSuperimposer
 from bopep.structure.parser import get_chain_sequences, get_chain_coordinates
 import os
 import glob
-from itertools import combinations
 
 
 def match_and_truncate(ref_seq :  str, ref_coords : list, target_seq : str, target_coords : list):
@@ -43,8 +42,8 @@ def align_and_compute_rmsd(
             (ref_keys[1], ref_keys[0])
         ]
         for pep_id, rec_id in pairs:
-            if ref_chain_seqs[pep_id] == peptide_sequence:
-                ref_pep_chain_id =  pep_id
+            if ref_chain_seqs.get(pep_id, "") == peptide_sequence:
+                ref_pep_chain_id = pep_id
                 ref_rec_chain_id, ref_rec_seq = rec_id, ref_chain_seqs[rec_id]
                 break
         else:
@@ -69,46 +68,108 @@ def align_and_compute_rmsd(
         print(f"  Reference file: {ref_structure_file}")
         print(f"  Target file: {structure_file}")
         print(f"  Peptide sequence: {peptide_sequence}")
-        return None
+    return None
 
 
-def compute_intra_model_rmsd(processed_dir : str, peptide_sequence : str):
+def compute_intra_model_rmsd(processed_dir: str, peptide_sequence: str):
     """
     Compute intra-model RMSD metrics for peptide chains within and across docking methods.
     """
     results = {}
-    
+
     # Find all model files by method
     alphafold_models = sorted(glob.glob(os.path.join(processed_dir, "alphafold_model_*.pdb")))
     boltz_models = sorted(glob.glob(os.path.join(processed_dir, "boltz_model_*.pdb")))
-    
-    # Function to compute pairwise RMSDs within a set of models
-    def compute_pairwise_rmsd(model_files):
+
+    def _prep_ref_mapping(pdb_path: str, pep_seq: str):
+        """Return (ref_pep_chain_id, ref_rec_chain_id) for a file, or None if not found."""
+        seqs = get_chain_sequences(pdb_path)  # Now uses caching automatically
+        keys = list(seqs.keys())
+        if len(keys) != 2:
+            return None
+        # Try to find which chain matches the peptide
+        if seqs.get(keys[0], "") == pep_seq:
+            return keys[0], keys[1]
+        if seqs.get(keys[1], "") == pep_seq:
+            return keys[1], keys[0]
+        # Fallback to common convention (B is peptide)
+        if seqs.get("B", "") == pep_seq:
+            return "B", "A"
+        return None
+
+    def _compute_pairwise_rmsd(model_files):
         if len(model_files) < 2:
             return None
-        
-        rmsd_values = []
-        for ref_file, comp_file in combinations(model_files, 2):
+
+        # Choose a reference model that we can map (peptide/receptor chain IDs)
+        ref_file = None
+        ref_mapping = None
+        for f in model_files:
+            m = _prep_ref_mapping(f, peptide_sequence)
+            if m is not None:
+                ref_file = f
+                ref_mapping = m
+                break
+        if ref_file is None or ref_mapping is None:
+            return None
+
+        # Prepare reference receptor sequence and coordinates
+        ref_pep_id, ref_rec_id = ref_mapping
+        ref_seqs = get_chain_sequences(ref_file)  # Uses caching
+        ref_rec_seq = ref_seqs.get(ref_rec_id, "")
+        ref_rec_coords = np.array(get_chain_coordinates(ref_file, ref_rec_id))  # Uses caching
+
+        # For each model, align its receptor (assumed A) to the reference receptor once,
+        # then store its peptide coords transformed into the reference frame
+        aligned_pep_coords = {}
+        for f in model_files:
             try:
-                rmsd_val = align_and_compute_rmsd(ref_file, comp_file, peptide_sequence)
-                rmsd_values.append(rmsd_val)
-            except Exception as e:
+                comp_rec_coords = np.array(get_chain_coordinates(f, "A"))  # Uses caching
+                comp_pep_coords = np.array(get_chain_coordinates(f, "B"))  # Uses caching
+                comp_seqs = get_chain_sequences(f)  # Uses caching
+                comp_rec_seq = comp_seqs.get("A", "")
+                
+                # Match-and-truncate receptor coords to ensure SVD sees same length/order
+                ref_rec_coords_trunc, comp_rec_coords_trunc = match_and_truncate(
+                    ref_rec_seq, ref_rec_coords, comp_rec_seq, comp_rec_coords
+                )
+                sup = SVDSuperimposer()
+                sup.set(ref_rec_coords_trunc, comp_rec_coords_trunc)
+                sup.run()
+                rot, tran = sup.get_rotran()
+                aligned_pep_coords[f] = np.dot(comp_pep_coords, rot) + tran
+            except Exception:
+                # Skip files that fail alignment
                 continue
-        
-        return np.mean(rmsd_values) if rmsd_values else None
-    
-    # Compute intra-method RMSDs
+
+        # Need at least two successfully aligned models
+        if len(aligned_pep_coords) < 2:
+            return None
+
+        # Compute pairwise RMSDs among pre-aligned peptide coordinates
+        files = list(aligned_pep_coords.keys())
+        rmsd_values = []
+        for i in range(len(files)):
+            for j in range(i + 1, len(files)):
+                try:
+                    rmsd_values.append(rmsd(aligned_pep_coords[files[i]], aligned_pep_coords[files[j]]))
+                except Exception:
+                    continue
+
+        return float(np.mean(rmsd_values)) if rmsd_values else None
+
+    # Compute intra-method RMSDs 
     if len(alphafold_models) >= 2:
-        results['intra_alphafold_mean_rmsd'] = compute_pairwise_rmsd(alphafold_models)
-    
+        results['intra_alphafold_mean_rmsd'] = _compute_pairwise_rmsd(alphafold_models)
+
     if len(boltz_models) >= 2:
-        results['intra_boltz_mean_rmsd'] = compute_pairwise_rmsd(boltz_models)
-    
+        results['intra_boltz_mean_rmsd'] = _compute_pairwise_rmsd(boltz_models)
+
     # Compute cross-method RMSD (all models together)
     all_models = alphafold_models + boltz_models
     if len(all_models) >= 2:
-        results['intra_all_mean_rmsd'] = compute_pairwise_rmsd(all_models)
-    
+        results['intra_all_mean_rmsd'] = _compute_pairwise_rmsd(all_models)
+
     return results
 
 
