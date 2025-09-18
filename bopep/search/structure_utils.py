@@ -1,35 +1,4 @@
-from bopep.docking.utils import extract_sequence_from_pdb
-
-def check_starting_index_in_pdb(pdb_file: str) -> int:
-    """
-    Parses PDB file and checks what the starting residue index is. 
-    Some PDB files are not 0-indexed.
-    
-    Args:
-        pdb_file: Path to the PDB file
-        
-    Returns:
-        The starting residue index (usually 1 for standard PDB files), 
-        or None if no valid residue is found
-    """
-    try:
-        with open(pdb_file, 'r') as f:
-            for line in f:
-                if line.startswith("ATOM  "):
-                    residue_number = line[22:26].strip()
-                    try:
-                        return int(residue_number)
-                    except ValueError:
-                        continue         
-        return None
-        
-    except FileNotFoundError:
-        print(f"Error: PDB file {pdb_file} not found.")
-        return None
-    except Exception as e:
-        print(f"Error reading PDB file: {e}")
-        return None
-    
+from bopep.structure.parser import extract_sequence_from_structure, check_starting_index_in_structure
 
 def _check_binding_site_residue_indices(
     binding_site_residue_indices,
@@ -44,9 +13,9 @@ def _check_binding_site_residue_indices(
 
     Return a visualization of the residues that are selected as binding site residues.
     """
-    starting_index = check_starting_index_in_pdb(target_structure_path)
-    print("PDB chain starts at residue", starting_index)
-    protein_sequence = extract_sequence_from_pdb(target_structure_path)
+    starting_index = check_starting_index_in_structure(target_structure_path)
+    print("Structure chain starts at residue", starting_index)
+    protein_sequence = extract_sequence_from_structure(target_structure_path)
     
     if binding_site_residue_indices is None:
         return None
@@ -169,4 +138,3 @@ if __name__ == "__main__":
     pdb_path = "/home/er8813ha/bopep/data/4glf.pdb"
     binding_site_indices = [23, 42]
     _check_binding_site_residue_indices(binding_site_indices, pdb_path)
-    # This will print the binding site residues and their context in the sequence

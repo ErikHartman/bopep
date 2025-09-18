@@ -37,7 +37,6 @@ class HyperparameterTuner:
         hidden_dim_max: int = 256,
         uncertainty_param_min: Optional[Union[float, int]] = None,
         uncertainty_param_max: Optional[Union[float, int]] = None,
-        target_fxn: str = "nll_gaussian",
     ):
         """
         Args:
@@ -50,7 +49,6 @@ class HyperparameterTuner:
             random_state: for cross-validation reproducibility
             hidden_dim_min, hidden_dim_max: Range for hidden dims in MLP or RNN
             uncertainty_param_min, uncertainty_param_max: Range for uncertainty hyperparam
-            target_fxn: Target function for optimization. Currently support "crps_gaussian" and "nll_gaussian".
         """
         self.model_type = model_type
         self.input_dim = input_dim
@@ -64,8 +62,6 @@ class HyperparameterTuner:
 
         self.uncertainty_param_min = uncertainty_param_min
         self.uncertainty_param_max = uncertainty_param_max
-
-        self.target_fxn = target_fxn
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -129,7 +125,7 @@ class HyperparameterTuner:
         self, model: "BasePredictionModel", val_loader: DataLoader
     ) -> Tuple[float, float, float, float, float]:
         """
-        Returns crps.
+        Returns nll.
         """
         model.eval()
         model.to(self.device)
@@ -150,30 +146,9 @@ class HyperparameterTuner:
         stds = torch.cat(all_stds)
         targets = torch.cat(all_targets)
 
-        if self.target_fxn == "crps_gaussian":
-            return self._crps_gaussian(means, stds, targets)
-        elif self.target_fxn == "nll_gaussian":
-            return self._nll_gaussian(means, stds, targets)
-        else:
-            raise ValueError(f"Unknown target function: {self.target_fxn}")
 
-    @staticmethod
-    def _crps_gaussian(means: torch.Tensor,
-                    stds:  torch.Tensor,
-                    targets: torch.Tensor) -> float:
-        stds = torch.clamp(stds, min=1e-6)
-        z = (targets - means) / stds
+        return self._nll_gaussian(means, stds, targets)
 
-        denom = math.sqrt(2 * math.pi)
-        inv_sqrt_pi = 1.0 / math.sqrt(math.pi)
-
-        pdf = torch.exp(-0.5 * z**2) / denom
-        cdf = 0.5 * (1 + torch.erf(z / math.sqrt(2.0)))
-
-        term = z * (2 * cdf - 1) + 2 * pdf - inv_sqrt_pi
-        crps = stds * term
-
-        return crps.mean().item()
     
     @staticmethod
     def _nll_gaussian(means: torch.Tensor,
@@ -183,18 +158,13 @@ class HyperparameterTuner:
         Returns the mean negative log‐likelihood under N(means, stds^2).
         NLL = 0.5 * [((y-μ)^2/σ^2) + log(σ^2) + log(2π)].
         """
-        # 1) avoid zero‐variance
         stds = torch.clamp(stds, min=1e-6)
         var  = stds**2
-
-        # 2) compute per‐sample NLL
-        #    note: math.log(2*pi) is a float, so it’s broadcasted
         nll = 0.5 * ( (targets - means)**2 / var
                     + torch.log(var)
                     + math.log(2 * math.pi)
                 )
 
-        # 3) average over the batch
         return nll.mean().item()
     
 
@@ -302,8 +272,8 @@ class HyperparameterTuner:
                 collate_fn=variable_length_collate_fn,
             )
 
-            crps = self._evaluate_model(model, val_loader)
-            cv_scores.append(crps)
+            nlls = self._evaluate_model(model, val_loader)
+            cv_scores.append(nlls)
 
         avg_score = float(np.mean(cv_scores))
 
@@ -383,7 +353,6 @@ def tune_hyperparams(
     previous_study: Optional[optuna.study.Study] = None,
     uncertainty_param_min: Optional[Union[float, int]] = None,
     uncertainty_param_max: Optional[Union[float, int]] = None,
-    target_fxn: str = "crps_gaussian",
 ) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
     """
     High-level API for tuning architecture + uncertainty hyperparams with 
@@ -411,7 +380,6 @@ def tune_hyperparams(
         hidden_dim_max=hidden_dim_max,
         uncertainty_param_min = uncertainty_param_min,
         uncertainty_param_max = uncertainty_param_max,
-        target_fxn=target_fxn,
     )
 
     best_params, study = tuner.tune(embedding_dict, objective_dict, previous_study)

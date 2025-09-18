@@ -1,51 +1,39 @@
 import numpy as np
 from Bio.SVDSuperimposer import SVDSuperimposer
-from bopep.scoring.utils import parse_pdb, get_chain_sequences, match_and_truncate
+from bopep.structure.parser import get_chain_sequences, get_chain_coordinates
 import os
 import glob
 from itertools import combinations
-from typing import Dict, Tuple, Optional
-
-# Modest caching implementations to avoid repeated parsing of the same files, without having to rewrite a bunch of stuff
-_SEQ_CACHE: Dict[str, Dict[str, str]] = {}
-_COORDS_CACHE: Dict[Tuple[str, str, str], Tuple[np.ndarray, np.ndarray]] = {}
 
 
-def _get_chain_sequences_cached(pdb_path: str) -> Dict[str, str]:
-    seqs = _SEQ_CACHE.get(pdb_path)
-    if seqs is None:
-        seqs = get_chain_sequences(pdb_path)
-        _SEQ_CACHE[pdb_path] = seqs
-    return seqs
-
-
-def _get_coords_cached(pdb_path: str, rec_chain_id: str, pep_chain_id: str) -> Tuple[np.ndarray, np.ndarray]:
-    key = (pdb_path, rec_chain_id, pep_chain_id)
-    coords = _COORDS_CACHE.get(key)
-    if coords is None:
-        rec_coords, pep_coords = map(np.array, parse_pdb(pdb_path, rec_chain_id, pep_chain_id))
-        coords = (rec_coords, pep_coords)
-        _COORDS_CACHE[key] = coords
-    return coords
+def match_and_truncate(ref_seq :  str, ref_coords : list, target_seq : str, target_coords : list):
+    if ref_seq in target_seq:
+        i = target_seq.index(ref_seq)
+        return ref_coords, target_coords[i:i+len(ref_seq)]
+    elif target_seq in ref_seq:
+        i = ref_seq.index(target_seq)
+        return ref_coords[i:i+len(target_seq)], target_coords
+    else:
+        raise ValueError(f"Could not match reference and target receptor sequences for alignment. Reference sequence: {ref_seq}, Target sequence: {target_seq}")
 
 def rmsd(coords1 : np.ndarray, coords2 : np.ndarray) -> float:
     return np.sqrt(np.mean(np.sum((coords1 - coords2) ** 2, axis=1)))
 
 def align_and_compute_rmsd(
-    ref_pdb_file: str, pdb_file: str, peptide_sequence: str,
+    ref_structure_file : str, structure_file : str, peptide_sequence :str,
 ):
     """
-    Given multiple PDBs, align each structure's receptor (chain A by default)
+    Given multiple structure files (PDB/CIF), align each structure's receptor (chain A by default)
     and compute a distance matrix of peptide RMSDs between all pairs.
 
-    Each structure's receptor is aligned to the first PDB's receptor, then
+    Each structure's receptor is aligned to the first structure's receptor, then
     peptide RMSD is computed between all pairs of aligned structures.
     """
     try:
-        ref_chain_seqs = _get_chain_sequences_cached(ref_pdb_file)
-        new_chain_seqs = _get_chain_sequences_cached(pdb_file)
+        ref_chain_seqs = get_chain_sequences(ref_structure_file)
+        new_chain_seqs = get_chain_sequences(structure_file)
         if len(ref_chain_seqs) != 2:
-            raise ValueError("Reference PDB must have exactly two chains.")
+            raise ValueError("Reference structure file must have exactly two chains.")
         ref_keys = list(ref_chain_seqs.keys())
 
         # Assign peptide/receptor chains by sequence match
@@ -62,8 +50,10 @@ def align_and_compute_rmsd(
         else:
             raise ValueError("The peptide sequence found in reference chains does not match the new peptide sequence.")
 
-        ref_rec_coords, ref_pep_coords = _get_coords_cached(ref_pdb_file, ref_rec_chain_id, ref_pep_chain_id)
-        new_rec_coords, new_pep_coords = _get_coords_cached(pdb_file, "A", "B")
+        ref_rec_coords = np.array(get_chain_coordinates(ref_structure_file, ref_rec_chain_id))
+        ref_pep_coords = np.array(get_chain_coordinates(ref_structure_file, ref_pep_chain_id))
+        new_rec_coords = np.array(get_chain_coordinates(structure_file, "A"))
+        new_pep_coords = np.array(get_chain_coordinates(structure_file, "B"))
         new_rec_seq = new_chain_seqs.get("A", "")
 
         ref_rec_coords_trunc, new_rec_coords_trunc = match_and_truncate(ref_rec_seq, ref_rec_coords, new_rec_seq, new_rec_coords)
@@ -76,8 +66,8 @@ def align_and_compute_rmsd(
     
     except Exception as e:
         print(f"Warning: Template RMSD calculation failed: {e}")
-        print(f"  Reference file: {ref_pdb_file}")
-        print(f"  Target file: {pdb_file}")
+        print(f"  Reference file: {ref_structure_file}")
+        print(f"  Target file: {structure_file}")
         print(f"  Peptide sequence: {peptide_sequence}")
     return None
 
@@ -183,14 +173,12 @@ def compute_intra_model_rmsd(processed_dir: str, peptide_sequence: str):
 
 
 if __name__ == "__main__":
-    pdb_file_path = "./data/1ssc.pdb"
+    structure_file_path = "./data/1ssc.pdb"
 
-    seq_dict = get_chain_sequences(pdb_file_path)
+    seq_dict = get_chain_sequences(structure_file_path)
 
     print(seq_dict["B"], seq_dict["A"])
     
-    distance_matrix = align_and_compute_rmsd(ref_pdb_file=pdb_file_path, pdb_file=pdb_file_path, peptide_sequence=seq_dict["B"])
-    print(f"Distance matrix for {pdb_file_path}:")
+    distance_matrix = align_and_compute_rmsd(ref_structure_file=structure_file_path, structure_file=structure_file_path, peptide_sequence=seq_dict["B"])
+    print(f"Distance matrix for {structure_file_path}:")
     print(distance_matrix)
-
-    print(compute_intra_model_rmsd(processed_dir="/home/er8813ha/bopep/examples/docking/both_docking_output/processed/4glf_NYLSELSEHV", peptide_sequence="NYLSELSEHV"))

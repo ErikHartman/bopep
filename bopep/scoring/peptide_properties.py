@@ -1,17 +1,20 @@
-from bopep.docking.utils import extract_sequence_from_pdb
+from bopep.structure.parser import extract_sequence_from_structure
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import numpy as np
-
+_AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 class PeptideProperties:
 
-    def __init__(self, pdb_file: str = None, peptide_sequence :str= None, chain_id: str = "B"):
-        if pdb_file:
-            self.peptide_sequence = extract_sequence_from_pdb(pdb_file, chain_id=chain_id)
+    def __init__(self, structure_file: str = None, peptide_sequence :str= None, chain_id: str = "B"):
+        if structure_file:
+            self.peptide_sequence = extract_sequence_from_structure(structure_file, chain_id=chain_id)
         elif peptide_sequence:
             self.peptide_sequence = peptide_sequence
         else:
-            raise ValueError("Either a PDB file or a peptide sequence must be provided.")
+            raise ValueError("Either a structure file (PDB/CIF) or a peptide sequence must be provided.")
+        
+        if not all(aa in _AMINO_ACIDS for aa in self.peptide_sequence):
+            raise ValueError(f"Invalid amino acids in peptide sequence: {self.peptide_sequence}. Allowed amino acids are: {_AMINO_ACIDS}")
         
         self.pa = ProteinAnalysis(self.peptide_sequence)
 
