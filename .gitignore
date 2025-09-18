@@ -5,7 +5,10 @@
 *.egg-info
 env_config.py
 *.png
-!bopep_header_image.png
+!assets/bopep_header_image.png
+!assets/bopep.png
+!assets/boga.png
+!assets/borf.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
