@@ -2,14 +2,11 @@ from typing import List, Optional, Tuple
 from Bio.PDB import PDBParser, MMCIFParser, Structure
 import os
 from Bio.SeqUtils import seq1
+from .cache import get_from_cache, store_in_cache
 
 class StructureParser:
     """
     Unified structure parser for PDB and CIF files.
-    
-    This class provides a consistent interface for parsing structural data
-    from both PDB and CIF file formats, automatically selecting the appropriate
-    BioPython parser based on the file extension.
     """
     
     def __init__(self, quiet: bool = True, auth_residues: bool = False):
@@ -29,8 +26,21 @@ class StructureParser:
         if structure_id is None:
             structure_id = os.path.splitext(os.path.basename(filepath))[0]
         
+        # Check cache first for parsed structure
+        cached_structure = get_from_cache(filepath, 'structure')
+        if cached_structure is not None:
+            # Create a copy with the requested structure_id to avoid modifying the cached object
+            import copy
+            structure_copy = copy.copy(cached_structure)
+            structure_copy.id = structure_id
+            return structure_copy
+        
         parser = self._get_parser(filepath)
-        return parser.get_structure(structure_id, filepath)
+        structure = parser.get_structure(structure_id, filepath)
+        
+        # Cache the parsed structure
+        store_in_cache(filepath, 'structure', structure)
+        return structure
     
     def _get_parser(self, filepath: str):
         """
@@ -75,62 +85,12 @@ class StructureParser:
 
 def parse_structure(filepath: str, structure_id: Optional[str] = None, 
                    quiet: bool = True, auth_residues: bool = False) -> Structure:
-    """
-    Convenience function for parsing structure files.
-    
-    This is a shorthand for StructureParser.parse_structure() that can be imported
-    directly for quick usage.
-    
-    Parameters
-    ----------
-    filepath : str
-        Path to the structure file (.pdb or .cif)
-    structure_id : str, optional
-        Identifier for the structure. If None, uses the filename without extension
-    quiet : bool, default True
-        If True, suppress BioPython parser warnings
-    auth_residues : bool, default False
-        For CIF files, whether to use author residue numbering
-    
-    Returns
-    -------
-    Bio.PDB.Structure.Structure
-        Parsed structure object
-        
-    Examples
-    --------
-    >>> from bopep.structure.parser import parse_structure
-    >>> structure = parse_structure("protein.pdb")
-    >>> structure = parse_structure("protein.cif", structure_id="my_protein")
-    """
+    """Convenience function for parsing structure files with caching."""
     return StructureParser.parse_structure(filepath, structure_id, quiet, auth_residues)
 
 
 def extract_sequence_from_structure(structure_file: str, chain_id: str = "A") -> str:
-    """
-    Extract the amino acid sequence from a structure file for a specific chain.
-    
-    This function uses BioPython's amino acid mapping for robust sequence extraction
-    from both PDB and CIF format files.
-    
-    Parameters
-    ----------
-    structure_file : str
-        Path to the structure file (.pdb, .cif, .pdbx, .mmcif)
-    chain_id : str, default "A"
-        Chain identifier to extract sequence from
-        
-    Returns
-    -------
-    str
-        Single-letter amino acid sequence for the specified chain
-        
-    Examples
-    --------
-    >>> seq = extract_sequence_from_structure("protein.pdb", "A")
-    >>> seq = extract_sequence_from_structure("protein.cif", "B")
-    """
-
+    """Extract amino acid sequence from a structure file for a specific chain."""
     structure = parse_structure(structure_file, structure_id="sequence_extraction")
     
     # Use only the first model to avoid repeated sequences for NMR/multi-model structures
@@ -143,11 +103,7 @@ def extract_sequence_from_structure(structure_file: str, chain_id: str = "A") ->
                 # Only consider standard amino acid residues
                 if residue.id[0] == ' ':
                     resname = residue.get_resname()
-                    # Use BioPython's seq1 function with fallback to 'X' for unknown
-                    try:
-                        aa_letter = seq1(resname)
-                    except KeyError:
-                        aa_letter = 'X'
+                    aa_letter = seq1(resname)
                     sequence += aa_letter
             break
     
@@ -155,24 +111,11 @@ def extract_sequence_from_structure(structure_file: str, chain_id: str = "A") ->
 
 
 def get_chain_sequences(structure_file: str) -> dict:
-    """
-    Extract amino acid sequences for all chains in a structure file.
-    
-    Parameters
-    ----------
-    structure_file : str
-        Path to the structure file (.pdb, .cif, .pdbx, .mmcif)
-        
-    Returns
-    -------
-    dict
-        Dictionary mapping chain IDs to their amino acid sequences
-        
-    Examples
-    --------
-    >>> sequences = get_chain_sequences("protein.pdb")
-    >>> print(sequences)  # {'A': 'MKLAVF...', 'B': 'EILVGD...'}
-    """
+    """Extract amino acid sequences for all chains in a structure file."""
+    # Check cache first
+    cached_sequences = get_from_cache(structure_file, 'sequences')
+    if cached_sequences is not None:
+        return cached_sequences
     
     structure = parse_structure(structure_file, structure_id="chain_sequences")
     
@@ -181,166 +124,92 @@ def get_chain_sequences(structure_file: str) -> dict:
         for chain in model:
             sequence = ""
             for residue in chain:
-                # Only consider standard amino acid residues
                 if residue.id[0] == ' ':
                     resname = residue.get_resname()
-                    # Use BioPython's seq1 function with fallback to 'X' for unknown
-                    try:
-                        aa_letter = seq1(resname)
-                    except KeyError:
-                        aa_letter = 'X'
+                    aa_letter = seq1(resname)
                     sequence += aa_letter
             
             if sequence:  # Only add chains that have amino acid residues
                 chain_sequences[chain.id] = sequence
     
+    # Store in cache
+    store_in_cache(structure_file, 'sequences', chain_sequences)
     return chain_sequences
 
 
 def check_starting_index_in_structure(structure_file: str) -> Optional[int]:
-    """
-    Check the starting residue index in a structure file.
+    """Check the starting residue index in a structure file."""
+    structure = parse_structure(structure_file, structure_id="check_index")
+    model = structure[0]
     
-    Some structure files are not 0-indexed, this function helps identify
-    the actual starting residue number.
+    for chain in model:
+        for residue in chain:
+            # Skip non-amino acid residues
+            if residue.id[0] == ' ':
+                return residue.id[1]  # Return the residue sequence number
     
-    Parameters
-    ----------
-    structure_file : str
-        Path to the structure file (.pdb, .cif, .pdbx, .mmcif)
-        
-    Returns
-    -------
-    int or None
-        The starting residue index, or None if no valid residue is found
-        
-    Examples
-    --------
-    >>> start_idx = check_starting_index_in_structure("protein.pdb")
-    >>> print(f"Structure starts at residue {start_idx}")
-    """
-    try:
-        structure = parse_structure(structure_file, structure_id="check_index")
-        model = structure[0]
-        
-        for chain in model:
-            for residue in chain:
-                # Skip non-amino acid residues
-                if residue.id[0] == ' ':
-                    return residue.id[1]  # Return the residue sequence number
-        
-        return None
-        
-    except FileNotFoundError:
-        print(f"Error: structure file {structure_file} not found.")
-        return None
-    except Exception as e:
-        print(f"Error reading structure file: {e}")
-        return None
+    return None
+    
+
 
 
 def get_structure_residues(structure_file: str) -> List[Tuple[str, str]] :
-    """
-    Get a list of (chain_id, residue_number) tuples for all residues in a structure.
+    """Get a list of (chain_id, residue_number) tuples for all residues in a structure."""
+
+    cached_residues = get_from_cache(structure_file, 'structure_residues')
+    if cached_residues is not None:
+        return cached_residues
     
-    This replaces manual PDB parsing with BioPython-based extraction that works
-    with all supported structure formats (PDB, CIF, PDBX, MMCIF).
-    
-    Parameters
-    ----------
-    structure_file : str
-        Path to the structure file (.pdb, .cif, .pdbx, .mmcif)
-        
-    Returns
-    -------
-    list of tuple
-        List of (chain_id, residue_number) tuples in structure order
-        
-    Examples
-    --------
-    >>> residues = get_structure_residues("protein.pdb")
-    >>> print(residues)  # [('A', 1), ('A', 2), ..., ('B', 1), ('B', 2), ...]
-    """
     residue_chain_list = []
     
-    try:
-        structure = parse_structure(structure_file, structure_id="residue_list")
-        
-        for model in structure:
-            for chain in model:
-                for residue in chain:
-                    # Only consider standard amino acid residues
-                    if residue.id[0] == ' ':
-                        chain_id = chain.id
-                        residue_num = residue.id[1]  # Residue sequence number
-                        residue_chain_list.append((chain_id, str(residue_num)))
-        
-    except Exception as e:
-        print(f"Error reading structure file: {e}")
-        
+    structure = parse_structure(structure_file, structure_id="residue_list")
+    
+    for model in structure:
+        for chain in model:
+            for residue in chain:
+                # Only consider standard amino acid residues
+                if residue.id[0] == ' ':
+                    chain_id = chain.id
+                    residue_num = residue.id[1]  # Residue sequence number
+                    residue_chain_list.append((chain_id, str(residue_num)))
+    
+
+    store_in_cache(structure_file, 'structure_residues', residue_chain_list)
     return residue_chain_list
 
 
 def get_chain_coordinates(structure_file: str, chain_id: str, atom_type: str = "CA") -> list:
-    """
-    Extract coordinates for a specific atom type from a specific chain.
+    """Extract coordinates for a specific atom type from a specific chain."""
+    coord_key = f'{chain_id}_{atom_type}'
     
-    Parameters
-    ----------
-    structure_file : str
-        Path to the structure file (.pdb, .cif, .pdbx, .mmcif)
-    chain_id : str
-        Chain identifier to extract coordinates from
-    atom_type : str, default "CA"
-        Atom type to extract (e.g., "CA", "CB", "N", "C", "O")
-        
-    Returns
-    -------
-    list
-        List of coordinate arrays (x, y, z) for the specified atom type
-        
-    Examples
-    --------
-    >>> coords = get_chain_coordinates("protein.pdb", "A", "CA")
-    >>> coords = get_chain_coordinates("protein.cif", "B", "CB")
-    """
+    cached_coords = get_from_cache(structure_file, f'coordinates.{coord_key}')
+    if cached_coords is not None:
+        return cached_coords
+    
     structure = parse_structure(structure_file, structure_id="coordinate_extraction")
     
     coordinates = []
-    model = structure[0]  # Use first model
+    model = structure[0]
     
     for chain in model:
         if chain.id == chain_id:
             for residue in chain:
-                # Only consider standard amino acid residues
                 if residue.id[0] == ' ':
                     if atom_type in residue:
                         atom = residue[atom_type]
                         coordinates.append(atom.get_coord())
             break
     
+    store_in_cache(structure_file, f'coordinates.{coord_key}', coordinates)
     return coordinates
 
 
 def get_chain_list(structure_file: str) -> list:
-    """
-    Get a list of all chain IDs in a structure file.
+    """Get a list of all chain IDs in a structure file."""
+    cached_chains = get_from_cache(structure_file, 'chains')
+    if cached_chains is not None:
+        return cached_chains
     
-    Parameters
-    ----------
-    structure_file : str
-        Path to the structure file (.pdb, .cif, .pdbx, .mmcif)
-        
-    Returns
-    -------
-    list
-        List of chain IDs present in the structure
-        
-    Examples
-    --------
-    >>> chains = get_chain_list("protein.pdb")
-    >>> print(chains)  # ['A', 'B', 'C']
-    """
     structure = parse_structure(structure_file, structure_id="chain_list")
     
     chain_ids = []
@@ -349,40 +218,28 @@ def get_chain_list(structure_file: str) -> list:
             if chain.id not in chain_ids:
                 chain_ids.append(chain.id)
     
-    return sorted(chain_ids)
+    chain_ids = sorted(chain_ids)
+    
+    store_in_cache(structure_file, 'chains', chain_ids)
+    return chain_ids
 
 
 def get_all_atom_coordinates(structure_file: str, chain_id: str) -> dict:
-    """
-    Get coordinates for all atoms in a specific chain, organized by residue.
+    """Get coordinates for all atoms in a specific chain, organized by residue."""
+    cache_key = f'all_atom_coords_{chain_id}'
     
-    Parameters
-    ----------
-    structure_file : str
-        Path to the structure file (.pdb, .cif, .pdbx, .mmcif)
-    chain_id : str
-        Chain identifier to extract coordinates from
-        
-    Returns
-    -------
-    dict
-        Dictionary mapping residue numbers to atom coordinate dictionaries
-        Format: {residue_num: {atom_name: coordinates}}
-        
-    Examples
-    --------
-    >>> all_coords = get_all_atom_coordinates("protein.pdb", "A")
-    >>> ca_coord = all_coords[1]["CA"]  # CA coordinates for residue 1
-    """
+    cached_coords = get_from_cache(structure_file, cache_key)
+    if cached_coords is not None:
+        return cached_coords
+    
     structure = parse_structure(structure_file, structure_id="all_coordinates")
     
     residue_coords = {}
-    model = structure[0]  # Use first model
+    model = structure[0]
     
     for chain in model:
         if chain.id == chain_id:
             for residue in chain:
-                # Only consider standard amino acid residues
                 if residue.id[0] == ' ':
                     residue_num = residue.id[1]
                     atom_coords = {}
@@ -393,107 +250,74 @@ def get_all_atom_coordinates(structure_file: str, chain_id: str) -> dict:
                     residue_coords[residue_num] = atom_coords
             break
     
+    store_in_cache(structure_file, cache_key, residue_coords)
     return residue_coords
 
 
 def get_residue_coordinates(structure_file: str, chain_id: str, residue_indices: List[int], atom_type: str = None) -> list:
-    """
-    Extract coordinates for specific residues by their zero-based indices.
+    """Extract coordinates for specific residues by their zero-based indices."""
+    indices_str = '_'.join(map(str, residue_indices))
+    atom_str = atom_type if atom_type else 'all'
+    cache_key = f'residue_coords_{chain_id}_{indices_str}_{atom_str}'
     
-    Parameters
-    ----------
-    structure_file : str
-        Path to structure file (PDB/CIF/PDBX/MMCIF)
-    chain_id : str
-        Chain identifier
-    residue_indices : list[int]
-        Zero-based indices of residues to extract (0 = first residue in chain)
-    atom_type : str, optional
-        Specific atom type to extract (e.g., 'CA', 'CB'). If None, all atoms are extracted.
-        
-    Returns
-    -------
-    list
-        List of coordinate arrays (x, y, z) for the specified residues
-        
-    Examples
-    --------
-    >>> coords = get_residue_coordinates("protein.pdb", "A", [0, 1, 2], "CA")
-    >>> coords = get_residue_coordinates("protein.pdb", "B", [5, 10, 15])  # All atoms
-    """
+    # Check cache first
+    cached_coords = get_from_cache(structure_file, cache_key)
+    if cached_coords is not None:
+        return cached_coords
+    
     structure = parse_structure(structure_file)
     model = structure[0]
     
     if chain_id not in model:
-        return []
+        coordinates = []
+    else:
+        chain = model[chain_id]
         
-    chain = model[chain_id]
+        residues = [res for res in chain.get_residues() if res.id[0] == " "]
+        
+        coordinates = []
+        for idx in residue_indices:
+            if 0 <= idx < len(residues):
+                residue = residues[idx]
+                if atom_type:
+                    if atom_type in residue:
+                        coordinates.append(residue[atom_type].get_coord())
+                else:
+                    for atom in residue.get_atoms():
+                        coordinates.append(atom.get_coord())
     
-    # Get only standard amino acid residues
-    residues = [res for res in chain.get_residues() if res.id[0] == " "]
-    
-    coordinates = []
-    for idx in residue_indices:
-        if 0 <= idx < len(residues):
-            residue = residues[idx]
-            if atom_type:
-                # Extract specific atom type
-                if atom_type in residue:
-                    coordinates.append(residue[atom_type].get_coord())
-            else:
-                # Extract all atoms
-                for atom in residue.get_atoms():
-                    coordinates.append(atom.get_coord())
-                    
+    store_in_cache(structure_file, cache_key, coordinates)
     return coordinates
 
 
 def get_all_chain_atoms(structure_file: str, chain_id: str, atom_type: str = None, return_atoms: bool = False):
-    """
-    Get all atoms or coordinates from a chain with optional filtering.
+    """Get all atoms or coordinates from a chain with optional filtering."""
+    atom_str = atom_type if atom_type else 'all'
+    return_type = 'atoms' if return_atoms else 'coords'
+    cache_key = f'all_chain_{return_type}_{chain_id}_{atom_str}'
     
-    Parameters
-    ----------
-    structure_file : str
-        Path to structure file (PDB/CIF/PDBX/MMCIF)
-    chain_id : str
-        Chain identifier
-    atom_type : str, optional
-        Specific atom type to extract (e.g., 'CA', 'CB'). If None, all atoms are extracted.
-    return_atoms : bool, optional
-        If True, return Bio.PDB.Atom objects. If False, return coordinates.
-        
-    Returns
-    -------
-    list
-        List of atom coordinates (x, y, z) if return_atoms=False, or atom objects if return_atoms=True
-        
-    Examples
-    --------
-    >>> coords = get_all_chain_atoms("protein.pdb", "A", "CA")
-    >>> atoms = get_all_chain_atoms("protein.pdb", "B", return_atoms=True)
-    """
+    cached_results = get_from_cache(structure_file, cache_key)
+    if cached_results is not None:
+        return cached_results
+    
     structure = parse_structure(structure_file)
     model = structure[0]
     
     if chain_id not in model:
-        return []
+        results = []
+    else:
+        chain = model[chain_id]
+        residues = [res for res in chain.get_residues() if res.id[0] == " "]
         
-    chain = model[chain_id]
+        results = []
+        for residue in residues:
+            if atom_type:
+                if atom_type in residue:
+                    atom = residue[atom_type]
+                    results.append(atom if return_atoms else atom.get_coord())
+            else:
+                for atom in residue.get_atoms():
+                    results.append(atom if return_atoms else atom.get_coord())
     
-    # Get only standard amino acid residues
-    residues = [res for res in chain.get_residues() if res.id[0] == " "]
-    
-    results = []
-    for residue in residues:
-        if atom_type:
-            # Extract specific atom type
-            if atom_type in residue:
-                atom = residue[atom_type]
-                results.append(atom if return_atoms else atom.get_coord())
-        else:
-            # Extract all atoms
-            for atom in residue.get_atoms():
-                results.append(atom if return_atoms else atom.get_coord())
-                
+    store_in_cache(structure_file, cache_key, results)
     return results

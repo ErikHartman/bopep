@@ -16,7 +16,12 @@ from .parser import (
     get_chain_list,
     get_all_atom_coordinates,
     get_residue_coordinates,
-    get_all_chain_atoms
+    get_all_chain_atoms,
+)
+
+from .cache import (
+    clear_structure_cache,
+    get_cache_stats
 )
 
 __all__ = [
@@ -30,5 +35,7 @@ __all__ = [
     'get_chain_list',
     'get_all_atom_coordinates',
     'get_residue_coordinates',
-    'get_all_chain_atoms'
+    'get_all_chain_atoms',
+    'clear_structure_cache',
+    'get_cache_stats'
 ]

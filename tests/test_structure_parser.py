@@ -7,7 +7,6 @@ import tempfile
 import os
 from unittest.mock import patch, MagicMock
 from Bio.PDB.Structure import Structure
-from Bio.PDB import Model, Chain, Residue, Atom
 
 from bopep.structure.parser import StructureParser, parse_structure
 
@@ -91,41 +90,27 @@ class TestStructureParser:
         with pytest.raises(FileNotFoundError, match="Structure file not found"):
             parser.parse("nonexistent.pdb")
     
-    @patch('bopep.structure.parser.os.path.exists')
-    @patch('bopep.structure.parser.PDBParser')
-    def test_parse_structure_id_from_filename(self, mock_pdb_parser, mock_exists):
+    def test_parse_structure_id_from_filename(self):
         """Test that structure_id is derived from filename when not provided."""
-        mock_exists.return_value = True
-        mock_parser_instance = MagicMock()
-        mock_structure = MagicMock()
-        mock_parser_instance.get_structure.return_value = mock_structure
-        mock_pdb_parser.return_value = mock_parser_instance
-        
         parser = StructureParser()
-        result = parser.parse("/path/to/test_protein.pdb")
+        # Use actual data file
+        test_file = "data/1ssc.pdb"
+        result = parser.parse(test_file)
         
-        mock_parser_instance.get_structure.assert_called_once_with(
-            "test_protein", "/path/to/test_protein.pdb"
-        )
-        assert result == mock_structure
-    
-    @patch('bopep.structure.parser.os.path.exists')
-    @patch('bopep.structure.parser.PDBParser')
-    def test_parse_custom_structure_id(self, mock_pdb_parser, mock_exists):
+        # Check that the structure_id was set correctly
+        assert result.id == "1ssc"
+        assert hasattr(result, 'get_models')
+
+    def test_parse_custom_structure_id(self):
         """Test parsing with custom structure_id."""
-        mock_exists.return_value = True
-        mock_parser_instance = MagicMock()
-        mock_structure = MagicMock()
-        mock_parser_instance.get_structure.return_value = mock_structure
-        mock_pdb_parser.return_value = mock_parser_instance
-        
         parser = StructureParser()
-        result = parser.parse("test.pdb", structure_id="custom_id")
+        # Use actual data file
+        test_file = "data/4glf.pdb"
+        result = parser.parse(test_file, structure_id="custom_id")
         
-        mock_parser_instance.get_structure.assert_called_once_with(
-            "custom_id", "test.pdb"
-        )
-        assert result == mock_structure
+        # Check that the custom structure_id was used
+        assert result.id == "custom_id"
+        assert hasattr(result, 'get_models')
     
     @patch('bopep.structure.parser.StructureParser.parse')
     def test_parse_structure_static_method(self, mock_parse):
