@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional, Tuple
 from Bio.PDB import PDBParser, MMCIFParser, Structure
 import os
 from Bio.SeqUtils import seq1
@@ -45,7 +45,7 @@ class StructureParser:
         else:
             raise ValueError(
                 f"Unsupported file format: {filepath}. "
-                "Supported formats are .pdb and .cif"
+                f"Supported formats are: {', '.join(self.get_supported_formats())}"
             )
     
     @staticmethod
@@ -131,7 +131,6 @@ def extract_sequence_from_structure(structure_file: str, chain_id: str = "A") ->
     >>> seq = extract_sequence_from_structure("protein.cif", "B")
     """
 
-    
     structure = parse_structure(structure_file, structure_id="sequence_extraction")
     
     # Use only the first model to avoid repeated sequences for NMR/multi-model structures
@@ -198,7 +197,7 @@ def get_chain_sequences(structure_file: str) -> dict:
     return chain_sequences
 
 
-def check_starting_index_in_structure(structure_file: str) -> int:
+def check_starting_index_in_structure(structure_file: str) -> Optional[int]:
     """
     Check the starting residue index in a structure file.
     
@@ -240,7 +239,7 @@ def check_starting_index_in_structure(structure_file: str) -> int:
         return None
 
 
-def get_structure_residues(structure_file: str) -> list:
+def get_structure_residues(structure_file: str) -> List[Tuple[str, str]] :
     """
     Get a list of (chain_id, residue_number) tuples for all residues in a structure.
     
@@ -397,7 +396,7 @@ def get_all_atom_coordinates(structure_file: str, chain_id: str) -> dict:
     return residue_coords
 
 
-def get_residue_coordinates(structure_file: str, chain_id: str, residue_indices: list[int], atom_type: str = None) -> list:
+def get_residue_coordinates(structure_file: str, chain_id: str, residue_indices: List[int], atom_type: str = None) -> list:
     """
     Extract coordinates for specific residues by their zero-based indices.
     
