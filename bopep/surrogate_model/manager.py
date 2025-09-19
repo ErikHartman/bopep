@@ -99,6 +99,9 @@ class SurrogateModelManager:
         else:
             raise ValueError("Cannot determine input_dim. Provide embeddings or set in surrogate_model_kwargs.")
         
+        # Get n_objectives parameter (default to 1 for backward compatibility)
+        n_objectives = self.surrogate_model_kwargs.get('n_objectives', 1)
+        
         # Extract hyperparameters
         hidden_dims = hyperparams.get('hidden_dims')
         hidden_dim = hyperparams.get('hidden_dim')
@@ -113,7 +116,8 @@ class SurrogateModelManager:
                 hidden_dim=hidden_dim,
                 num_layers=num_layers,
                 network_type=network_type,
-                mve_regularization=uncertainty_param
+                mve_regularization=uncertainty_param,
+                n_objectives=n_objectives
             )
         elif model_type == 'deep_evidential':
             self.model = DeepEvidentialRegression(
@@ -122,7 +126,8 @@ class SurrogateModelManager:
                 hidden_dim=hidden_dim,
                 num_layers=num_layers,
                 network_type=network_type,
-                evidential_regularization=uncertainty_param
+                evidential_regularization=uncertainty_param,
+                n_objectives=n_objectives
             )
         elif model_type == 'mc_dropout':
             self.model = MonteCarloDropout(
@@ -131,7 +136,8 @@ class SurrogateModelManager:
                 hidden_dim=hidden_dim,
                 num_layers=num_layers,
                 network_type=network_type,
-                dropout_rate=uncertainty_param
+                dropout_rate=uncertainty_param,
+                n_objectives=n_objectives
             )
         elif model_type == 'nn_ensemble':
             self.model = NeuralNetworkEnsemble(
@@ -140,7 +146,8 @@ class SurrogateModelManager:
                 hidden_dim=hidden_dim,
                 num_layers=num_layers,
                 network_type=network_type,
-                n_networks=int(uncertainty_param)
+                n_networks=int(uncertainty_param),
+                n_objectives=n_objectives
             )
         else:
             raise ValueError(f"Unknown model type: {model_type}")

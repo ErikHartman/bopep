@@ -256,7 +256,7 @@ def main():
             model_type=model_type,
             embedding_dict=embedding_dict,
             objective_dict=objective_dict,
-            n_trials=10,
+            n_trials=50,
             n_splits=3,
             random_state=SEED,
             hidden_dim_max=32,

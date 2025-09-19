@@ -19,6 +19,7 @@ class NetworkFactory:
         network_type: Literal["mlp", "bilstm", "bigru"],
         input_dim: int,
         output_dim: int = 1,
+        n_objectives: int = 1,  # Support for multi-objective outputs
         **kwargs,
     ) -> BaseNetwork:
         """
@@ -28,6 +29,7 @@ class NetworkFactory:
             network_type: Type of network to create ("mlp", "bilstm", "bigru")
             input_dim: Input dimension for the network
             output_dim: Output dimension for the network (default: 1)
+            n_objectives: Number of objectives for multi-objective optimization (default: 1)
             **kwargs: Additional parameters specific to the network type
 
         Returns:
@@ -38,6 +40,7 @@ class NetworkFactory:
             "dropout_rate": kwargs.get("dropout_rate", 0.0),
             "input_dim": input_dim,
             "output_dim": output_dim,
+            "n_objectives": n_objectives,
         }
 
         device = kwargs.get("device", torch.device("cpu"))

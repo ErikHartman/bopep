@@ -21,13 +21,15 @@ class HyperparameterTuner:
     Unified tuner that searches:
       1) Network architecture hyperparams (MLP vs BiLSTM vs BiGRU)
       2) Uncertainty hyperparam (MVE/DER reg, dropout rate, or ensemble size)
-    Uses a combined metric: RMSE + NLL + MSCE + Coverage Error.
+    Uses NLL as the primary metric, supports both single and multi-objective optimization.
+    For multi-objective, NLLs are summed across objectives.
     """
 
     def __init__(
         self,
         model_type: Literal["mve", "deep_evidential", "nn_ensemble", "mc_dropout"],
         input_dim: int,
+        n_objectives: int = 1,
         network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
         device: Optional[torch.device] = None,
         n_splits: int = 3,
@@ -42,6 +44,7 @@ class HyperparameterTuner:
         Args:
             model_type: "mve", "deep_evidential", "nn_ensemble", or "mc_dropout"
             input_dim: feature dimension
+            n_objectives: number of objectives (1 for single-objective, >1 for multi-objective)
             network_type: "mlp", "bilstm", or "bigru"
             device: Torch device
             n_splits: K-fold CV splits
@@ -50,8 +53,14 @@ class HyperparameterTuner:
             hidden_dim_min, hidden_dim_max: Range for hidden dims in MLP or RNN
             uncertainty_param_min, uncertainty_param_max: Range for uncertainty hyperparam
         """
+        # Validate model_type
+        valid_model_types = ["mve", "deep_evidential", "nn_ensemble", "mc_dropout"]
+        if model_type not in valid_model_types:
+            raise ValueError(f"Unknown model type: {model_type}. Must be one of {valid_model_types}")
+            
         self.model_type = model_type
         self.input_dim = input_dim
+        self.n_objectives = n_objectives
         self.network_type = network_type
         self.n_splits = n_splits
         self.n_trials = n_trials
@@ -90,6 +99,7 @@ class HyperparameterTuner:
                 num_layers=num_layers,
                 network_type=self.network_type,
                 mve_regularization=param_value,
+                n_objectives=self.n_objectives,
             )
         elif self.model_type == "deep_evidential":
             return DeepEvidentialRegression(
@@ -99,6 +109,7 @@ class HyperparameterTuner:
                 num_layers=num_layers,
                 network_type=self.network_type,
                 evidential_regularization=param_value,
+                n_objectives=self.n_objectives,
             )
         elif self.model_type == "mc_dropout":
             return MonteCarloDropout(
@@ -108,6 +119,7 @@ class HyperparameterTuner:
                 num_layers=num_layers,
                 network_type=self.network_type,
                 dropout_rate=param_value,
+                n_objectives=self.n_objectives,
             )
         elif self.model_type == "nn_ensemble":
             return NeuralNetworkEnsemble(
@@ -117,15 +129,16 @@ class HyperparameterTuner:
                 num_layers=num_layers,
                 network_type=self.network_type,
                 n_networks=int(param_value),
+                n_objectives=self.n_objectives,
             )
         else:
             raise ValueError(f"Unknown model type: {self.model_type}")
 
     def _evaluate_model(
         self, model: "BasePredictionModel", val_loader: DataLoader
-    ) -> Tuple[float, float, float, float, float]:
+    ) -> float:
         """
-        Returns nll.
+        Returns NLL. For multi-objective, returns sum of NLLs across objectives.
         """
         model.eval()
         model.to(self.device)
@@ -135,7 +148,18 @@ class HyperparameterTuner:
         with torch.no_grad():
             for batch_x, batch_y, lengths in val_loader:
                 batch_x = batch_x.to(self.device)
-                batch_y = batch_y.to(self.device).view(-1, 1)
+                batch_y = batch_y.to(self.device)
+                
+                # Handle target reshaping based on objectives
+                if self.n_objectives == 1:
+                    # Single objective: ensure shape [batch_size, 1]
+                    if batch_y.dim() == 1:
+                        batch_y = batch_y.view(-1, 1)
+                else:
+                    # Multi-objective: ensure shape [batch_size, n_objectives]
+                    if batch_y.dim() == 1:
+                        # This shouldn't happen for multi-objective, but handle gracefully
+                        batch_y = batch_y.view(-1, 1)
 
                 means, stds = model.forward_predict(batch_x, lengths=lengths)
                 all_means.append(means)
@@ -146,8 +170,10 @@ class HyperparameterTuner:
         stds = torch.cat(all_stds)
         targets = torch.cat(all_targets)
 
-
-        return self._nll_gaussian(means, stds, targets)
+        if self.n_objectives == 1:
+            return self._nll_gaussian(means, stds, targets)
+        else:
+            return self._nll_multi_gaussian(means, stds, targets)
 
     
     @staticmethod
@@ -166,6 +192,35 @@ class HyperparameterTuner:
                 )
 
         return nll.mean().item()
+    
+    @staticmethod
+    def _nll_multi_gaussian(means: torch.Tensor,
+                          stds: torch.Tensor,
+                          targets: torch.Tensor) -> float:
+        """
+        Returns the sum of mean negative log-likelihoods across objectives.
+        For multi-objective case where:
+        - means: [batch_size, n_objectives] or [batch_size, n_objectives, 1]
+        - stds: [batch_size, n_objectives] or [batch_size, n_objectives, 1]  
+        - targets: [batch_size, n_objectives]
+        """
+        # Ensure consistent shapes
+        if means.dim() == 3:
+            means = means.squeeze(-1)  # [batch_size, n_objectives]
+        if stds.dim() == 3:
+            stds = stds.squeeze(-1)   # [batch_size, n_objectives]
+        if targets.dim() == 3:
+            targets = targets.squeeze(-1)  # [batch_size, n_objectives]
+        
+        stds = torch.clamp(stds, min=1e-6)
+        var = stds**2
+        nll = 0.5 * ( (targets - means)**2 / var
+                    + torch.log(var)
+                    + math.log(2 * math.pi)
+                )
+        
+        # Sum NLL across objectives, then take mean across batch
+        return nll.sum(dim=-1).mean().item()
     
 
     def _fit_model(
@@ -296,7 +351,7 @@ class HyperparameterTuner:
     def tune(
         self,
         embedding_dict: Dict[str, np.ndarray],
-        objective_dict: Dict[str, float],
+        objective_dict: Dict[str, Union[float, List[float], np.ndarray]],
         previous_study: Optional[optuna.study.Study] = None,
     ) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
         """
@@ -342,7 +397,7 @@ class HyperparameterTuner:
 def tune_hyperparams(
     model_type: Literal["mve", "deep_evidential", "nn_ensemble", "mc_dropout"],
     embedding_dict: Dict[str, np.ndarray],
-    objective_dict: Dict[str, float],
+    objective_dict: Dict[str, Union[float, List[float], np.ndarray]],
     network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
     n_splits: int = 3,
     n_trials: int = 20,
@@ -356,7 +411,11 @@ def tune_hyperparams(
 ) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
     """
     High-level API for tuning architecture + uncertainty hyperparams with 
-    MLP/BiLSTM/BiGRU options, using a combined calibration metric.
+    MLP/BiLSTM/BiGRU options, supporting both single and multi-objective optimization.
+    
+    Args:
+        objective_dict: Can contain single values (float) for single-objective,
+                       or lists/arrays for multi-objective optimization
     
     Returns:
         Tuple of (best_params, study) where study can be reused in future calls
@@ -368,9 +427,17 @@ def tune_hyperparams(
     else:
         input_dim = sample_embedding.shape[0]
     
+    # Auto-detect number of objectives
+    sample_objective = next(iter(objective_dict.values()))
+    if isinstance(sample_objective, (list, np.ndarray)):
+        n_objectives = len(sample_objective)
+    else:
+        n_objectives = 1
+    
     tuner = HyperparameterTuner(
         model_type=model_type,
         input_dim=input_dim,
+        n_objectives=n_objectives,
         network_type=network_type,
         device=device,
         n_splits=n_splits,

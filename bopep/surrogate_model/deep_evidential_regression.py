@@ -36,19 +36,22 @@ class DeepEvidentialRegression(BasePredictionModel):
         hidden_dim: Optional[int] = None,
         evidential_regularization: float = 0.1,
         uncertainty_type: Literal["aleatoric", "epistemic", "total"] = "total",
+        n_objectives: int = 1,  # Support for multi-objective outputs
         **kwargs
     ):
         super().__init__()
         self.evidential_regularization = evidential_regularization
         self.uncertainty_type = uncertainty_type
+        self.n_objectives = n_objectives
 
-        # We need 4 outputs (mu, v, alpha, beta)
+        # We need 4 outputs per objective (mu, v, alpha, beta)
         output_dim = 4
 
         self.network = NetworkFactory.get_network(
             network_type=network_type,
             input_dim=input_dim,
             output_dim=output_dim,
+            n_objectives=n_objectives,
             hidden_dims=hidden_dims,
             hidden_dim=hidden_dim,
             num_layers=num_layers,
@@ -61,10 +64,20 @@ class DeepEvidentialRegression(BasePredictionModel):
         lengths: Optional[List[int]] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         outputs = self.network(x, lengths=lengths)
-        mu = outputs[:, 0:1]
-        v = torch.nn.functional.softplus(outputs[:, 1:2]) + 1e-3  
-        alpha = torch.nn.functional.softplus(outputs[:, 2:3]) + 1.0 
-        beta = torch.nn.functional.softplus(outputs[:, 3:4]) + 1e-3 
+        
+        if self.n_objectives == 1:
+            # Original behavior: outputs shape is (N, 4)
+            mu = outputs[:, 0:1]
+            v = torch.nn.functional.softplus(outputs[:, 1:2]) + 1e-3  
+            alpha = torch.nn.functional.softplus(outputs[:, 2:3]) + 1.0 
+            beta = torch.nn.functional.softplus(outputs[:, 3:4]) + 1e-3 
+        else:
+            # Multi-objective: outputs shape is (N, n_objectives, 4)
+            mu = outputs[:, :, 0:1]  # (N, n_objectives, 1)
+            v = torch.nn.functional.softplus(outputs[:, :, 1:2]) + 1e-3  
+            alpha = torch.nn.functional.softplus(outputs[:, :, 2:3]) + 1.0 
+            beta = torch.nn.functional.softplus(outputs[:, :, 3:4]) + 1e-3 
+            
         return mu, v, alpha, beta
 
     def forward_predict(
@@ -81,6 +94,10 @@ class DeepEvidentialRegression(BasePredictionModel):
             lengths: Optional sequence lengths for variable-length inputs
             uncertainty_mode: Which uncertainty component to use ("aleatoric", "epistemic", or "total")
                               If None, uses the default set in __init__
+                              
+        Returns:
+        - For single objective (n_objectives=1): mean (N, 1), std (N, 1)
+        - For multi-objective (n_objectives>1): mean (N, n_objectives), std (N, n_objectives)
         """
         if uncertainty_mode is None:
             uncertainty_mode = self.uncertainty_type
@@ -99,6 +116,17 @@ class DeepEvidentialRegression(BasePredictionModel):
             variance = aleatoric_variance + epistemic_variance
             
         std = torch.sqrt(variance)
+        
+        # Squeeze the last dimension for consistency with other models
+        if self.n_objectives == 1:
+            mu = mu.squeeze(-1)  # (N, 1) -> (N,) -> (N, 1) after unsqueeze
+            std = std.squeeze(-1)
+            mu = mu.unsqueeze(-1)
+            std = std.unsqueeze(-1)
+        else:
+            mu = mu.squeeze(-1)  # (N, n_objectives, 1) -> (N, n_objectives)
+            std = std.squeeze(-1)
+            
         return mu, std
 
     def get_uncertainty_components(
@@ -198,12 +226,43 @@ class DeepEvidentialRegression(BasePredictionModel):
         1. NLL term: Negative log likelihood of the data under the predictive distribution
         2. Regularization term: KL divergence between the predicted and prior distribution
         
-        mu: Predicted mean
-        v: Predicted precision parameter
-        alpha: Predicted shape parameter
-        beta: Predicted scale parameter
-        targets: Ground truth targets
+        Args:
+            mu: Predicted mean - shape (N, n_objectives, 1) or (N, 1)
+            v: Predicted precision parameter - same shape as mu
+            alpha: Predicted shape parameter - same shape as mu  
+            beta: Predicted scale parameter - same shape as mu
+            targets: Ground truth targets - shape (N, n_objectives) or (N, 1)
         """
+        # Handle both single and multi-objective cases
+        if self.n_objectives > 1:
+            # Multi-objective: mu has shape (N, n_objectives, 1), targets (N, n_objectives)
+            # Squeeze the last dimension from predictions
+            mu = mu.squeeze(-1)  # (N, n_objectives)
+            v = v.squeeze(-1)
+            alpha = alpha.squeeze(-1)
+            beta = beta.squeeze(-1)
+            
+            # Ensure targets has the right shape
+            if targets.dim() == 1:
+                targets = targets.unsqueeze(-1)  # (N,) -> (N, 1)
+            if targets.shape[1] == 1 and self.n_objectives > 1:
+                # Broadcast single target to all objectives (assumes same target for all)
+                targets = targets.expand(-1, self.n_objectives)  # (N, 1) -> (N, n_objectives)
+        else:
+            # Single objective: ensure consistent shapes
+            mu = mu.squeeze(-1)  # (N, 1) -> (N,)
+            v = v.squeeze(-1)
+            alpha = alpha.squeeze(-1) 
+            beta = beta.squeeze(-1)
+            targets = targets.squeeze(-1) if targets.dim() > 1 else targets
+            
+            # Add dimension back for computation
+            mu = mu.unsqueeze(-1)  # (N,) -> (N, 1)
+            v = v.unsqueeze(-1)
+            alpha = alpha.unsqueeze(-1)
+            beta = beta.unsqueeze(-1)
+            targets = targets.unsqueeze(-1)
+        
         twoBlambda = 2.0 * beta * (1.0 + v)
 
         nll = (
@@ -219,7 +278,11 @@ class DeepEvidentialRegression(BasePredictionModel):
 
         loss = nll + self.evidential_regularization * reg
 
-        return loss.mean()
+        # For multi-objective, sum losses across objectives, then average across batch
+        if self.n_objectives > 1:
+            loss = loss.sum(dim=-1)  # Sum across objectives
+        
+        return loss.mean()  # Average across batch
 
     def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
         mu, v, alpha, beta = self.forward_once(batch_x, lengths)
