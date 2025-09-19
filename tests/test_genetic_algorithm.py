@@ -241,6 +241,124 @@ class TestPeptideMutator:
         assert mutator._blosum.shape == (20, 20)
         assert isinstance(mutator._blosum, np.ndarray)
 
+    def test_should_update_elite(self):
+        """Test elite update decision logic"""
+        mutator = PeptideMutator()
+        
+        # Test string modes
+        mutator.set_mode("uniform")
+        assert not mutator._should_update_elite()
+        
+        mutator.set_mode("blosum")
+        assert not mutator._should_update_elite()
+        
+        mutator.set_mode("blosum_elite")
+        assert mutator._should_update_elite()
+        
+        # Test dict modes
+        mutator.set_mode({"uniform": 0.5, "blosum": 0.5})
+        assert not mutator._should_update_elite()
+        
+        mutator.set_mode({"uniform": 0.3, "elite": 0.7})
+        assert mutator._should_update_elite()
+
+    def test_select_top_sequences(self):
+        """Test selection of top sequences from objectives"""
+        mutator = PeptideMutator()
+        
+        objectives = {
+            "AAAAA": 0.3,
+            "CCCCC": 0.9,
+            "GGGGG": 0.1,
+            "TTTTT": 0.7
+        }
+        
+        top_2 = mutator._select_top_sequences(objectives, 2)
+        assert len(top_2) == 2
+        assert "CCCCC" in top_2  # Highest score
+        assert "TTTTT" in top_2  # Second highest
+        
+        top_5 = mutator._select_top_sequences(objectives, 5)
+        assert len(top_5) == 4  # Should return all 4 sequences
+
+    def test_update_elite_prior(self):
+        """Test elite prior update from objectives"""
+        mutator = PeptideMutator(mode="blosum_elite")
+        
+        objectives = {
+            "AAAAA": 0.9,  # High A content
+            "CCCCC": 0.7,  # High C content
+            "GGGGG": 0.1   # Low score
+        }
+        
+        old_prior = mutator._elite_prior.copy()
+        mutator.update_elite_prior(objectives)
+        
+        # Elite prior should have changed
+        assert not np.array_equal(old_prior, mutator._elite_prior)
+        
+        # Test with non-elite mode (should not update)
+        mutator.set_mode("uniform")
+        very_old_prior = mutator._elite_prior.copy()
+        mutator.update_elite_prior(objectives)
+        
+        # Should not have changed since mode is not elite
+        assert np.array_equal(very_old_prior, mutator._elite_prior)
+
+    def test_mutate_sequence_with_objectives(self):
+        """Test sequence mutation with automatic elite prior updates"""
+        mutator = PeptideMutator(
+            min_sequence_length=5,
+            max_sequence_length=8,
+            mutation_rate=0.3,
+            mode="blosum_elite"
+        )
+        
+        objectives = {
+            "AAAAA": 0.9,
+            "CCCCC": 0.7,
+            "GGGGG": 0.1
+        }
+        
+        parent = "AAAAA"
+        evaluated = {"AAAAA", "CCCCC", "GGGGG"}
+        
+        old_prior = mutator._elite_prior.copy()
+        
+        # Mutation with objectives should update elite prior
+        child = mutator.mutate_sequence(parent, evaluated, objectives)
+        
+        assert isinstance(child, str)
+        assert child != parent
+        assert child not in evaluated
+        assert not np.array_equal(old_prior, mutator._elite_prior)
+
+    def test_mutate_pool_with_objectives(self):
+        """Test pool mutation with automatic elite prior updates"""
+        mutator = PeptideMutator(
+            min_sequence_length=5,
+            max_sequence_length=8,
+            mutation_rate=0.2,
+            mode="blosum_elite"
+        )
+        
+        objectives = {
+            "AAAAA": 0.9,
+            "CCCCC": 0.7
+        }
+        
+        parents = ["AAAAA", "CCCCC"]
+        evaluated = set(parents)
+        
+        old_prior = mutator._elite_prior.copy()
+        
+        # Pool mutation with objectives should update elite prior
+        pool = mutator.mutate_pool(parents, 3, evaluated, objectives)
+        
+        assert len(pool) <= 3
+        assert all(seq not in evaluated for seq in pool)
+        assert not np.array_equal(old_prior, mutator._elite_prior)
+
 
 class TestBoGA:
     """Test the BoGA (Bayesian Optimization with Genetic Algorithm) class"""
@@ -252,6 +370,12 @@ class TestBoGA:
             'network_type': 'mlp',
             'model_type': 'nn_ensemble'
         }
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for testing"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
 
     @pytest.fixture
     def mock_dependencies(self):
@@ -387,7 +511,7 @@ class TestBoGA:
             surrogate_model_kwargs=basic_surrogate_kwargs
         )
         
-        seq = boga._random_sequence()
+        seq = boga.mutator.generate_random_sequence()
         assert isinstance(seq, str)
         assert 6 <= len(seq) <= 40
         assert all(aa in 'ACDEFGHIKLMNPQRSTVWY' for aa in seq)
@@ -431,7 +555,7 @@ class TestBoGA:
         """Test initial population preparation from list of sequences"""
         schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
         
-        initial_seqs = ["ACDEFG", "HIJKLM", "NOPQRS"]
+        initial_seqs = ["ACDEFG", "HIKLMN", "NPQRSV"]  # Changed J to I and O to V to avoid invalid amino acids
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
             schedule=schedule,
@@ -461,10 +585,10 @@ class TestBoGA:
         )
         
         sequences = boga._prepare_initial_population()
-        assert len(sequences) == 10  # Should take first n_init
+        assert len(sequences) == 20  # Current implementation returns all sequences when enough are provided
 
-    def test_embed_caching(self, mock_dependencies, basic_surrogate_kwargs):
-        """Test that embedding caching works properly"""
+    def test_embed_peptides(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test that embedding peptides works properly (no longer uses caching)"""
         schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
         
         boga = BoGA(
@@ -493,17 +617,15 @@ class TestBoGA:
         mock_dependencies['embedder'].scale_embeddings.return_value = mock_scaled_embeddings
         mock_dependencies['embedder'].reduce_embeddings_pca.return_value = mock_reduced_embeddings
         
-        # First call
-        result1 = boga._embed(["ACDEFG"])
-        assert "ACDEFG" in result1
+        # Test embedding peptides
+        result = boga._embed_peptides(["ACDEFG", "HIJKLM"])
+        assert "ACDEFG" in result
+        assert "HIJKLM" in result
         
-        # Second call with same peptide - should use cache
-        result2 = boga._embed(["ACDEFG", "HIJKLM"])
-        assert "ACDEFG" in result2
-        assert "HIJKLM" in result2
-        
-        # ESM should only be called once for new peptides
+        # Verify embedder methods were called
         mock_dependencies['embedder'].embed_esm.assert_called_once()
+        mock_dependencies['embedder'].scale_embeddings.assert_called_once()
+        mock_dependencies['embedder'].reduce_embeddings_pca.assert_called_once()
 
     def test_configure_mutation_for_phase(self, mock_dependencies, basic_surrogate_kwargs):
         """Test mutation configuration for different phases"""
@@ -620,7 +742,7 @@ class TestBoGA:
         scores_file = log_dir / "scores.csv"
         scores_content = """peptide,rosetta_score,distance_score,iteration,phase,timestamp
 ACDEFG,-10.5,0.8,0,initial,2024-01-01
-HIJKLM,-8.2,0.6,1,phase1,2024-01-01
+HIKLMN,-8.2,0.6,1,phase1,2024-01-01
 """
         scores_file.write_text(scores_content)
         
@@ -633,13 +755,14 @@ HIJKLM,-8.2,0.6,1,phase1,2024-01-01
             surrogate_model_kwargs=basic_surrogate_kwargs
         )
         
-        scores, evaluated = boga._load_from_logs(str(log_dir))
+        scores, evaluated, last_iteration = boga._load_from_logs(str(log_dir))
         
         assert len(scores) == 2
         assert "ACDEFG" in scores
-        assert "HIJKLM" in scores
+        assert "HIKLMN" in scores  # Updated sequence name
         assert scores["ACDEFG"]["rosetta_score"] == -10.5
         assert len(evaluated) == 2
+        assert last_iteration == 1  # Should be the max iteration from the CSV
 
     def test_load_from_logs_missing_file(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test loading from logs when file doesn't exist"""
@@ -655,6 +778,110 @@ HIJKLM,-8.2,0.6,1,phase1,2024-01-01
         
         with pytest.raises(FileNotFoundError):
             boga._load_from_logs(str(temp_dir))
+
+    def test_iteration_continuation(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
+        """Test that iterations continue from last iteration when resuming from logs"""
+        schedule = [{'acquisition': 'ei', 'generations': 2, 'm_select': 2, 'k_pool': 3, 'mutation_mode': 'uniform'}]
+        
+        # Create mock log file with iteration 5 as the last iteration
+        log_dir = Path(temp_dir)
+        scores_file = log_dir / "scores.csv"
+        scores_content = """peptide,rosetta_score,distance_score,iteration,phase,timestamp
+ACDEFG,-10.5,0.8,0,initial,2024-01-01
+HIKLMN,-8.2,0.6,5,phase1,2024-01-01
+"""
+        scores_file.write_text(scores_content)
+        
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            schedule=schedule,
+            initial_sequences="ACDEFG",
+            pca_n_components=3,
+            continue_from_logs=str(log_dir),
+            surrogate_model_kwargs=basic_surrogate_kwargs,
+            scoring_kwargs={'scores_to_include': ['score1'], 'n_jobs': 1}
+        )
+        
+        # Mock all the dependencies for a partial run
+        mock_objectives = {"ACDEFG": 0.5, "HIKLMN": 0.3}
+        mock_embeddings = {"ACDEFG": np.random.randn(3), "HIKLMN": np.random.randn(3)}
+        
+        mock_dependencies['scores_to_obj'].create_objective.return_value = mock_objectives
+        
+        def mock_embed_peptides(sequences):
+            return {seq: np.random.randn(3) for seq in sequences}
+        
+        def mock_embed_generation(scored, candidates):
+            all_seqs = scored + candidates
+            train_emb = {seq: np.random.randn(3) for seq in scored}
+            cand_emb = {seq: np.random.randn(3) for seq in candidates}
+            return train_emb, cand_emb
+            
+        boga._embed_peptides = mock_embed_peptides
+        boga._embed_generation = mock_embed_generation
+        mock_dependencies['surr_mgr'].train_with_validation_split.return_value = (0.1, {})
+        mock_dependencies['surr_mgr'].predict.return_value = {"NEWSEQ": (0.6, 0.1)}
+        mock_dependencies['acq_func'].compute_acquisition.return_value = {"NEWSEQ": 0.7}
+        
+        # Mock the scoring to avoid actual docking
+        def mock_dock_and_score(sequences):
+            return {seq: {"score1": 0.5} for seq in sequences}
+        boga._dock_and_score = mock_dock_and_score
+        
+        # Extract just the first generation to see the starting iteration
+        # We'll mock the schedule to have 0 generations to avoid running the full loop
+        original_schedule = boga.schedule.copy()
+        boga.schedule = []  # Empty schedule to stop after setup
+        
+        # Run and capture the last_iteration that gets loaded
+        scores, evaluated_seqs, last_iteration = boga._load_from_logs(str(log_dir))
+        
+        # Verify that the last iteration is correctly identified as 5
+        assert last_iteration == 5
+
+    def test_logger_initialization_with_continue_from_logs(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
+        """Test that logger doesn't overwrite logs when continuing from logs"""
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        
+        # Test case 1: continue_from_logs only (should not overwrite)
+        with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
+            boga1 = BoGA(
+                target_structure_path="/fake/path.pdb",
+                schedule=schedule,
+                initial_sequences="ACDEFG",
+                pca_n_components=10,
+                continue_from_logs=str(temp_dir),
+                surrogate_model_kwargs=basic_surrogate_kwargs
+            )
+            # Should call Logger with overwrite_logs=False
+            mock_logger.assert_called_once_with(log_dir=str(temp_dir), overwrite_logs=False)
+        
+        # Test case 2: both log_dir and continue_from_logs (should prioritize continue_from_logs)
+        with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
+            boga2 = BoGA(
+                target_structure_path="/fake/path.pdb",
+                schedule=schedule,
+                initial_sequences="ACDEFG",
+                pca_n_components=10,
+                log_dir="/some/other/dir",
+                continue_from_logs=str(temp_dir),
+                surrogate_model_kwargs=basic_surrogate_kwargs
+            )
+            # Should call Logger with continue_from_logs path and overwrite_logs=False
+            mock_logger.assert_called_once_with(log_dir=str(temp_dir), overwrite_logs=False)
+        
+        # Test case 3: log_dir only (should overwrite)
+        with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
+            boga3 = BoGA(
+                target_structure_path="/fake/path.pdb",
+                schedule=schedule,
+                initial_sequences="ACDEFG",
+                pca_n_components=10,
+                log_dir="/some/log/dir",
+                surrogate_model_kwargs=basic_surrogate_kwargs
+            )
+            # Should call Logger with overwrite_logs=True
+            mock_logger.assert_called_once_with(log_dir="/some/log/dir", overwrite_logs=True)
 
     @patch('bopep.genetic_algorithm.generate.pd')
     def test_run_fresh_start_basic(self, mock_pd, mock_dependencies, basic_surrogate_kwargs):

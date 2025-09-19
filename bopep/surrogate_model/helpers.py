@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
 
@@ -53,31 +53,41 @@ class VariableLengthDataset(Dataset):
     """
     Stores (embedding, score) pairs.
     Each embedding can have shape (D,) for MLP or (L, D) for a variable-length embedding.
+    Scores can be single values (float) or multiple values (List[float]) for multi-objective.
     """
 
     def __init__(
-        self, embedding_dict: Dict[str, np.ndarray], objective_dict: Dict[str, float]
+        self, embedding_dict: Dict[str, np.ndarray], objective_dict: Dict[str, Union[float, List[float]]]
     ):
         super().__init__()
         self.peptides = list(embedding_dict.keys())
         self.embeddings = [
             torch.tensor(embedding_dict[p], dtype=torch.float32) for p in self.peptides
         ]
-        self.scores = [
-            torch.tensor(objective_dict[p], dtype=torch.float32) for p in self.peptides
-        ]
+        
+        # Handle both single and multi-objective scores
+        self.scores = []
+        for p in self.peptides:
+            score = objective_dict[p]
+            if isinstance(score, (list, np.ndarray)):
+                # Multi-objective: convert list to tensor
+                self.scores.append(torch.tensor(score, dtype=torch.float32))
+            else:
+                # Single objective: convert float to tensor
+                self.scores.append(torch.tensor(score, dtype=torch.float32))
 
     def __len__(self):
         return len(self.peptides)
 
     def __getitem__(self, idx):
-        # Return (embedding_tensor, score)
+        # Return (embedding_tensor, score_tensor)
         return self.embeddings[idx], self.scores[idx]
 
 
 def variable_length_collate_fn(batch):
     """
     batch: List of (embedding_tensor, score_tensor)
+    Handles both single-objective (score is scalar) and multi-objective (score is vector) cases.
     """
     embeddings = [item[0] for item in batch]  # List[Tensor]
     scores = [item[1] for item in batch]  # List[Tensor]
@@ -98,8 +108,13 @@ def variable_length_collate_fn(batch):
         ]  # keep track of each sequence length
         x_padded = pad_sequence(embeddings, batch_first=True) # pads with 0s
 
-    # Stack scores => shape (N, 1) for regression
-    y_stacked = torch.stack(scores).unsqueeze(-1)  # shape (N, 1)
+    # Handle scores - they can be scalars or vectors
+    if scores[0].dim() == 0:
+        # Single objective: scores are scalars
+        y_stacked = torch.stack(scores)  # shape (N,) - keep it simple for single objective
+    else:
+        # Multi-objective: scores are vectors
+        y_stacked = torch.stack(scores)  # shape (N, n_objectives)
 
     return x_padded, y_stacked, lengths
 
@@ -114,9 +129,9 @@ class BasePredictionModel(torch.nn.Module):
     def fit_dict(
         self,
         embedding_dict: Dict[str, np.ndarray],
-        objective_dict: Dict[str, float],
+        objective_dict: Dict[str, Union[float, List[float]]],
         val_embedding_dict: Optional[Dict[str, np.ndarray]] = None,
-        val_objective_dict: Optional[Dict[str, float]] = None,
+        val_objective_dict: Optional[Dict[str, Union[float, List[float]]]] = None,
         epochs: int = 100,
         batch_size: int = 32,
         learning_rate: float = 1e-3,
@@ -127,6 +142,22 @@ class BasePredictionModel(torch.nn.Module):
     ) -> float:
         """
         Train using dictionaries of embeddings and scores, with optional validation set.
+
+        Args:
+            embedding_dict: {peptide: embedding_array}
+            objective_dict: {peptide: score} for single-objective or {peptide: [score1, score2, ...]} for multi-objective
+            val_embedding_dict: Optional validation embeddings
+            val_objective_dict: Optional validation scores (same format as objective_dict)
+            epochs: Number of training epochs
+            batch_size: Batch size for training
+            learning_rate: Learning rate for optimizer
+            device: Device to train on
+            verbose: Whether to print training progress
+            criterion: Loss function (uses model default if None)
+            clip_grad_norm: Gradient clipping threshold
+
+        Returns:
+            Final training or validation loss
 
         If a validation set is provided (val_embedding_dict & val_objective_dict),
         early stopping and LR scheduling are based on val_loss. Otherwise,
@@ -263,14 +294,18 @@ class BasePredictionModel(torch.nn.Module):
         batch_size: int = 32,
         device: Optional[torch.device] = None,
         uncertainty_mode: Optional[str] = None
-    ) -> Dict[str, Tuple[float, float]]:
-        """Predict for a dictionary of embeddings, returning {pep: (mean, std), ...}.
+    ) -> Dict[str, Tuple]:
+        """Predict for a dictionary of embeddings.
         
         Args:
             embedding_dict: Dictionary mapping peptides to their embeddings
             batch_size: Batch size for prediction
             device: Device to use for prediction
             uncertainty_mode: Which uncertainty component to use (for DeepEvidentialRegression)
+            
+        Returns:
+            For single objective: {pep: (mean, std), ...}
+            For multi-objective: {pep: ([mean1, mean2, ...], [std1, std2, ...]), ...}
         """
 
         if device is None:
@@ -309,13 +344,30 @@ class BasePredictionModel(torch.nn.Module):
                 std_list.append(std_pred.cpu())    # Move back to CPU for numpy
 
         # Concatenate all predictions
-        mean_array = torch.cat(mean_list).view(-1).numpy()
-        std_array = torch.cat(std_list).view(-1).numpy()
-
-        # Build dictionary of {peptide: (mean, std)}
+        all_means = torch.cat(mean_list)  # Shape depends on n_objectives
+        all_stds = torch.cat(std_list)
+        
+        # Check if we have multi-objective outputs
+        n_objectives = getattr(self, 'n_objectives', 1)
+        
         predictions_dict = {}
-        for i, pep in enumerate(peptides):
-            predictions_dict[pep] = (float(mean_array[i]), float(std_array[i]))
+        
+        if n_objectives == 1:
+            # Single objective: convert to (mean, std) tuples
+            mean_array = all_means.view(-1).numpy()
+            std_array = all_stds.view(-1).numpy()
+            
+            for i, pep in enumerate(peptides):
+                predictions_dict[pep] = (float(mean_array[i]), float(std_array[i]))
+        else:
+            # Multi-objective: convert to ([means], [stds]) tuples
+            mean_array = all_means.numpy()  # Shape: (n_peptides, n_objectives)
+            std_array = all_stds.numpy()
+            
+            for i, pep in enumerate(peptides):
+                mean_values = [float(mean_array[i, j]) for j in range(n_objectives)]
+                std_values = [float(std_array[i, j]) for j in range(n_objectives)]
+                predictions_dict[pep] = (mean_values, std_values)
 
         return predictions_dict
     

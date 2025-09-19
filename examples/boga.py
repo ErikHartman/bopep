@@ -24,13 +24,15 @@ def main():
             'acquisition': 'expected_improvement',
             'generations': 5,
             'm_select': 5,
-            'k_pool': 10_000
+            'k_pool': 10_000,
+            'mutation_mode': 'uniform'  # Add missing mutation_mode
         },
         {
             'acquisition': 'upper_confidence_bound', 
             'generations': 5,
             'm_select': 5,
-            'k_pool': 10_000
+            'k_pool': 10_000,
+            'mutation_mode': 'blosum_elite'  # Add missing mutation_mode
         }
     ]
     
@@ -47,13 +49,14 @@ def main():
         n_init=10,           # Initial population size (reduced for testing)
         mutation_rate=0.05,  # Higher mutation rate for exploration
         
-        # Surrogate model configuration (BiGRU + DER)
+        # Surrogate model configuration (MLP + DER)
         surrogate_model_kwargs={
             'model_type': 'deep_evidential',  # Deep Evidential Regression (DER)
             'network_type': 'mlp',          # MLP network (will auto-detect embed_average=True)
             'n_trials': 10,                   # Hyperparameter optimization trials (reduced for testing)
             'n_splits': 3,                    # Cross-validation splits
-            'random_state': 42
+            'random_state': 42,
+            'hpo_interval': 5,                # Hyperparameter optimization every 5 generations
         },
         
         # Scoring configuration
@@ -95,10 +98,6 @@ def main():
         embed_batch_size=32,          # Batch size for embedding
         pca_n_components=10,          # PCA components to retain (less than n_init)
 
-        # Other parameters
-        hpo_interval=5,               # Hyperparameter optimization every 10 generations
-        random_seed=42,
-        
         # Logging configuration
         log_dir="../boga_logs",
     )
@@ -115,7 +114,7 @@ def main():
     print(f"Initial population: {boga.n_init} sequences")
     print(f"Schedule phases: {len(boga.schedule)}")
     for i, phase in enumerate(boga.schedule, 1):
-        print(f"  Phase {i}: {phase['acquisition']} for {phase['generations']} generations (m_select={phase['m_select']}, k_pool={phase['k_pool']})")
+        print(f"  Phase {i}: {phase['acquisition']} for {phase['generations']} generations (m_select={phase['m_select']}, k_pool={phase['k_pool']}, mutation={phase['mutation_mode']})")
 
     print(f"Logging enabled: {boga.logger is not None}")
     if boga.logger:

@@ -17,10 +17,12 @@ class NeuralNetworkEnsemble(BasePredictionModel):
         network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
         num_layers: int = 1,
         hidden_dim: Optional[int] = None,
+        n_objectives: int = 1,  # Support for multi-objective outputs
         **kwargs,
     ):
         super().__init__()
         self.n_networks = n_networks
+        self.n_objectives = n_objectives
 
         self.networks = torch.nn.ModuleList(
             [
@@ -28,6 +30,7 @@ class NeuralNetworkEnsemble(BasePredictionModel):
                     network_type=network_type,
                     input_dim=input_dim,
                     output_dim=1,
+                    n_objectives=n_objectives,
                     hidden_dims=hidden_dims,
                     hidden_dim=hidden_dim,
                     num_layers=num_layers,
@@ -46,14 +49,27 @@ class NeuralNetworkEnsemble(BasePredictionModel):
         - (N, D) for MLP
         - (N, L, D) for BiLSTM/BiGRU
         lengths = None or List[int] for variable-length sequences
+        
+        Returns:
+        - For single objective (n_objectives=1): mean (N, 1), std (N, 1)
+        - For multi-objective (n_objectives>1): mean (N, n_objectives), std (N, n_objectives)
         """
         # Forward pass through each network in the ensemble, passing lengths
         predictions = torch.stack(
             [net(x, lengths=lengths) for net in self.networks], dim=0
-        )  # shape => (n_networks, N, 1)
-
-        mean = torch.mean(predictions, dim=0)  # (N, 1)
-        std = torch.std(predictions, dim=0)  # (N, 1)
+        )  # shape => (n_networks, N, ...) where ... depends on n_objectives
+        
+        if self.n_objectives == 1:
+            # Original behavior: predictions shape is (n_networks, N, 1)
+            mean = torch.mean(predictions, dim=0)  # (N, 1)
+            std = torch.std(predictions, dim=0)  # (N, 1)
+        else:
+            # Multi-objective: predictions shape is (n_networks, N, n_objectives, 1)
+            # Squeeze the last dimension since output_dim=1
+            predictions = predictions.squeeze(-1)  # (n_networks, N, n_objectives)
+            mean = torch.mean(predictions, dim=0)  # (N, n_objectives)
+            std = torch.std(predictions, dim=0)  # (N, n_objectives)
+        
         return mean, std
 
     def _get_default_criterion(self):
@@ -70,5 +86,16 @@ class NeuralNetworkEnsemble(BasePredictionModel):
         total_loss = 0.0
         for network in self.networks:
             pred = network(batch_x, lengths=lengths)
+            
+            # Handle shape mismatch between predictions and targets
+            if self.n_objectives == 1:
+                # Single objective: model outputs (N, 1, 1), targets are (N,)
+                # Squeeze both dimensions to get (N,)
+                pred = pred.squeeze()
+            else:
+                # Multi-objective: model outputs (N, n_objectives, 1), targets are (N, n_objectives)
+                # Squeeze the last dimension only
+                pred = pred.squeeze(-1)
+                
             total_loss += criterion(pred, batch_y)
         return total_loss / len(self.networks)

@@ -24,6 +24,7 @@ class MLPNetwork(BaseNetwork):
         hidden_dims: List[int],
         dropout_rate: float = 0.0,
         output_dim: int = 1,
+        n_objectives: int = 1,
     ):
         super().__init__()
         layers = []
@@ -33,14 +34,26 @@ class MLPNetwork(BaseNetwork):
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout_rate))
             prev_dim = dim
-        layers.append(nn.Linear(prev_dim, output_dim))
+        # For multi-objective, final output dimension is output_dim * n_objectives
+        final_output_dim = output_dim * n_objectives
+        layers.append(nn.Linear(prev_dim, final_output_dim))
         self.network = nn.Sequential(*layers)
+        self.n_objectives = n_objectives
+        self.output_dim = output_dim
 
     def forward(
         self, x: torch.Tensor, lengths: Optional[List[int]] = None
     ) -> torch.Tensor:
         # lengths ignored for MLP
-        return self.network(x)
+        output = self.network(x)
+        
+        # Reshape output for multi-objective case
+        if self.n_objectives > 1:
+            batch_size = output.shape[0]
+            # Reshape from [batch_size, output_dim * n_objectives] to [batch_size, n_objectives, output_dim]
+            output = output.view(batch_size, self.n_objectives, self.output_dim)
+        
+        return output
 
 
 class SelfAttention(torch.nn.Module):
@@ -140,9 +153,12 @@ class RNNetwork(nn.Module):
         dropout_rate: float = 0.0,
         output_dim: int = 1,
         architecture: str = "gru",   # "gru" or "lstm"
+        n_objectives: int = 1,
     ):
         super().__init__()
         self.architecture = architecture
+        self.n_objectives = n_objectives
+        self.output_dim = output_dim
         
         # positional encoding (same as before)
         self.positional_encoding = PositionalEncoding(input_dim)
@@ -166,7 +182,9 @@ class RNNetwork(nn.Module):
         self.fc1 = nn.Linear(in_dim, hidden_dim)
         self.act = nn.ReLU()
         self.dropout = nn.Dropout(dropout_rate)
-        self.fc2     = nn.Linear(hidden_dim, output_dim)
+        # For multi-objective, final output dimension is output_dim * n_objectives
+        final_output_dim = output_dim * n_objectives
+        self.fc2 = nn.Linear(hidden_dim, final_output_dim)
 
     def forward(
         self,
@@ -181,7 +199,10 @@ class RNNetwork(nn.Module):
 
         # compute valid token mask
         if lengths is not None:
-            lt = torch.tensor(lengths, device=device)
+            if isinstance(lengths, torch.Tensor): #Sometimes lengths is a tensor and sometimes a list
+                lt = lengths.clone().detach().to(device)
+            else:
+                lt = torch.tensor(lengths, device=device, dtype=torch.long)
             mask = torch.arange(T, device=device)[None, :] < lt[:, None]  # [B, T]
             pack_x = rnn_utils.pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
             out_packed, _ = self.rnn(pack_x)
@@ -212,5 +233,10 @@ class RNNetwork(nn.Module):
         h1 = self.dropout(h1)
         out = self.fc2(h1) 
 
+        # Reshape output for multi-objective case
+        if self.n_objectives > 1:
+            batch_size = out.shape[0]
+            # Reshape from [batch_size, output_dim * n_objectives] to [batch_size, n_objectives, output_dim]
+            out = out.view(batch_size, self.n_objectives, self.output_dim)
 
         return out
