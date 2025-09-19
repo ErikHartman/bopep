@@ -24,7 +24,7 @@ class MLPNetwork(BaseNetwork):
         hidden_dims: List[int],
         dropout_rate: float = 0.0,
         output_dim: int = 1,
-        n_objectives: int = 1,  # Support for multi-objective outputs
+        n_objectives: int = 1,
     ):
         super().__init__()
         layers = []
@@ -153,7 +153,7 @@ class RNNetwork(nn.Module):
         dropout_rate: float = 0.0,
         output_dim: int = 1,
         architecture: str = "gru",   # "gru" or "lstm"
-        n_objectives: int = 1,  # Support for multi-objective outputs
+        n_objectives: int = 1,
     ):
         super().__init__()
         self.architecture = architecture
