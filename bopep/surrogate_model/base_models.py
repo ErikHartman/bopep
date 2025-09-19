@@ -181,7 +181,10 @@ class RNNetwork(nn.Module):
 
         # compute valid token mask
         if lengths is not None:
-            lt = torch.tensor(lengths, device=device)
+            if isinstance(lengths, torch.Tensor): #Sometimes lengths is a tensor and sometimes a list
+                lt = lengths.clone().detach().to(device)
+            else:
+                lt = torch.tensor(lengths, device=device, dtype=torch.long)
             mask = torch.arange(T, device=device)[None, :] < lt[:, None]  # [B, T]
             pack_x = rnn_utils.pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
             out_packed, _ = self.rnn(pack_x)

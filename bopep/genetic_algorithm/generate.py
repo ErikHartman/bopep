@@ -389,6 +389,9 @@ class BoGA:
                 global_generation += 1
                 print(f"\n--- Generation {global_generation} (Phase {phase_index}, Gen {gen}/{generations}) ---")
                 
+                # Convert scores to objectives FIRST to ensure mutation uses current data
+                objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
+
                 # Generate new pool via mutation of top M
                 # For parent selection, always use objectives (exploitation)
                 parents = self._select_top_objectives(objectives, m_select)
@@ -403,9 +406,6 @@ class BoGA:
 
                 # Init fresh model with training embeddings to determine input_dim
                 self.surrogate_manager.initialize_model(embeddings=training_embeddings)
-
-                # Convert scores to objectives
-                objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
                 # Train surrogate or model only based on interval
                 if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0:

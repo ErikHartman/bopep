@@ -111,8 +111,8 @@ class PeptideMutator:
 
         for _ in range(max_attempts):
             child = list(seq)
-            lam = max(1e-9, len(child) * self.mutation_rate)
-            n_edits = max(1, int(np.random.poisson(lam)))
+            poiss_lam = max(1e-9, len(child) * self.mutation_rate)
+            n_edits = max(1, int(np.random.poisson(poiss_lam)))
 
             for _ in range(n_edits):
                 can_del = len(child) > self.min_sequence_length
