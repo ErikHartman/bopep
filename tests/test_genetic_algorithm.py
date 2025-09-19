@@ -839,6 +839,50 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         # Verify that the last iteration is correctly identified as 5
         assert last_iteration == 5
 
+    def test_logger_initialization_with_continue_from_logs(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
+        """Test that logger doesn't overwrite logs when continuing from logs"""
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        
+        # Test case 1: continue_from_logs only (should not overwrite)
+        with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
+            boga1 = BoGA(
+                target_structure_path="/fake/path.pdb",
+                schedule=schedule,
+                initial_sequences="ACDEFG",
+                pca_n_components=10,
+                continue_from_logs=str(temp_dir),
+                surrogate_model_kwargs=basic_surrogate_kwargs
+            )
+            # Should call Logger with overwrite_logs=False
+            mock_logger.assert_called_once_with(log_dir=str(temp_dir), overwrite_logs=False)
+        
+        # Test case 2: both log_dir and continue_from_logs (should prioritize continue_from_logs)
+        with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
+            boga2 = BoGA(
+                target_structure_path="/fake/path.pdb",
+                schedule=schedule,
+                initial_sequences="ACDEFG",
+                pca_n_components=10,
+                log_dir="/some/other/dir",
+                continue_from_logs=str(temp_dir),
+                surrogate_model_kwargs=basic_surrogate_kwargs
+            )
+            # Should call Logger with continue_from_logs path and overwrite_logs=False
+            mock_logger.assert_called_once_with(log_dir=str(temp_dir), overwrite_logs=False)
+        
+        # Test case 3: log_dir only (should overwrite)
+        with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
+            boga3 = BoGA(
+                target_structure_path="/fake/path.pdb",
+                schedule=schedule,
+                initial_sequences="ACDEFG",
+                pca_n_components=10,
+                log_dir="/some/log/dir",
+                surrogate_model_kwargs=basic_surrogate_kwargs
+            )
+            # Should call Logger with overwrite_logs=True
+            mock_logger.assert_called_once_with(log_dir="/some/log/dir", overwrite_logs=True)
+
     @patch('bopep.genetic_algorithm.generate.pd')
     def test_run_fresh_start_basic(self, mock_pd, mock_dependencies, basic_surrogate_kwargs):
         """Test basic run functionality for fresh start (without full execution)"""

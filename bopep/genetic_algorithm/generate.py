@@ -120,13 +120,14 @@ class BoGA:
         )
 
         # Initialize logging
-        if log_dir is not None:
+        if continue_from_logs is not None:
+            # When continuing from logs, never overwrite existing logs
+            self.logger = Logger(log_dir=continue_from_logs, overwrite_logs=False)
+        elif log_dir is not None:
+            # For fresh runs, overwrite logs
             self.logger = Logger(log_dir=log_dir, overwrite_logs=True)
         else:
-            if continue_from_logs is not None:
-                self.logger = Logger(log_dir=continue_from_logs, overwrite_logs=False)
-            else:
-                self.logger = None
+            self.logger = None
 
         self._evaluated_sequences  = set()
 
