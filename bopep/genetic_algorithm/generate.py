@@ -289,9 +289,10 @@ class BoGA:
         
         print(f"Mutation: mode={mutation_mode}, tau={mutation_tau:.3f}, lam={mutation_lam:.3f}")
 
-    def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set]:
+    def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set, int]:
         """
         Load scores and evaluated sequences from existing log files.
+        Returns scores, evaluated_sequences, and last_iteration.
         """
 
         log_path = Path(log_dir)
@@ -311,14 +312,19 @@ class BoGA:
             scores[sequence] = {col: row[col] for col in score_columns}
 
         evaluated_sequences = set(scores.keys())
-        print(f"Loaded {len(scores)} previously evaluated sequences")
         
-        return scores, evaluated_sequences
+        # Get the last iteration number to continue from
+        last_iteration = df['iteration'].max() if 'iteration' in df.columns and not df.empty else 0
+        
+        print(f"Loaded {len(scores)} previously evaluated sequences")
+        print(f"Last iteration was: {last_iteration}")
+        
+        return scores, evaluated_sequences, last_iteration
 
     def run(self) -> Dict[str, float]:
         if self.continue_from_logs:
             print(f"Loading previous results from {self.continue_from_logs}")
-            scores, self._evaluated_sequences = self._load_from_logs(self.continue_from_logs)
+            scores, self._evaluated_sequences, last_iteration = self._load_from_logs(self.continue_from_logs)
             print("Skipping initial population generation - using loaded sequences")
         else:
             # Fresh start - initial population and embedding/reduction
@@ -333,6 +339,8 @@ class BoGA:
             
             print("Initial scores:")
             print(scores)
+            
+            last_iteration = 0  # Fresh start
 
         # Convert initial scores to objectives
         objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
@@ -363,7 +371,7 @@ class BoGA:
             self._optimize_hyperparameters(existing_reduced, objectives)
 
         # Run through schedule phases
-        global_generation = 0
+        global_generation = last_iteration  # Continue from last iteration when resuming
         for phase_index, phase in enumerate(self.schedule, start=1):
             acquisition_function = phase['acquisition']
             generations = phase['generations']

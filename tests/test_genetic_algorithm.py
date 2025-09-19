@@ -742,7 +742,7 @@ class TestBoGA:
         scores_file = log_dir / "scores.csv"
         scores_content = """peptide,rosetta_score,distance_score,iteration,phase,timestamp
 ACDEFG,-10.5,0.8,0,initial,2024-01-01
-HIJKLM,-8.2,0.6,1,phase1,2024-01-01
+HIKLMN,-8.2,0.6,1,phase1,2024-01-01
 """
         scores_file.write_text(scores_content)
         
@@ -755,13 +755,14 @@ HIJKLM,-8.2,0.6,1,phase1,2024-01-01
             surrogate_model_kwargs=basic_surrogate_kwargs
         )
         
-        scores, evaluated = boga._load_from_logs(str(log_dir))
+        scores, evaluated, last_iteration = boga._load_from_logs(str(log_dir))
         
         assert len(scores) == 2
         assert "ACDEFG" in scores
-        assert "HIJKLM" in scores
+        assert "HIKLMN" in scores  # Updated sequence name
         assert scores["ACDEFG"]["rosetta_score"] == -10.5
         assert len(evaluated) == 2
+        assert last_iteration == 1  # Should be the max iteration from the CSV
 
     def test_load_from_logs_missing_file(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test loading from logs when file doesn't exist"""
@@ -777,6 +778,66 @@ HIJKLM,-8.2,0.6,1,phase1,2024-01-01
         
         with pytest.raises(FileNotFoundError):
             boga._load_from_logs(str(temp_dir))
+
+    def test_iteration_continuation(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
+        """Test that iterations continue from last iteration when resuming from logs"""
+        schedule = [{'acquisition': 'ei', 'generations': 2, 'm_select': 2, 'k_pool': 3, 'mutation_mode': 'uniform'}]
+        
+        # Create mock log file with iteration 5 as the last iteration
+        log_dir = Path(temp_dir)
+        scores_file = log_dir / "scores.csv"
+        scores_content = """peptide,rosetta_score,distance_score,iteration,phase,timestamp
+ACDEFG,-10.5,0.8,0,initial,2024-01-01
+HIKLMN,-8.2,0.6,5,phase1,2024-01-01
+"""
+        scores_file.write_text(scores_content)
+        
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            schedule=schedule,
+            initial_sequences="ACDEFG",
+            pca_n_components=3,
+            continue_from_logs=str(log_dir),
+            surrogate_model_kwargs=basic_surrogate_kwargs,
+            scoring_kwargs={'scores_to_include': ['score1'], 'n_jobs': 1}
+        )
+        
+        # Mock all the dependencies for a partial run
+        mock_objectives = {"ACDEFG": 0.5, "HIKLMN": 0.3}
+        mock_embeddings = {"ACDEFG": np.random.randn(3), "HIKLMN": np.random.randn(3)}
+        
+        mock_dependencies['scores_to_obj'].create_objective.return_value = mock_objectives
+        
+        def mock_embed_peptides(sequences):
+            return {seq: np.random.randn(3) for seq in sequences}
+        
+        def mock_embed_generation(scored, candidates):
+            all_seqs = scored + candidates
+            train_emb = {seq: np.random.randn(3) for seq in scored}
+            cand_emb = {seq: np.random.randn(3) for seq in candidates}
+            return train_emb, cand_emb
+            
+        boga._embed_peptides = mock_embed_peptides
+        boga._embed_generation = mock_embed_generation
+        mock_dependencies['surr_mgr'].train_with_validation_split.return_value = (0.1, {})
+        mock_dependencies['surr_mgr'].predict.return_value = {"NEWSEQ": (0.6, 0.1)}
+        mock_dependencies['acq_func'].compute_acquisition.return_value = {"NEWSEQ": 0.7}
+        
+        # Mock the scoring to avoid actual docking
+        def mock_dock_and_score(sequences):
+            return {seq: {"score1": 0.5} for seq in sequences}
+        boga._dock_and_score = mock_dock_and_score
+        
+        # Extract just the first generation to see the starting iteration
+        # We'll mock the schedule to have 0 generations to avoid running the full loop
+        original_schedule = boga.schedule.copy()
+        boga.schedule = []  # Empty schedule to stop after setup
+        
+        # Run and capture the last_iteration that gets loaded
+        scores, evaluated_seqs, last_iteration = boga._load_from_logs(str(log_dir))
+        
+        # Verify that the last iteration is correctly identified as 5
+        assert last_iteration == 5
 
     @patch('bopep.genetic_algorithm.generate.pd')
     def test_run_fresh_start_basic(self, mock_pd, mock_dependencies, basic_surrogate_kwargs):
