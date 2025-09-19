@@ -332,8 +332,22 @@ class HyperparameterTuner:
 
         avg_score = float(np.mean(cv_scores))
 
-        if avg_score < self.best_score:
+        # Update best params if this trial is better OR if no valid trial found yet
+        if avg_score < self.best_score or (self.best_params is None and not np.isinf(avg_score)):
             self.best_score = avg_score
+            self.best_params = {
+                "network_type": self.network_type,
+                "num_layers": n_layers,
+                "hidden_dims": hidden_dims if hidden_dims is not None else None,
+                "hidden_dim": chosen_hidden_dim if chosen_hidden_dim is not None else None,
+                "learning_rate": learning_rate,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "uncertainty_param": param_value,
+                "avg_score": avg_score,
+            }
+        # Special case: if no valid trial yet and this trial failed (inf), still save it as fallback
+        elif self.best_params is None and np.isinf(avg_score):
             self.best_params = {
                 "network_type": self.network_type,
                 "num_layers": n_layers,
@@ -390,6 +404,13 @@ class HyperparameterTuner:
             
         # Run optimization
         study.optimize(self.objective, n_trials=self.n_trials)
+
+        # Ensure we always have best_params with at least network_type
+        if self.best_params is None:
+            self.best_params = {
+                "network_type": self.network_type,
+                "avg_score": float('inf')
+            }
 
         return self.best_params or {}, study
 
