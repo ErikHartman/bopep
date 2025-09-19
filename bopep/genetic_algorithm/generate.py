@@ -43,7 +43,7 @@ class BoGA:
         # PCA reduction
         pca_n_components: int = 128,
         # Validation options
-        n_validate: Optional[Union[float, int]] = None,  # Number (int) or fraction (float<1) for validation. None=no validation
+        n_validate: Optional[Union[float, int]] = 0.2,  # Number (int) or fraction (float<1) for validation. None=no validation
         min_validation_samples: int = 20,
         min_training_samples: int = 100,
         # Logging options
@@ -123,19 +123,15 @@ class BoGA:
         if log_dir is not None:
             self.logger = Logger(log_dir=log_dir, overwrite_logs=True)
         else:
-            self.logger = None
+            if continue_from_logs is not None:
+                self.logger = Logger(log_dir=continue_from_logs, overwrite_logs=False)
+            else:
+                self.logger = None
 
         self._evaluated_sequences  = set()
-        
-        # Store raw embeddings for dynamic PCA fitting
-        self.raw_embeddings_cache = {}
-
-
-    def _random_sequence(self) -> str:
-        return self.mutator.generate_random_sequence()
 
     def _generate_initial_sequences(self) -> List[str]:
-        return [self._random_sequence() for _ in range(self.n_init)]
+        return [self.mutator.generate_random_sequence() for _ in range(self.n_init)]
 
     def _prepare_initial_population(self) -> List[str]:
         """
@@ -161,99 +157,77 @@ class BoGA:
         elif isinstance(self.initial_sequences, str):
             # Single sequence provided - mutate until we have enough UNIQUE sequences
             base_sequence = self.initial_sequences
-            sequences = {base_sequence}  # Use set to ensure uniqueness
+            sequences = {base_sequence}
             
             # Keep mutating until we have enough unique sequences
-            max_attempts = self.n_init * 10  # Prevent infinite loops
-            attempts = 0
-            while len(sequences) < self.n_init and attempts < max_attempts:
+            while len(sequences) < self.n_init:
                 # Mutate a random sequence from our current set (more diversity)
                 parent = random.choice(list(sequences))
                 new_seq = self.mutator.mutate_sequence(parent, self._evaluated_sequences)  # Always forces change now
                 sequences.add(new_seq)
-                attempts += 1
-            
-            # If we still don't have enough, fill with random sequences
-            while len(sequences) < self.n_init:
-                sequences.add(self._random_sequence())
-            
-            sequence_list = list(sequences)
-            return sequence_list
+            return list(sequences)
         
         elif isinstance(self.initial_sequences, list):
             if len(self.initial_sequences) >= self.n_init:
-                # Enough sequences provided - use first n_init
-                return self.initial_sequences[:self.n_init]
+                return self.initial_sequences
             else:
-                # Not enough sequences - use all and fill remainder
                 sequences = set(self.initial_sequences)  # Ensure uniqueness
-                
-                # Fill remainder with mutations of existing sequences and random sequences
-                max_attempts = self.n_init * 10
-                attempts = 0
-                while len(sequences) < self.n_init and attempts < max_attempts:
-                    if random.random() < 0.7:  # 70% chance to mutate existing sequence
-                        parent = random.choice(list(sequences))
-                        sequences.add(self.mutator.mutate_sequence(parent, self._evaluated_sequences))
-                    else:  # 30% chance to generate completely random sequence
-                        sequences.add(self._random_sequence())
-                    attempts += 1
-                
-                # Fill any remaining with random sequences
+
                 while len(sequences) < self.n_init:
-                    sequences.add(self._random_sequence())
-                
-                sequence_list = list(sequences)
-                return sequence_list
-        
+                    parent = random.choice(list(sequences))
+                    sequences.add(self.mutator.mutate_sequence(parent, self._evaluated_sequences))
+                return list(sequences)
         else:
             raise ValueError("initial_sequences must be None, a string, or a list of strings")
 
-    def _embed(self, peptides: List[str]) -> Dict[str, Any]:
+    def _embed_peptides(self, peptides: List[str]) -> Dict[str, Any]:
         """
-        Embed peptides (ESM or AAIndex), scale, and apply PCA reduction. Returns
-        reduced embeddings directly.
-        
-        Uses cached raw embeddings and recomputes PCA on the complete dataset each time.
+        Embed, scale, and apply PCA to a list of peptides.
         """
-        # First, embed any new peptides that aren't in our cache
-        new_peptides = [p for p in peptides if p not in self.raw_embeddings_cache]
+        if not peptides:
+            return {}
         
-        if new_peptides:
-            # Embed new peptides
-            if self.embed_method == 'esm':
-                new_raw = self.embedder.embed_esm(
-                    new_peptides,
-                    average=self.embed_average,
-                    model_path=self.embed_model_path,
-                    batch_size=self.embed_batch_size,
-                    filter=False,
-                    device=self.embed_device
-                )
-            elif self.embed_method == 'aaindex':
-                new_raw = self.embedder.embed_aaindex(
-                    new_peptides,
-                    average=self.embed_average,
-                    filter=False
-                )
-            else:
-                raise ValueError("embed_method must be 'esm' or 'aaindex'")
-            
-            # Add to cache
-            self.raw_embeddings_cache.update(new_raw)
+        # Fresh embed all peptides
+        if self.embed_method == 'esm':
+            raw_embeddings = self.embedder.embed_esm(
+                peptides,
+                average=self.embed_average,
+                model_path=self.embed_model_path,
+                batch_size=self.embed_batch_size,
+                filter=False,
+                device=self.embed_device
+            )
+        elif self.embed_method == 'aaindex':
+            raw_embeddings = self.embedder.embed_aaindex(
+                peptides,
+                average=self.embed_average,
+                filter=False
+            )
+        else:
+            raise ValueError("embed_method must be 'esm' or 'aaindex'")
         
-        # Scale all embeddings in the cache (for consistency)
-        all_scaled = self.embedder.scale_embeddings(self.raw_embeddings_cache)
-        
-        # Apply PCA to all cached embeddings
-        all_reduced = self.embedder.reduce_embeddings_pca(
-            all_scaled,
+        # Scale and reduce the embeddings
+        scaled_embeddings = self.embedder.scale_embeddings(raw_embeddings)
+        reduced_embeddings = self.embedder.reduce_embeddings_pca(
+            scaled_embeddings,
             n_components=self.pca_n_components
         )
         
-        # Return only the embeddings requested for this batch
-        batch_reduced = {p: all_reduced[p] for p in peptides}
-        return batch_reduced
+        return reduced_embeddings
+
+    def _embed_generation(self, scored_peptides: List[str], candidate_peptides: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Embed and reduce peptides for this generation, ensuring consistent scaling/PCA.
+        """
+        # Combine all peptides for consistent scaling and PCA
+        all_peptides = scored_peptides + candidate_peptides
+        all_embeddings = self._embed_peptides(all_peptides)
+        
+        # Split back into training and candidate sets
+        training_embeddings = {p: all_embeddings[p] for p in scored_peptides if p in all_embeddings}
+        candidate_embeddings = {p: all_embeddings[p] for p in candidate_peptides if p in all_embeddings}
+        
+        return training_embeddings, candidate_embeddings
 
     def _dock_and_score(self, sequences: List[str]) -> Dict[str, float]:
         dock_dirs = self.docker.dock_peptides(sequences)
@@ -280,10 +254,6 @@ class BoGA:
             n_splits=self.surrogate_model_kwargs.get('n_splits', 3),
             iteration=iteration
         )
-
-    def _initialize_model(self, embeddings: Dict[str, Any]) -> None:
-        """Initialize the model using the surrogate model manager."""
-        self.surrogate_manager.initialize_model(embeddings=embeddings)
 
     def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Tuple[float, Dict[str, Any]]:
         """
@@ -318,11 +288,6 @@ class BoGA:
         self.mutator.lam = float(mutation_lam)
         
         print(f"Mutation: mode={mutation_mode}, tau={mutation_tau:.3f}, lam={mutation_lam:.3f}")
-  
-        if mutation_mode == 'blosum_elite' and len(objectives) > 0:
-            top_sequences = self._select_top_objectives(objectives, min(50, len(objectives)))
-            self.mutator.set_elite_prior_from_sequences(top_sequences)
-            print(f"Updated elite prior from top {len(top_sequences)} sequences")
 
     def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set]:
         """
@@ -340,8 +305,7 @@ class BoGA:
         
         scores = {}
         for _, row in df.iterrows():
-            sequence = row['peptide']  # Column is 'peptide', not 'sequence'
-            # Reconstruct score dict from CSV columns (excluding metadata columns)
+            sequence = row['peptide']
             score_columns = [col for col in df.columns 
                            if col not in ['peptide', 'iteration', 'phase', 'timestamp']]
             scores[sequence] = {col: row[col] for col in score_columns}
@@ -352,7 +316,6 @@ class BoGA:
         return scores, evaluated_sequences
 
     def run(self) -> Dict[str, float]:
-        # Check if continuing from existing logs
         if self.continue_from_logs:
             print(f"Loading previous results from {self.continue_from_logs}")
             scores, self._evaluated_sequences = self._load_from_logs(self.continue_from_logs)
@@ -362,7 +325,7 @@ class BoGA:
             init_seqs = self._prepare_initial_population()
             print(f"Generated initial population of {len(init_seqs)} sequences")
 
-            init_reduced = self._embed(init_seqs)
+            init_reduced = self._embed_peptides(init_seqs)
 
             # Dock and score initial population
             print("Docking and scoring initial population...")
@@ -386,7 +349,7 @@ class BoGA:
             print(f"Initial population - best objective: {max(objectives.values()):.4f}")
 
             # Initial hyperparameter tuning for fresh runs
-            init_reduced = self._embed(list(scores.keys()))
+            init_reduced = self._embed_peptides(list(scores.keys()))
             print("Optimizing initial hyperparameters...")
             self._optimize_hyperparameters(init_reduced, objectives)
         else:
@@ -395,7 +358,7 @@ class BoGA:
             print(f"Best existing objective: {max(objectives.values()):.4f}")
             
             # For continued runs, optimize hyperparameters on existing data
-            existing_reduced = self._embed(list(scores.keys()))
+            existing_reduced = self._embed_peptides(list(scores.keys()))
             print("Optimizing hyperparameters on existing data...")
             self._optimize_hyperparameters(existing_reduced, objectives)
 
@@ -417,12 +380,20 @@ class BoGA:
                 global_generation += 1
                 print(f"\n--- Generation {global_generation} (Phase {phase_index}, Gen {gen}/{generations}) ---")
                 
-                # Embed and reduce current peptides
-                seqs = list(scores.keys())
-                reduced_embs = self._embed(seqs)
+                # Generate new pool via mutation of top M
+                # For parent selection, always use objectives (exploitation)
+                parents = self._select_top_objectives(objectives, m_select)
+                print(f"Selected top {len(parents)} parents for mutation")
+                
+                pool = self.mutator.mutate_pool(parents, k_pool, self._evaluated_sequences, objectives)
+                print(f"Generated candidate pool of {len(pool)} sequences")
 
-                # Init fresh model with embeddings to determine input_dim
-                self._initialize_model(reduced_embs)
+                # Embed scored peptides + candidates together with fresh scaling/PCA
+                scored_seqs = list(scores.keys())
+                training_embeddings, candidate_embeddings = self._embed_generation(scored_seqs, pool)
+
+                # Init fresh model with training embeddings to determine input_dim
+                self.surrogate_manager.initialize_model(embeddings=training_embeddings)
 
                 # Convert scores to objectives
                 objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
@@ -430,24 +401,13 @@ class BoGA:
                 # Train surrogate or model only based on interval
                 if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0:
                     print(f"Re-optimizing hyperparameters (generation {global_generation})")
-                    self._optimize_hyperparameters(reduced_embs, objectives, iteration=global_generation)
+                    self._optimize_hyperparameters(training_embeddings, objectives, iteration=global_generation)
 
                 print("Training surrogate model...")
-                val_loss, metrics = self._train_model(reduced_embs, objectives)
+                val_loss, metrics = self._train_model(training_embeddings, objectives)
 
-                # Generate new pool via mutation of top M
-                # For parent selection, always use objectives (exploitation)
-                parents = self._select_top_objectives(objectives, m_select)
-                print(f"Selected top {len(parents)} parents for mutation")
-                
-                pool = self.mutator.mutate_pool(parents, k_pool, self._evaluated_sequences)
-                print(f"Generated candidate pool of {len(pool)} sequences")
-
-                # Embed and reduce pool
-                pool_embs = self._embed(pool)
-
-                # Predict on pool
-                preds = self.surrogate_manager.predict(pool_embs)
+                # Predict on pool using candidate embeddings
+                preds = self.surrogate_manager.predict(candidate_embeddings)
 
                 # Select candidates using acquisition function
                 candidates = self._select_top_predictions(preds, m_select, acquisition_function)
@@ -461,12 +421,10 @@ class BoGA:
                 new_objectives = self.scores_to_objective.create_objective(new_scores, self.objective_function, **self.objective_function_kwargs)
                 
                 if self.logger:
-                    # Log new scores and objectives
                     self.logger.log_model_metrics(val_loss, iteration=global_generation, metrics=metrics)
                     self.logger.log_scores(new_scores, iteration=global_generation, acquisition_name=acquisition_function)
                     self.logger.log_objectives(new_objectives, iteration=global_generation, acquisition_name=acquisition_function)
                     
-                    # Log hyperparameters if they were updated
                     if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0 and self.surrogate_manager.best_hyperparams:
                         self.logger.log_hyperparameters(
                             iteration=global_generation,
@@ -475,7 +433,6 @@ class BoGA:
                             network_type=self.surrogate_model_kwargs['network_type']
                         )
 
-                # Report generation progress
                 current_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
                 print(f"Generation {global_generation} leaderboard:")
@@ -483,8 +440,6 @@ class BoGA:
                 for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
                     print(f"  {rank}. {seq} - Objective: {obj:.4f}")
 
-
-        # Return final objectives instead of raw scores
         final_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
         
         print(f"\n=== Final Results ===")

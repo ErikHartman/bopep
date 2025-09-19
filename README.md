@@ -15,19 +15,19 @@ This repository contains the code for `BoPep`, a framework for identifying and g
 The core of the BoPep framework lies in searching large datasets for binders. It does so by training a surrogate model to predict whether a peptide will bind or not, based on embeddings and previous docking experiments. During the search, the peptide dataset is navigated with the help of surrogate models. 
 
 <p align="center">
-  <img src="assets/bopep.png" width="500", alt="BoPep">
+  <img src="assets/bopep.png" width="1000", alt="BoPep">
 </p>
 
 ## Generation with diffusion (BoRF)
 We also provide a way to generate large candidate datasets using an RFdiffusion + ProteinMPNN + FastRelax pipeline. By sampling lengths and hotspots we generate a large diverse dataset of candidate peptides. We can then apply the BoPep search on the datasets, leading to less computationally expensive design of peptide binders.
 <p align="center">
-  <img src="assets/borf.png" width="500", alt="BoPep">
+  <img src="assets/borf.png" width="1000", alt="BoPep">
 </p>
 
 ## Generation with evolutionary algorithm (BoGA)
 The surrogate models can also be leveraged from design. The BoGA algorithm uses the surrogate models in an evolutionary algorithm to generate a binder from a biological prior. The prior can be either a single sequence or a set of sequences.
 <p align="center">
-  <img src="assets/boga.png" width="500", alt="BoPep">
+  <img src="assets/boga.png" width="1000", alt="BoPep">
 </p>
 
 ## Installation
