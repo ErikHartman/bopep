@@ -48,7 +48,8 @@ def main():
 
     scores_to_compute = [
         "alphafold_iptm",
-        "boltz_iptm",
+        #"boltz_iptm",
+        
         "molecular_weight",
         "gravy",
         "instability_index",
@@ -60,25 +61,25 @@ def main():
         "hydrophobic_aa_percent",
         "polar_aa_percent",
 
-        "boltz_distance_score",
+        #"boltz_distance_score",
         "alphafold_distance_score",
         "alphafold_rosetta_score",
-        "boltz_rosetta_score",
+        #"boltz_rosetta_score",
         "alphafold_interface_sasa",
-        "boltz_interface_sasa",
+        #"boltz_interface_sasa",
         "alphafold_interface_dG",
-        "boltz_interface_dG",
+        #"boltz_interface_dG",
         "alphafold_packstat",
-        "boltz_packstat",
+        #"boltz_packstat",
 
         "alphafold_interface_peptide_plddt",
-        "boltz_interface_peptide_plddt",
+        #"boltz_interface_peptide_plddt",
         "alphafold_peptide_plddt",
-        "boltz_peptide_plddt",
+        #"boltz_peptide_plddt",
 
-        "boltz_in_binding_site",
+        #"boltz_in_binding_site",
         "alphafold_in_binding_site",
-        "inter_model_rmsd"
+       # "inter_model_rmsd"
     ]
     
     
