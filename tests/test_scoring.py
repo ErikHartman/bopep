@@ -407,7 +407,6 @@ class TestPerformanceAndTiming:
         
         print(f"Multiple peptides calculation time: {execution_time:.4f} seconds")
 
-    @pytest.mark.slow
     def test_large_sequence_timing(self):
         """Test timing for large protein sequence"""
         # Create a large sequence (200 amino acids)

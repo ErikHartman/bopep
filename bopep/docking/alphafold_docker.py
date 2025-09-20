@@ -269,8 +269,8 @@ class AlphaFoldDocker(BaseDockingModel):
         )
         
         docked_dirs = []
-        for peptide in peptides:
-
+        for i, peptide in enumerate(peptides, 1):
+            print(f"GPU {gpu_id} progress: {i}/{len(peptides)} - docking {peptide}")
             dir_path = temp_docker._dock_single_peptide(
                 peptide, target_structure, target_sequence, target_name, gpu_id
             )
