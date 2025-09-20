@@ -1,4 +1,5 @@
 import torch
+import math
 from typing import List, Tuple, Literal, Optional
 
 from bopep.surrogate_model.helpers import BasePredictionModel
@@ -117,10 +118,12 @@ class MVE(BasePredictionModel):
             log_var = log_var.squeeze(-1)
             targets = targets.squeeze(-1) if targets.dim() > 1 else targets
 
+        log_var = torch.clamp(log_var, min=-10.0, max=10.0)
+
         nll = 0.5 * (
             log_var
             + ((targets - mu) ** 2) * torch.exp(-log_var)
-            + torch.log(2 * torch.tensor(torch.pi))
+            + math.log(2 * math.pi)
         )
 
         # For multi-objective, sum losses across objectives, then average across batch

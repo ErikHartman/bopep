@@ -191,7 +191,11 @@ class HyperparameterTuner:
                     + math.log(2 * math.pi)
                 )
 
-        return nll.mean().item()
+        result = nll.mean().item()
+        # Check for numerical issues and return a finite fallback value
+        if not math.isfinite(result):
+            return 1e6  # Large but finite penalty
+        return result
     
     @staticmethod
     def _nll_multi_gaussian(means: torch.Tensor,
@@ -220,7 +224,11 @@ class HyperparameterTuner:
                 )
         
         # Sum NLL across objectives, then take mean across batch
-        return nll.sum(dim=-1).mean().item()
+        result = nll.sum(dim=-1).mean().item()
+        # Check for numerical issues and return a finite fallback value
+        if not math.isfinite(result):
+            return 1e6  # Large but finite penalty
+        return result
     
 
     def _fit_model(
