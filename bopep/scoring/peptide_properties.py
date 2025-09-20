@@ -43,27 +43,27 @@ class PeptideProperties:
         return self.pa.secondary_structure_fraction()[2]
 
     def get_hydrophobic_aa_percent(self):
-        aa_composition = self.pa.amino_acids_percent
+        aa_composition = self.pa.get_amino_acids_percent()
         hydrophobic_aa_percent = sum([aa_composition[aa] for aa in ['A', 'V', 'I', 'L', 'M', 'F', 'W', 'Y']])
         return hydrophobic_aa_percent
 
     def get_polar_aa_percent(self):
-        aa_composition = self.pa.amino_acids_percent
+        aa_composition = self.pa.get_amino_acids_percent()
         polar_aa_percent = sum([aa_composition[aa] for aa in ['N', 'C', 'Q', 'S', 'T']])
         return polar_aa_percent
 
     def get_positively_charged_aa_percent(self):
-        aa_composition = self.pa.amino_acids_percent
+        aa_composition = self.pa.get_amino_acids_percent()
         positively_charged = sum([aa_composition[aa] for aa in ['K', 'R', 'H']])
         return positively_charged
 
     def get_negatively_charged_aa_percent(self):
-        aa_composition = self.pa.amino_acids_percent
+        aa_composition = self.pa.get_amino_acids_percent()
         negatively_charged = sum([aa_composition[aa] for aa in ['D', 'E']])
         return negatively_charged
 
     def get_delta_net_charge_frac(self):
-        aa_composition = self.pa.amino_acids_percent
+        aa_composition = self.pa.get_amino_acids_percent()
         positively_charged = sum([aa_composition[aa] for aa in ['K', 'R', 'H']])
         negatively_charged = sum([aa_composition[aa] for aa in ['D', 'E']])
         net_charge = positively_charged - negatively_charged

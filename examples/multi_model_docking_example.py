@@ -1,15 +1,11 @@
-import os
 import sys
 import logging
 from pathlib import Path
-
-# Add bopep to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -18,22 +14,21 @@ logging.basicConfig(
 def main():
     """Run the complete multi-model docking and scoring pipeline."""
     
-    # Configuration
     peptide_sequence = "NYLSELSEHV"
-    target_pdb_path = "/home/er8813ha/bopep/data/4glf.cif"
-    output_dir = "/home/er8813ha/bopep/examples/docking/"
-    
-    
+    target_pdb_path = "/Users/erikhartman/dev/bopep/data/4glf.cif" 
+    output_dir = "/Users/erikhartman/dev/bopep/examples/docking/"
+
+
     docker_kwargs = {
-        "models": ["alphafold", "boltz"],  # Use both models
+        "models": ["alphafold"],
         "output_dir": output_dir,
-        "num_models": 2,  # Generate 2 models for faster example
-        "num_recycles": 3,  # Reduced for faster execution
+        "num_models": 1,
+        "num_recycles": 0,  
         "recycle_early_stop_tolerance": 0.01,
         "amber": True,
         "num_relax": 1,
-        "diffusion_samples": 2,  # Number of samples to generate
-        "sampling_steps": 200,  # Number of denoising steps
+        "diffusion_samples": 2,  
+        "sampling_steps": 200,  
         "output_format": "pdb",
         "step_scale": 1.638
     }
@@ -50,12 +45,11 @@ def main():
         
     
     scorer = Scorer()
-    
-    # Define different score sets for each method
+
     scores_to_compute = [
-        # Peptide properties (work for both)
         "alphafold_iptm",
-        "boltz_iptm",
+        #"boltz_iptm",
+        
         "molecular_weight",
         "gravy",
         "instability_index",
@@ -66,29 +60,26 @@ def main():
         "sheet_fraction",
         "hydrophobic_aa_percent",
         "polar_aa_percent",
-        
-        # Distance-based scores (work for both)
-        "boltz_distance_score",
+
+        #"boltz_distance_score",
         "alphafold_distance_score",
-        
-        # Structural scores (if Rosetta works)
         "alphafold_rosetta_score",
-        "boltz_rosetta_score",
+        #"boltz_rosetta_score",
         "alphafold_interface_sasa",
-        "boltz_interface_sasa",
+        #"boltz_interface_sasa",
         "alphafold_interface_dG",
-        "boltz_interface_dG",
+        #"boltz_interface_dG",
         "alphafold_packstat",
-        "boltz_packstat",
+        #"boltz_packstat",
 
         "alphafold_interface_peptide_plddt",
-        "boltz_interface_peptide_plddt",
+        #"boltz_interface_peptide_plddt",
         "alphafold_peptide_plddt",
-        "boltz_peptide_plddt",
+        #"boltz_peptide_plddt",
 
-        "boltz_in_binding_site",
+        #"boltz_in_binding_site",
         "alphafold_in_binding_site",
-        "inter_model_rmsd"
+       # "inter_model_rmsd"
     ]
     
     

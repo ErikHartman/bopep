@@ -961,6 +961,7 @@ class Scorer:
                 for input_val in inputs
             ]
 
+            completed_count = 0
             with ProcessPoolExecutor(max_workers=n_jobs) as executor:
                 # Use the static method for parallel processing
                 futures = [
@@ -971,11 +972,14 @@ class Scorer:
                     try:
                         result = future.result()
                         all_scores.update(result)
+                        completed_count += 1
+                        print(f"Scoring progress: {completed_count}/{len(inputs)}")
                     except Exception as e:
-                        print(f"Error processing input: {e}")
+                        completed_count += 1
+                        print(f"Error processing input ({completed_count}/{len(inputs)}): {e}")
         else:
             # Sequential processing
-            for input_value in inputs:
+            for i, input_value in enumerate(inputs, 1):
                 try:
                     result = self._process_single_input(
                         self,
@@ -988,10 +992,11 @@ class Scorer:
                         template_structures,
                     )
                     all_scores.update(result)
+                    print(f"Scoring progress: {i}/{len(inputs)}")
                 except Exception as e:
-                    print(f"Error processing input {input_value}: {e}")
+                    print(f"Error processing input {input_value} ({i}/{len(inputs)}): {e}")
                     traceback.print_exc()
-        print(f"Scored {len(all_scores)} inputs.")
+        print(f"Scoring complete! Processed {len(all_scores)} inputs.")
         return all_scores
 
     @staticmethod

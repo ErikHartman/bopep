@@ -81,15 +81,18 @@ class BaseDockingModel(ABC):
             raw_docked_dirs = []
             # Use the first GPU for sequential processing
             gpu_id = self.gpu_ids[0] if self.gpu_ids else "0"
-            for peptide in peptides_to_dock:
+            for i, peptide in enumerate(peptides_to_dock, 1):
+                print(f"Docking progress: {i}/{len(peptides_to_dock)} - {peptide}")
                 raw_dir = self._dock_single_peptide(peptide, target_structure, 
                                                   target_sequence, target_name, gpu_id)
                 raw_docked_dirs.append(raw_dir)
         
         # Process raw output to standardized format
         processed_dirs = []
-        for raw_dir, peptide in zip(raw_docked_dirs, peptides_to_dock):
+        print(f"Processing {len(raw_docked_dirs)} docked structures...")
+        for i, (raw_dir, peptide) in enumerate(zip(raw_docked_dirs, peptides_to_dock), 1):
             if os.path.exists(raw_dir):
+                print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {peptide}")
                 processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
                 processed_dirs.append(processed_dir)
         
@@ -123,6 +126,11 @@ class BaseDockingModel(ABC):
             gpu_index = i % len(self.gpu_ids)
             peptides_by_gpu[gpu_index].append(peptide)
         
+        # Log peptide distribution across GPUs
+        for gpu_index, gpu_peptides in enumerate(peptides_by_gpu):
+            if gpu_peptides:
+                print(f"GPU {self.gpu_ids[gpu_index]}: {len(gpu_peptides)} peptides")
+        
         # Create arguments for each worker process
         process_args = []
         for gpu_index, gpu_peptides in enumerate(peptides_by_gpu):
@@ -151,11 +159,14 @@ class BaseDockingModel(ABC):
             # fork not available on this platform (e.g., Windows)
             context = get_context("spawn")
         
+        print(f"Starting parallel docking across {len(process_args)} GPU processes...")
         with context.Pool(processes=len(process_args)) as pool:
             all_docked_dirs = pool.starmap(self._dock_peptides_for_gpu, process_args)
         
         # Flatten the list of lists
-        return [dir_path for dirs in all_docked_dirs for dir_path in dirs]
+        flattened_dirs = [dir_path for dirs in all_docked_dirs for dir_path in dirs]
+        print(f"Parallel docking complete! Processed {len(flattened_dirs)} peptides.")
+        return flattened_dirs
     
     @abstractmethod
     def _get_method_parameters(self) -> dict:
