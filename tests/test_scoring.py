@@ -78,6 +78,262 @@ class TestScorer:
         assert "alphafold" in scorer.supported_methods
         assert "boltz" in scorer.supported_methods
 
+    def test_get_available_scores_binding_site_filtering(self):
+        """Test that binding site scores are only available when binding site parameters provided"""
+        import tempfile
+        import json
+        
+        scorer = Scorer()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create fake metrics files for both models
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            with open(os.path.join(temp_dir, 'boltz_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.7}, f)
+            
+            # Test without binding site parameters
+            available_no_bs = scorer.get_available_scores(processed_dir=temp_dir)
+            
+            # Test with binding site parameters
+            binding_site_indices = list(range(1, 10))
+            available_with_bs = scorer.get_available_scores(
+                processed_dir=temp_dir, 
+                binding_site_residue_indices=binding_site_indices
+            )
+            
+            # Check for binding site related scores (those that require binding site parameters)
+            binding_site_score_names = ['in_binding_site', 'in_binding_site_score', 'binding_site_n_contacts']
+            
+            # Without binding site params - should have NO binding site scores
+            bs_scores_no_params = [s for s in available_no_bs 
+                                 if any(bs_name in s for bs_name in binding_site_score_names)]
+            assert len(bs_scores_no_params) == 0, f"Found binding site scores without params: {bs_scores_no_params}"
+            
+            # But should have generic n_contacts (which doesn't require binding site)
+            n_contacts_scores = [s for s in available_no_bs if 'n_contacts' in s and 'binding_site' not in s]
+            assert len(n_contacts_scores) > 0, "Expected n_contacts to be available without binding site params"
+            
+            # With binding site params - should have binding site scores  
+            bs_scores_with_params = [s for s in available_with_bs 
+                                   if any(bs_name in s for bs_name in binding_site_score_names)]
+            assert len(bs_scores_with_params) > 0, "Expected binding site scores when params provided"
+            
+            # Should have method-specific binding site scores
+            expected_bs_scores = [
+                'alphafold_in_binding_site', 'alphafold_in_binding_site_score', 'alphafold_binding_site_n_contacts',
+                'boltz_in_binding_site', 'boltz_in_binding_site_score', 'boltz_binding_site_n_contacts'
+            ]
+            for score in expected_bs_scores:
+                assert score in available_with_bs, f"Missing expected binding site score: {score}"
+
+    def test_get_available_scores_generic_structural_filtering_both_models(self):
+        """Test that generic structural scores are NOT available when both models are present"""
+        import tempfile
+        import json
+        
+        scorer = Scorer()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create fake metrics files for BOTH models
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            with open(os.path.join(temp_dir, 'boltz_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.7}, f)
+            
+            available = scorer.get_available_scores(processed_dir=temp_dir)
+            
+            # Check that NO generic structural scores are present when both models available
+            structural_scores = scorer.structural_scores
+            generic_structural = [s for s in available 
+                                if s in structural_scores and not s.startswith(('alphafold_', 'boltz_'))]
+            
+            assert len(generic_structural) == 0, f"Found generic structural scores when both models available: {generic_structural}"
+            
+            # Should have method-specific scores for both models
+            alphafold_scores = [s for s in available if s.startswith('alphafold_')]
+            boltz_scores = [s for s in available if s.startswith('boltz_')]
+            
+            assert len(alphafold_scores) > 0, "Should have AlphaFold-specific scores"
+            assert len(boltz_scores) > 0, "Should have Boltz-specific scores"
+            
+            # Verify specific structural scores are method-prefixed
+            for base_score in ['distance_score', 'rosetta_score', 'interface_sasa']:
+                assert base_score not in available, f"Generic '{base_score}' should not be available when both models present"
+                assert f'alphafold_{base_score}' in available, f"Missing 'alphafold_{base_score}'"
+                assert f'boltz_{base_score}' in available, f"Missing 'boltz_{base_score}'"
+
+    def test_get_available_scores_generic_structural_available_single_model(self):
+        """Test that generic structural scores ARE available when only one model is present"""
+        import tempfile
+        import json
+        
+        scorer = Scorer()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create fake metrics file for ONLY AlphaFold
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            
+            available = scorer.get_available_scores(processed_dir=temp_dir)
+            
+            # Should have both generic AND method-specific scores when only one model
+            structural_scores = scorer.structural_scores
+            
+            # Filter out binding site scores since we didn't provide binding site params
+            non_binding_structural = [s for s in structural_scores 
+                                    if s not in ['in_binding_site', 'in_binding_site_score', 'n_contacts']]
+            
+            generic_structural = [s for s in available 
+                                if s in non_binding_structural and not s.startswith(('alphafold_', 'boltz_'))]
+            
+            assert len(generic_structural) > 0, "Should have generic structural scores when only one model available"
+            
+            # Verify specific scores
+            for base_score in ['distance_score', 'rosetta_score', 'interface_sasa']:
+                assert base_score in available, f"Generic '{base_score}' should be available when only one model present"
+                assert f'alphafold_{base_score}' in available, f"Missing 'alphafold_{base_score}'"
+
+    def test_get_available_scores_template_dependency(self):
+        """Test that template RMSD scores only appear when template is provided"""
+        import tempfile
+        import json
+        
+        scorer = Scorer()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create fake metrics files
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            with open(os.path.join(temp_dir, 'boltz_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.7}, f)
+            
+            # Test without template
+            available_no_template = scorer.get_available_scores(processed_dir=temp_dir)
+            template_scores_no_template = [s for s in available_no_template if 'template_rmsd' in s]
+            assert len(template_scores_no_template) == 0, "Template scores should not be available without template"
+            
+            # Test with template
+            available_with_template = scorer.get_available_scores(
+                processed_dir=temp_dir, 
+                template_structure="/fake/template.pdb"
+            )
+            template_scores_with_template = [s for s in available_with_template if 'template_rmsd' in s]
+            assert len(template_scores_with_template) > 0, "Template scores should be available with template"
+            
+            # Should have method-specific template scores
+            assert 'alphafold_template_rmsd' in available_with_template
+            assert 'boltz_template_rmsd' in available_with_template
+            # But NO generic template_rmsd when both models available
+            assert 'template_rmsd' not in available_with_template
+
+    def test_get_available_scores_peptide_properties_always_available(self):
+        """Test that peptide property scores are always available regardless of model availability"""
+        import tempfile
+        import json
+        
+        scorer = Scorer()
+        
+        # Test with no models
+        available_no_models = scorer.get_available_scores()
+        
+        # Test with one model
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            available_one_model = scorer.get_available_scores(processed_dir=temp_dir)
+        
+        # Test with both models
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            with open(os.path.join(temp_dir, 'boltz_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.7}, f)
+            available_both_models = scorer.get_available_scores(processed_dir=temp_dir)
+        
+        # Peptide property scores should always be present
+        peptide_prop_scores = scorer.peptide_property_scores
+        
+        for prop_score in peptide_prop_scores:
+            assert prop_score in available_no_models, f"Missing peptide property {prop_score} with no models"
+            assert prop_score in available_one_model, f"Missing peptide property {prop_score} with one model"
+            assert prop_score in available_both_models, f"Missing peptide property {prop_score} with both models"
+
+    def test_get_available_scores_special_scores(self):
+        """Test availability of special scores like inter_model_rmsd"""
+        import tempfile
+        import json
+        
+        scorer = Scorer()
+        
+        # Test with only one model - should NOT have inter_model_rmsd
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            available_one = scorer.get_available_scores(processed_dir=temp_dir)
+            assert 'inter_model_rmsd' not in available_one, "inter_model_rmsd should not be available with one model"
+        
+        # Test with both models - should HAVE inter_model_rmsd
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            with open(os.path.join(temp_dir, 'boltz_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.7}, f)
+            available_both = scorer.get_available_scores(processed_dir=temp_dir)
+            assert 'inter_model_rmsd' in available_both, "inter_model_rmsd should be available with both models"
+
+    def test_n_contacts_vs_binding_site_n_contacts_distinction(self):
+        """Test that n_contacts and binding_site_n_contacts are distinct and available appropriately"""
+        import tempfile
+        import json
+        
+        scorer = Scorer()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create fake metrics files for both models
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            with open(os.path.join(temp_dir, 'boltz_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.7}, f)
+            
+            # Test WITHOUT binding site parameters
+            available_no_bs = scorer.get_available_scores(processed_dir=temp_dir)
+            
+            # n_contacts should be available (counts any peptide-protein contacts)
+            assert 'alphafold_n_contacts' in available_no_bs, "alphafold_n_contacts should be available without binding site params"
+            assert 'boltz_n_contacts' in available_no_bs, "boltz_n_contacts should be available without binding site params"
+            
+            # binding_site_n_contacts should NOT be available
+            assert 'alphafold_binding_site_n_contacts' not in available_no_bs, "alphafold_binding_site_n_contacts should NOT be available without binding site params"
+            assert 'boltz_binding_site_n_contacts' not in available_no_bs, "boltz_binding_site_n_contacts should NOT be available without binding site params"
+            assert 'binding_site_n_contacts' not in available_no_bs, "binding_site_n_contacts should NOT be available without binding site params"
+            
+            # Test WITH binding site parameters  
+            binding_site_indices = list(range(1, 10))
+            available_with_bs = scorer.get_available_scores(
+                processed_dir=temp_dir,
+                binding_site_residue_indices=binding_site_indices
+            )
+            
+            # BOTH types should be available
+            assert 'alphafold_n_contacts' in available_with_bs, "alphafold_n_contacts should still be available with binding site params"
+            assert 'boltz_n_contacts' in available_with_bs, "boltz_n_contacts should still be available with binding site params"
+            assert 'alphafold_binding_site_n_contacts' in available_with_bs, "alphafold_binding_site_n_contacts should be available with binding site params"
+            assert 'boltz_binding_site_n_contacts' in available_with_bs, "boltz_binding_site_n_contacts should be available with binding site params"
+            
+            # Test single structure file (no method prefixes)
+            # Note: We can't actually test scoring without a real structure file, but we can test availability
+            structure_available_no_bs = scorer.get_available_scores(structure_file="/fake/path.pdb")
+            assert 'n_contacts' in structure_available_no_bs, "n_contacts should be available for single structure"
+            assert 'binding_site_n_contacts' not in structure_available_no_bs, "binding_site_n_contacts should NOT be available without binding site params"
+            
+            structure_available_with_bs = scorer.get_available_scores(
+                structure_file="/fake/path.pdb",
+                binding_site_residue_indices=binding_site_indices
+            )
+            assert 'n_contacts' in structure_available_with_bs, "n_contacts should be available for single structure with binding site"
+            assert 'binding_site_n_contacts' in structure_available_with_bs, "binding_site_n_contacts should be available with binding site params"
+
 
 class TestPeptideProperties:
     """Test peptide property calculations"""
