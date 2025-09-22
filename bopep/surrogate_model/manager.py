@@ -269,7 +269,14 @@ class SurrogateModelManager:
         
         preds = self.model.predict_dict(embeddings, device=self.device)
         m = self._compute_model_metrics(preds, objectives)
-        metrics = {"r2": m["r2"], "mae": m["mae"]}
+        
+        # Return standardized format with validation fields as None
+        metrics = {
+            "train_r2": m["r2"], 
+            "train_mae": m["mae"],
+            "val_r2": None,      # No validation performed
+            "val_mae": None      # No validation performed
+        }
         
         logging.info(f"Loss {loss:.4f}, R2 {m['r2']:.4f}, N={len(embeddings)}")
         return loss, metrics
