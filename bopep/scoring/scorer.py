@@ -152,29 +152,44 @@ class Scorer:
         # Always available: peptide property scores
         available_scores.extend(self.peptide_property_scores)
         
+        # Filter structural scores based on binding site availability
+        binding_site_scores = ["in_binding_site", "in_binding_site_score", "n_contacts"]
+        available_structural_scores = [score for score in self.structural_scores 
+                                     if score not in binding_site_scores or binding_site_residue_indices is not None]
+        
         # Model-dependent scores
         if has_alphafold:
-            # AlphaFold-specific scores
+            # AlphaFold-specific scores (filter out template-dependent scores if no template)
+            alphafold_specific = self.method_specific_scores["alphafold"]
+            if template_structure is None:
+                alphafold_specific = [score for score in alphafold_specific if score != "template_rmsd"]
+            
             available_scores.extend([f"alphafold_{score}" for score in self.core_docking_scores])
-            available_scores.extend([f"alphafold_{score}" for score in self.structural_scores])
+            available_scores.extend([f"alphafold_{score}" for score in available_structural_scores])
+            available_scores.extend([f"alphafold_{score}" for score in alphafold_specific])
             
             # Generic scores only if no conflict with Boltz
             if not both_models_available:
                 available_scores.extend(self.core_docking_scores)
-                available_scores.extend(self.structural_scores)
+                available_scores.extend(available_structural_scores)
         
         if has_boltz:
-            # Boltz-specific scores
+            # Boltz-specific scores (filter out template-dependent scores if no template)
             boltz_specific = self.method_specific_scores["boltz"]
-            available_scores.extend(boltz_specific)
+            if template_structure is None:
+                boltz_specific = [score for score in boltz_specific if score != "template_rmsd"]
+            
+            # Only add generic boltz scores when exactly one model is available
+            if not both_models_available:
+                available_scores.extend(boltz_specific)
             available_scores.extend([f"boltz_{score}" for score in boltz_specific])
             available_scores.extend([f"boltz_{score}" for score in self.core_docking_scores])
-            available_scores.extend([f"boltz_{score}" for score in self.structural_scores])
+            available_scores.extend([f"boltz_{score}" for score in available_structural_scores])
             
             # Generic scores only if no conflict with AlphaFold
             if not both_models_available:
                 available_scores.extend(self.core_docking_scores)
-                available_scores.extend(self.structural_scores)
+                available_scores.extend(available_structural_scores)
         
         # Special scores
         if both_models_available:
@@ -196,10 +211,8 @@ class Scorer:
         
         # Template RMSD scores - only if template provided
         if template_structure is not None:
-            if has_alphafold:
-                available_scores.append("alphafold_template_rmsd")
-            if has_boltz:
-                available_scores.append("boltz_template_rmsd")
+            # Method-specific template scores are already added through method-specific logic above
+            # Only add generic template_rmsd when exactly one model is available
             if not both_models_available:
                 available_scores.append("template_rmsd")
         
@@ -211,6 +224,7 @@ class Scorer:
                 available_scores.extend([f"alphafold_{score}" for score in binding_site_scores])
             if has_boltz:
                 available_scores.extend([f"boltz_{score}" for score in binding_site_scores])
+            # Only add generic binding site scores if exactly one model available
             if not both_models_available:
                 available_scores.extend(binding_site_scores)
         
@@ -221,7 +235,7 @@ class Scorer:
             available_scores.extend(generic_structural)
             
             if binding_site_residue_indices is not None:
-                available_scores.extend(["in_binding_site", "in_binding_site_score"])
+                available_scores.extend(["in_binding_site", "in_binding_site_score", "n_contacts"])
             if template_structure is not None:
                 available_scores.append("template_rmsd")
         
