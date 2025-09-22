@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import Dict, Any, Optional, Tuple, Union
+from typing import Dict, Any, Optional, Tuple, Union, List
 import logging
 from sklearn.metrics import r2_score, mean_absolute_error
 from bopep.surrogate_model import (
@@ -30,17 +30,13 @@ class SurrogateModelManager:
     def optimize_hyperparameters(
         self, 
         embeddings: Dict[str, Any], 
-        objectives: Dict[str, float],
+        objectives: Dict[str, Union[float, Dict[str, float]]],
         n_trials: int = 20,
         n_splits: int = 3,
         random_state: int = 42,
         iteration: Optional[int] = None
     ) -> Dict[str, Any]:
-        """
-        Optimize hyperparameters using Optuna.
-
-        Returns the best hyperparameters found.
-        """
+        """Optimize hyperparameters using Optuna."""
         model_type = self.surrogate_model_kwargs['model_type']
         network_type = self.surrogate_model_kwargs['network_type']
         
@@ -67,7 +63,22 @@ class SurrogateModelManager:
         
         return self.best_hyperparams
     
-    def initialize_model(self, hyperparams: Optional[Dict[str, Any]] = None, embeddings: Optional[Dict[str, Any]] = None) -> None:
+    def _auto_detect_n_objectives(self, objectives: Dict[str, Union[float, Dict[str, float]]]) -> int:
+        """
+        Auto-detect the number of objectives from the objectives dict structure.
+        """
+
+        # Get a sample objective to examine structure
+        sample_objective = next(iter(objectives.values()))
+        
+        if isinstance(sample_objective, dict):
+            # Named multi-objective case: count the number of objective names
+            return len(sample_objective)
+        else:
+            # Single objective case: float/int value
+            return 1
+
+    def initialize_model(self, hyperparams: Optional[Dict[str, Any]] = None, embeddings: Optional[Dict[str, Any]] = None, objectives: Optional[Dict[str, Union[float, Dict[str, float]]]] = None) -> None:
         """
         Initialize the surrogate model with given hyperparameters.
 
@@ -99,10 +110,11 @@ class SurrogateModelManager:
         else:
             raise ValueError("Cannot determine input_dim. Provide embeddings or set in surrogate_model_kwargs.")
         
-        # Get n_objectives parameter (default to 1 for backward compatibility)
-        n_objectives = self.surrogate_model_kwargs.get('n_objectives', 1)
-        
-        # Extract hyperparameters
+        # Auto-detect or get n_objectives parameter
+        if objectives:
+            n_objectives = self._auto_detect_n_objectives(objectives)
+        else:
+            n_objectives = self.surrogate_model_kwargs.get('n_objectives', 1)        # Extract hyperparameters
         hidden_dims = hyperparams.get('hidden_dims')
         hidden_dim = hyperparams.get('hidden_dim')
         num_layers = hyperparams.get('num_layers', 2)
@@ -153,12 +165,11 @@ class SurrogateModelManager:
             raise ValueError(f"Unknown model type: {model_type}")
         
         self.model.to(self.device)
-        logging.info(f"Initialized {model_type} model with {network_type} network architecture")
+        obj_info = f" ({n_objectives} objectives)" if n_objectives > 1 else ""
+        logging.info(f"Initialized {model_type} model with {network_type} network architecture{obj_info}")
     
-    def train(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> None:
-        """
-        Train the model on all provided data.
-        """
+    def train(self, embeddings: Dict[str, Any], objectives: Dict[str, Union[float, Dict[str, float]]]) -> None:
+        """Train the model on all provided data."""
         if self.model is None:
             raise RuntimeError("Model not initialized. Call initialize_model first.")
         
@@ -194,12 +205,13 @@ class SurrogateModelManager:
         validation_size: int = 5,
         min_training_samples: int = 10,
         min_validation_samples: int = 3
-    ) -> Tuple[float, dict]:
-        """
-        Train model with automatic train/validation split.
-        """
+    ) -> Dict[str, Any]:
+        """Train model with automatic train/validation split."""
         if not self.model:
             raise RuntimeError("Model must be initialized before training")
+        
+        # Basic validation
+        self._validate_multi_objective_consistency(objectives)
             
         total_samples = len(embeddings)
         
@@ -210,15 +222,15 @@ class SurrogateModelManager:
         
         if num_validate is None:
             # Train on all data
-            return self._train_on_all(embeddings, objectives) # returns loss, metrics
+            return self._train_on_all(embeddings, objectives)
         else:
             # Split and train with validation
             train_emb, train_obj, val_emb, val_obj = self._split_train_validation(
                 embeddings, objectives, num_validate
             )
-            return self._train_and_validate(train_emb, train_obj, val_emb, val_obj) # returns loss, metrics
+            return self._train_and_validate(train_emb, train_obj, val_emb, val_obj)
 
-    def _train_and_validate(self, train_emb: dict, train_obj: dict, val_emb: dict, val_obj: dict) -> Tuple[float, dict]:
+    def _train_and_validate(self, train_emb: dict, train_obj: dict, val_emb: dict, val_obj: dict) -> Dict[str, Any]:
         """Train on train set, evaluate on both splits."""
         if not self.best_hyperparams:
             raise RuntimeError("Hyperparameters must be optimized before training")
@@ -236,24 +248,39 @@ class SurrogateModelManager:
         
         train_pred = self.model.predict_dict(train_emb, device=self.device)
         val_pred = self.model.predict_dict(val_emb, device=self.device)
-        train_m = self._compute_model_metrics(train_pred, train_obj)
-        val_m = self._compute_model_metrics(val_pred, val_obj)
-
-        metrics = {
-            "train_r2": train_m["r2"],
-            "train_mae": train_m["mae"],
-            "val_r2": val_m["r2"],
-            "val_mae": val_m["mae"],
-        }
         
-        logging.info(
-            f"Loss {loss:.4f}, train R2 {train_m['r2']:.4f}, "
-            f"val R2 {val_m['r2']:.4f} "
-            f"(N_train={len(train_emb)}, N_val={len(val_emb)})"
-        )
-        return loss, metrics
+        # Compute metrics for both train and validation
+        train_metrics = self._compute_metrics(train_pred, train_obj)
+        val_metrics = self._compute_metrics(val_pred, val_obj)
 
-    def _train_on_all(self, embeddings: dict, objectives: dict) -> Tuple[float, dict]:
+        # Combine into unified metrics dict with train_ and val_ prefixes
+        metrics = {}
+        
+        # Add training metrics with train_ prefix
+        for key, value in train_metrics.items():
+            metrics[f"train_{key}"] = value
+            
+        # Add validation metrics with val_ prefix
+        for key, value in val_metrics.items():
+            metrics[f"val_{key}"] = value
+        
+        # Enhanced logging for named objectives
+        log_msg = f"Loss {loss:.4f}, train R2 {train_metrics['r2']:.4f}, val R2 {val_metrics['r2']:.4f}"
+        
+        # Add named objective details if available
+        named_objectives = [k for k in train_metrics.keys() if k.startswith('r2_') and k != 'r2']
+        if named_objectives:
+            obj_names = [k[3:] for k in named_objectives]  # Remove 'r2_' prefix
+            train_details = [f"{name}:{train_metrics[f'r2_{name}']:.3f}" for name in obj_names]
+            val_details = [f"{name}:{val_metrics[f'r2_{name}']:.3f}" for name in obj_names]
+            log_msg += f" (train: {', '.join(train_details)}; val: {', '.join(val_details)})"
+        
+        log_msg += f" (N_train={len(train_emb)}, N_val={len(val_emb)})"
+        logging.info(log_msg)
+        
+        return metrics
+
+    def _train_on_all(self, embeddings: dict, objectives: dict) -> Dict[str, Any]:
         """Train on the entire dataset (no validation)."""
         if not self.best_hyperparams:
             raise RuntimeError("Hyperparameters must be optimized before training")
@@ -268,88 +295,143 @@ class SurrogateModelManager:
         )
         
         preds = self.model.predict_dict(embeddings, device=self.device)
-        m = self._compute_model_metrics(preds, objectives)
+        train_metrics = self._compute_metrics(preds, objectives)
         
-        # Return standardized format with validation fields as None
-        metrics = {
-            "train_r2": m["r2"], 
-            "train_mae": m["mae"],
-            "val_r2": None,      # No validation performed
-            "val_mae": None      # No validation performed
-        }
+        # Create unified metrics dict with train_ prefix
+        metrics = {}
+        for key, value in train_metrics.items():
+            metrics[f"train_{key}"] = value
         
-        logging.info(f"Loss {loss:.4f}, R2 {m['r2']:.4f}, N={len(embeddings)}")
-        return loss, metrics
+        # Add validation fields as None to indicate no validation was performed
+        metrics["val_r2"] = None
+        metrics["val_mae"] = None
+        metrics["val_mse"] = None
+        
+        # Enhanced logging for named objectives
+        log_msg = f"Loss {loss:.4f}, R2 {train_metrics['r2']:.4f}"
+        
+        # Add named objective details if available
+        named_objectives = [k for k in train_metrics.keys() if k.startswith('r2_') and k != 'r2']
+        if named_objectives:
+            obj_names = [k[3:] for k in named_objectives]  # Remove 'r2_' prefix
+            obj_details = [f"{name}:{train_metrics[f'r2_{name}']:.3f}" for name in obj_names]
+            log_msg += f" ({', '.join(obj_details)})"
+        
+        log_msg += f", N={len(embeddings)}"
+        logging.info(log_msg)
+        
+        return metrics
 
-    def _calculate_validation_metrics(
+    def _compute_metrics(
         self, 
         predictions: Dict[str, Any], 
-        actual: Dict[str, float]
-    ) -> Tuple[float, Dict[str, Any]]:
-        """
-        Calculate validation metrics comparing predictions to actual values.
-        """
+        actual: Dict[str, Union[float, Dict[str, float]]]
+    ) -> Dict[str, Any]:
+        """Unified method to compute all metrics (R2, MAE, MSE, correlation, n_samples)."""
         if not predictions or not actual:
-            return 0.0, {}
+            return {}
         
-        # Find common sequences
         common_seqs = set(predictions.keys()) & set(actual.keys())
         if not common_seqs:
-            return 0.0, {}
+            return {}
         
-        # Extract values
-        pred_values = []
-        actual_values = []
+        # Check if we have named multi-objectives
+        first_actual = actual[next(iter(common_seqs))]
+        is_named_multi_objective = isinstance(first_actual, dict)
         
-        for seq in common_seqs:
-            pred = predictions[seq]
-            # Handle uncertainty models that return (mean, std) tuples
-            if isinstance(pred, tuple):
-                pred_values.append(pred[0])
-            else:
-                pred_values.append(pred)
-            actual_values.append(actual[seq])
+        if is_named_multi_objective:
+            # Named multi-objective case
+            objective_names = list(first_actual.keys())
+            all_mses = []
+            all_maes = []
+            all_r2s = []
+            metrics = {}
+            
+            for obj_name in objective_names:
+                pred_values = []
+                actual_values = []
+                
+                for seq in common_seqs:
+                    # Extract actual value (mean from tuple)
+                    actual_obj = actual[seq][obj_name]
+                    if isinstance(actual_obj, tuple):
+                        actual_values.append(actual_obj[0])  # mean
+                    else:
+                        actual_values.append(actual_obj)
+                    
+                    # Extract predicted value (mean from tuple)
+                    pred = predictions[seq]
+                    if isinstance(pred, dict):
+                        pred_obj = pred[obj_name]
+                        if isinstance(pred_obj, tuple):
+                            pred_values.append(pred_obj[0])  # mean
+                        else:
+                            pred_values.append(pred_obj)
+                    else:
+                        raise ValueError("Prediction format doesn't match named objective format")
+                
+                pred_array = np.array(pred_values)
+                actual_array = np.array(actual_values)
+                
+                # Calculate metrics for this objective
+                mse = np.mean((pred_array - actual_array) ** 2)
+                mae = np.mean(np.abs(pred_array - actual_array))
+                r2 = r2_score(actual_array, pred_array)
+                
+                metrics[f'mse_{obj_name}'] = float(mse)
+                metrics[f'mae_{obj_name}'] = float(mae)
+                metrics[f'r2_{obj_name}'] = float(r2)
+                
+                all_mses.append(mse)
+                all_maes.append(mae)
+                all_r2s.append(r2)
+            
+            # Aggregate metrics
+            avg_mse = np.mean(all_mses)
+            avg_mae = np.mean(all_maes)
+            avg_r2 = np.mean(all_r2s)
+            
+            metrics.update({
+                'mse': float(avg_mse),
+                'mae': float(avg_mae),
+                'r2': float(avg_r2)
+            })
+            
+            return metrics
         
-        pred_values = np.array(pred_values)
-        actual_values = np.array(actual_values)
-        
-        # Calculate metrics
-        mse = np.mean((pred_values - actual_values) ** 2)
-        mae = np.mean(np.abs(pred_values - actual_values))
-        
-        # Correlation coefficient (if variance exists)
-        if np.var(pred_values) > 0 and np.var(actual_values) > 0:
-            correlation = np.corrcoef(pred_values, actual_values)[0, 1]
         else:
-            correlation = 0.0
-        
-        # R² score
-        ss_res = np.sum((actual_values - pred_values) ** 2)
-        ss_tot = np.sum((actual_values - np.mean(actual_values)) ** 2)
-        r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-        
-        metrics = {
-            'mse': float(mse),
-            'mae': float(mae),
-            'correlation': float(correlation),
-            'r2': float(r2),
-            'n_samples': len(common_seqs)
-        }
-        
-        return float(mse), metrics
+            # Single objective case
+            pred_values = []
+            actual_values = []
+            
+            for seq in common_seqs:
+                # Extract actual value (mean from tuple if needed)
+                actual_val = actual[seq]
+                if isinstance(actual_val, tuple):
+                    actual_values.append(actual_val[0])  # mean
+                else:
+                    actual_values.append(actual_val)
+                
+                # Extract predicted value (mean from tuple if needed)
+                pred = predictions[seq]
+                if isinstance(pred, tuple):
+                    pred_values.append(pred[0])  # mean
+                else:
+                    pred_values.append(pred)
+            
+            pred_array = np.array(pred_values)
+            actual_array = np.array(actual_values)
+            
+            mse = np.mean((pred_array - actual_array) ** 2)
+            mae = np.mean(np.abs(pred_array - actual_array))
+            r2 = r2_score(actual_array, pred_array)
+            
+            return {
+                'mse': float(mse),
+                'mae': float(mae),
+                'r2': float(r2)
+            }
     
-    def _compute_model_metrics(self, predictions_dict: dict, objectives: dict) -> dict:
-        """Compute R2 and MAE metrics from predictions and objectives."""
-        peptides = list(predictions_dict.keys())
-        actual = np.array([objectives[p] for p in peptides])
-        predicted = np.array([predictions_dict[p][0] for p in peptides])
-        
-        
-        r2 = r2_score(actual, predicted)
-        mae = mean_absolute_error(actual, predicted)
-
-        return {"r2": r2, "mae": mae}
-
     def _compute_split_indices(
         self, total_samples: int, n_validate: Optional[Union[int, float]], min_training_samples: int = 10, 
         min_validation_samples: int = 3
@@ -395,3 +477,25 @@ class SurrogateModelManager:
         )
 
         return train_embeddings, train_objectives, val_embeddings, val_objectives
+
+    def _validate_multi_objective_consistency(self, objectives: Dict[str, Union[float, Dict[str, float]]]) -> None:
+        """Basic validation for multi-objective consistency."""
+        if not objectives:
+            return
+        
+        sample_obj = next(iter(objectives.values()))
+        is_named_multi_objective = isinstance(sample_obj, dict)
+        
+        if is_named_multi_objective:
+            # Named multi-objective: check all have same objective names
+            expected_names = set(sample_obj.keys())
+            for peptide, obj_dict in objectives.items():
+                if not isinstance(obj_dict, dict):
+                    raise ValueError(f"Expected dict of named objectives for peptide '{peptide}', got {type(obj_dict)}")
+                if set(obj_dict.keys()) != expected_names:
+                    raise ValueError(f"Inconsistent objective names for peptide '{peptide}'")
+        else:
+            # Single objective: check all are single values or tuples
+            for peptide, obj in objectives.items():
+                if not isinstance(obj, (int, float, tuple)):
+                    raise ValueError(f"Expected single objective (float or tuple) for peptide '{peptide}', got {type(obj)}")

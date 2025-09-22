@@ -373,7 +373,7 @@ class HyperparameterTuner:
     def tune(
         self,
         embedding_dict: Dict[str, np.ndarray],
-        objective_dict: Dict[str, Union[float, List[float], np.ndarray]],
+        objective_dict: Dict[str, Union[float, Dict[str, float]]],
         previous_study: Optional[optuna.study.Study] = None,
     ) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
         """
@@ -426,7 +426,7 @@ class HyperparameterTuner:
 def tune_hyperparams(
     model_type: Literal["mve", "deep_evidential", "nn_ensemble", "mc_dropout"],
     embedding_dict: Dict[str, np.ndarray],
-    objective_dict: Dict[str, Union[float, List[float], np.ndarray]],
+    objective_dict: Dict[str, Union[float, Dict[str, float]]],
     network_type: Literal["mlp", "bilstm", "bigru"] = "mlp",
     n_splits: int = 3,
     n_trials: int = 20,
@@ -458,10 +458,10 @@ def tune_hyperparams(
     
     # Auto-detect number of objectives
     sample_objective = next(iter(objective_dict.values()))
-    if isinstance(sample_objective, (list, np.ndarray)):
-        n_objectives = len(sample_objective)
+    if isinstance(sample_objective, dict):
+        n_objectives = len(sample_objective)  # Named multi-objective
     else:
-        n_objectives = 1
+        n_objectives = 1  # Single objective
     
     tuner = HyperparameterTuner(
         model_type=model_type,

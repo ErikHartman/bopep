@@ -246,7 +246,7 @@ class BoPep:
         )
         
         # Initialize the model with optimized hyperparameters
-        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs)
+        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs, objectives)
         
         # Save initial checkpoint
         logging.info("Creating initial checkpoint")
@@ -313,7 +313,7 @@ class BoPep:
         )
         
         # Initialize the model with optimized hyperparameters
-        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs)
+        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs, objectives)
 
         # Save initial checkpoint for continued run
         logging.info("Creating initial checkpoint for continued run")
@@ -353,12 +353,13 @@ class BoPep:
                 # Initialize fresh model for each iteration
                 # Use embeddings from current docked peptides for initialization
                 current_docked_embs = {p: self.embeddings[p] for p in self.docked_peptides}
-                self.surrogate_manager.initialize_model(self.best_hyperparams, current_docked_embs)
-
+                
                 # Turn scores into a scalarized score dict of peptide: score
                 objectives = self.scores_to_objective.create_objective(
                     scores, self.objective_function, **self.objective_function_kwargs
                 )
+                
+                self.surrogate_manager.initialize_model(self.best_hyperparams, current_docked_embs, objectives)
 
                 # Log the new objective values
                 new_objective_peptides = set(objectives.keys()) - all_logged_objectives
@@ -387,7 +388,7 @@ class BoPep:
                         random_state=self.hpo_kwargs.get("random_state", 42),
                         iteration=global_iteration
                     )
-                    self.surrogate_manager.initialize_model(embeddings=docked_embeddings)
+                    self.surrogate_manager.initialize_model(embeddings=docked_embeddings, objectives=objectives)
 
                     # Log hyperparameters
                     if self.surrogate_manager.best_hyperparams:
@@ -403,13 +404,16 @@ class BoPep:
                 )
 
                 # Train the model with automatic (optional) validation split
-                loss, metrics = self.surrogate_manager.train_with_validation_split(
+                metrics = self.surrogate_manager.train_with_validation_split(
                     embeddings=docked_embeddings,
                     objectives=objectives,
                     validation_size=n_validate,
                     min_training_samples=self.MIN_TRAINING_SAMPLES,
                     min_validation_samples=self.MIN_VALIDATION_SAMPLES
                 )
+
+                # Extract loss - use validation loss if available, otherwise training loss
+                loss = metrics["val_mse"] if metrics["val_mse"] is not None else metrics["train_mse"]
 
                 # Log the loss and metrics
                 self.logger.log_model_metrics(loss, global_iteration, metrics)

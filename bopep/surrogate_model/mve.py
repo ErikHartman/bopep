@@ -31,7 +31,7 @@ class MVE(BasePredictionModel):
         super().__init__()
 
         # We need 2 outputs per objective: mu and log_var
-        output_dim = 2
+        output_dim = 2 * n_objectives
         self.mve_regularization = mve_regularization
         self.n_objectives = n_objectives
 
@@ -55,7 +55,7 @@ class MVE(BasePredictionModel):
         outputs = self.network(x, lengths=lengths)
         
         if self.n_objectives == 1:
-            # Original behavior: outputs shape is (N, 2)
+            # Single objective: outputs shape is (N, 2)
             mu = outputs[:, 0:1]
             log_var = outputs[:, 1:2]
         else:

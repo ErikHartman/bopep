@@ -256,7 +256,7 @@ class BoGA:
             iteration=iteration
         )
 
-    def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Tuple[float, Dict[str, Any]]:
+    def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Dict[str, Any]:
         """
         Train the model with automatic validation split. Manager decides whether to validate based on sample size.
         """
@@ -405,7 +405,7 @@ class BoGA:
                 training_embeddings, candidate_embeddings = self._embed_generation(scored_seqs, pool)
 
                 # Init fresh model with training embeddings to determine input_dim
-                self.surrogate_manager.initialize_model(embeddings=training_embeddings)
+                self.surrogate_manager.initialize_model(embeddings=training_embeddings, objectives=objectives)
 
                 # Train surrogate or model only based on interval
                 if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0:
@@ -413,7 +413,10 @@ class BoGA:
                     self._optimize_hyperparameters(training_embeddings, objectives, iteration=global_generation)
 
                 print("Training surrogate model...")
-                val_loss, metrics = self._train_model(training_embeddings, objectives)
+                metrics = self._train_model(training_embeddings, objectives)
+
+                # Extract loss - use validation loss if available, otherwise training loss
+                loss = metrics["val_mse"] if metrics["val_mse"] is not None else metrics["train_mse"]
 
                 # Predict on pool using candidate embeddings
                 preds = self.surrogate_manager.predict(candidate_embeddings)
@@ -430,7 +433,7 @@ class BoGA:
                 new_objectives = self.scores_to_objective.create_objective(new_scores, self.objective_function, **self.objective_function_kwargs)
                 
                 if self.logger:
-                    self.logger.log_model_metrics(val_loss, iteration=global_generation, metrics=metrics)
+                    self.logger.log_model_metrics(loss, iteration=global_generation, metrics=metrics)
                     self.logger.log_scores(new_scores, iteration=global_generation, acquisition_name=acquisition_function)
                     self.logger.log_objectives(new_objectives, iteration=global_generation, acquisition_name=acquisition_function)
                     

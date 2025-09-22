@@ -83,13 +83,13 @@ def multi_objective_data():
         key = f"sample_{i}"
         # Random embedding
         embedding_dict[key] = np.random.randn(input_dim).astype(np.float32)
-        # Multiple objectives
-        objectives = [
-            float(np.sum(embedding_dict[key]**2)),      # sum of squares
-            float(np.mean(np.abs(embedding_dict[key]))), # mean absolute value
-            float(np.max(embedding_dict[key]))           # maximum value
-        ]
-        objective_dict[key] = objectives
+        # Multiple objectives as dict (proper format)
+        embedding_dict[key] = np.random.randn(input_dim).astype(np.float32)
+        objective_dict[key] = {
+            "sum_squares": float(np.sum(embedding_dict[key]**2)),
+            "mean_abs": float(np.mean(np.abs(embedding_dict[key]))),
+            "max_value": float(np.max(embedding_dict[key]))
+        }
     
     return embedding_dict, objective_dict
 
@@ -306,10 +306,10 @@ class TestMultiObjectiveTuning:
             key = f"sample_{i}"
             seq_len = np.random.randint(3, 8)
             embedding_dict[key] = np.random.randn(seq_len, input_dim).astype(np.float32)
-            objective_dict[key] = [
-                float(np.mean(embedding_dict[key])),
-                float(np.std(embedding_dict[key]))
-            ]
+            objective_dict[key] = {
+                "mean": float(np.mean(embedding_dict[key])),
+                "std": float(np.std(embedding_dict[key]))
+            }
         
         tuner = HyperparameterTuner(
             model_type="mc_dropout",
@@ -377,11 +377,11 @@ class TestHighLevelAPI:
         for i in range(n_samples):
             key = f"sample_{i}"
             embedding_dict[key] = np.random.randn(input_dim).astype(np.float32)
-            # Use numpy array instead of list
-            objective_dict[key] = np.array([
-                np.sum(embedding_dict[key]**2),
-                np.mean(np.abs(embedding_dict[key]))
-            ])
+            # Use dict format instead of numpy array
+            objective_dict[key] = {
+                "sum_squares": float(np.sum(embedding_dict[key]**2)),
+                "mean_abs": float(np.mean(np.abs(embedding_dict[key])))
+            }
         
         best_params, study = tune_hyperparams(
             model_type="nn_ensemble",
