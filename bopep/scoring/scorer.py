@@ -37,6 +37,7 @@ class Scorer:
             "distance_score",
             "in_binding_site", 
             "in_binding_site_score", 
+            "binding_site_n_contacts",
             "n_contacts",
 
             "peptide_plddt", 
@@ -153,7 +154,7 @@ class Scorer:
         available_scores.extend(self.peptide_property_scores)
         
         # Filter structural scores based on binding site availability
-        binding_site_scores = ["in_binding_site", "in_binding_site_score", "n_contacts"]
+        binding_site_scores = ["in_binding_site", "in_binding_site_score", "binding_site_n_contacts"]
         available_structural_scores = [score for score in self.structural_scores 
                                      if score not in binding_site_scores or binding_site_residue_indices is not None]
         
@@ -218,7 +219,7 @@ class Scorer:
         
         # Binding site scores - only if binding site indices provided
         if binding_site_residue_indices is not None:
-            binding_site_scores = ["in_binding_site", "in_binding_site_score"]
+            binding_site_scores = ["in_binding_site", "in_binding_site_score", "binding_site_n_contacts"]
             
             if has_alphafold:
                 available_scores.extend([f"alphafold_{score}" for score in binding_site_scores])
@@ -235,7 +236,8 @@ class Scorer:
             available_scores.extend(generic_structural)
             
             if binding_site_residue_indices is not None:
-                available_scores.extend(["in_binding_site", "in_binding_site_score", "n_contacts"])
+                available_scores.extend(["in_binding_site", "in_binding_site_score", "binding_site_n_contacts"])
+            available_scores.extend(["n_contacts"])
             if template_structure is not None:
                 available_scores.append("template_rmsd")
         
@@ -284,9 +286,9 @@ class Scorer:
         
         # Validate parameter dependencies
         binding_site_scores = [
-            "in_binding_site", "in_binding_site_score",
-            "alphafold_in_binding_site", "alphafold_in_binding_site_score", 
-            "boltz_in_binding_site", "boltz_in_binding_site_score"
+            "in_binding_site", "in_binding_site_score", "binding_site_n_contacts",
+            "alphafold_in_binding_site", "alphafold_in_binding_site_score", "alphafold_binding_site_n_contacts",
+            "boltz_in_binding_site", "boltz_in_binding_site_score", "boltz_binding_site_n_contacts"
         ]
         
         template_rmsd_scores = [
@@ -421,11 +423,17 @@ class Scorer:
                 alphafold_model_file, "A", "B", binding_site_distance_threshold
             )
         
+        if "alphafold_n_contacts" in scores_to_include:
+            receptor_contacts = get_receptor_contacts(
+                alphafold_model_file, "A", "B", binding_site_distance_threshold
+            )
+            scores["alphafold_n_contacts"] = len(receptor_contacts)
+        
         if "alphafold_in_binding_site" in scores_to_include:
             n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
                 alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
             scores["alphafold_in_binding_site"] = in_binding_site
-            scores["alphafold_n_contacts"] = n_contacts
+            scores["alphafold_binding_site_n_contacts"] = n_contacts
         
         if "alphafold_in_binding_site_score" in scores_to_include:
             if binding_site_residue_indices is not None:
@@ -433,6 +441,14 @@ class Scorer:
                     alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
             else:
                 scores["alphafold_in_binding_site_score"] = None
+        
+        if "alphafold_binding_site_n_contacts" in scores_to_include:
+            if binding_site_residue_indices is not None:
+                n_contacts, _ = is_peptide_in_binding_site_pdb_file(
+                    alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                scores["alphafold_binding_site_n_contacts"] = n_contacts
+            else:
+                scores["alphafold_binding_site_n_contacts"] = None
         
         if "alphafold_template_rmsd" in scores_to_include:
             if template_structure is not None:
@@ -530,11 +546,17 @@ class Scorer:
                 boltz_model_file, "A", "B", binding_site_distance_threshold
             )
         
+        if "boltz_n_contacts" in scores_to_include:
+            receptor_contacts = get_receptor_contacts(
+                boltz_model_file, "A", "B", binding_site_distance_threshold
+            )
+            scores["boltz_n_contacts"] = len(receptor_contacts)
+        
         if "boltz_in_binding_site" in scores_to_include:
             n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
                 boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
             scores["boltz_in_binding_site"] = in_binding_site
-            scores["boltz_n_contacts"] = n_contacts
+            scores["boltz_binding_site_n_contacts"] = n_contacts
         
         if "boltz_in_binding_site_score" in scores_to_include:
             if binding_site_residue_indices is not None:
@@ -542,6 +564,14 @@ class Scorer:
                     boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
             else:
                 scores["boltz_in_binding_site_score"] = None
+        
+        if "boltz_binding_site_n_contacts" in scores_to_include:
+            if binding_site_residue_indices is not None:
+                n_contacts, _ = is_peptide_in_binding_site_pdb_file(
+                    boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                scores["boltz_binding_site_n_contacts"] = n_contacts
+            else:
+                scores["boltz_binding_site_n_contacts"] = None
         
         if "boltz_template_rmsd" in scores_to_include:
             if template_structure is not None:
@@ -681,22 +711,22 @@ class Scorer:
                 n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
                     alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
                 scores["alphafold_in_binding_site"] = in_binding_site
-                scores["alphafold_n_contacts"] = n_contacts
+                scores["alphafold_binding_site_n_contacts"] = n_contacts
                 added = True
             if has_boltz and boltz_model_file:
                 n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
                     boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
                 scores["boltz_in_binding_site"] = in_binding_site
-                scores["boltz_n_contacts"] = n_contacts
+                scores["boltz_binding_site_n_contacts"] = n_contacts
                 added = True
             if not added:
                 n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
                     target_structure_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
                 scores["in_binding_site"] = in_binding_site
-                scores["n_contacts"] = n_contacts
+                scores["binding_site_n_contacts"] = n_contacts
             elif has_alphafold ^ has_boltz:
                 scores["in_binding_site"] = scores.get("alphafold_in_binding_site") or scores.get("boltz_in_binding_site")
-                scores["n_contacts"] = scores.get("alphafold_n_contacts") or scores.get("boltz_n_contacts")
+                scores["binding_site_n_contacts"] = scores.get("alphafold_binding_site_n_contacts") or scores.get("boltz_binding_site_n_contacts")
         
         if "in_binding_site_score" in scores_to_include:
             added = False
@@ -717,6 +747,28 @@ class Scorer:
             else:
                 scores["in_binding_site_score"] = None
         
+        if "binding_site_n_contacts" in scores_to_include:
+            added = False
+            if binding_site_residue_indices is not None:
+                if has_alphafold and alphafold_model_file:
+                    n_contacts, _ = is_peptide_in_binding_site_pdb_file(
+                        alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                    scores["alphafold_binding_site_n_contacts"] = n_contacts
+                    added = True
+                if has_boltz and boltz_model_file:
+                    n_contacts, _ = is_peptide_in_binding_site_pdb_file(
+                        boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                    scores["boltz_binding_site_n_contacts"] = n_contacts
+                    added = True
+                if not added:
+                    n_contacts, _ = is_peptide_in_binding_site_pdb_file(
+                        target_structure_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                    scores["binding_site_n_contacts"] = n_contacts
+                elif has_alphafold ^ has_boltz:
+                    scores["binding_site_n_contacts"] = scores.get("alphafold_binding_site_n_contacts") or scores.get("boltz_binding_site_n_contacts")
+            else:
+                scores["binding_site_n_contacts"] = None
+        
         if "template_rmsd" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file and template_structure is not None:
@@ -733,24 +785,43 @@ class Scorer:
             if has_alphafold ^ has_boltz:  # only one method available -> keep generic alias
                 scores["template_rmsd"] = scores.get("alphafold_template_rmsd") or scores.get("boltz_template_rmsd")
 
-        if "receptor_contacts" in scores_to_include:
-            added = False
+        # Handle receptor_contacts and n_contacts together for efficiency
+        if "receptor_contacts" in scores_to_include or "n_contacts" in scores_to_include:
+            # Calculate contacts for both methods if available
             if has_alphafold and alphafold_model_file:
-                scores["alphafold_receptor_contacts"] = get_receptor_contacts(
+                alphafold_contacts = get_receptor_contacts(
                     alphafold_model_file, "A", "B", binding_site_distance_threshold
                 )
-                added = True
+                if "receptor_contacts" in scores_to_include:
+                    scores["alphafold_receptor_contacts"] = alphafold_contacts
+                if "n_contacts" in scores_to_include:
+                    scores["alphafold_n_contacts"] = len(alphafold_contacts)
+            
             if has_boltz and boltz_model_file:
-                scores["boltz_receptor_contacts"] = get_receptor_contacts(
+                boltz_contacts = get_receptor_contacts(
                     boltz_model_file, "A", "B", binding_site_distance_threshold
                 )
-                added = True
-            if not added:
-                scores["receptor_contacts"] = get_receptor_contacts(
+                if "receptor_contacts" in scores_to_include:
+                    scores["boltz_receptor_contacts"] = boltz_contacts
+                if "n_contacts" in scores_to_include:
+                    scores["boltz_n_contacts"] = len(boltz_contacts)
+            
+            # Handle generic scores when no methods available or only one method
+            if not (has_alphafold or has_boltz):
+                # Single structure file case
+                contacts = get_receptor_contacts(
                     target_structure_file, "A", "B", binding_site_distance_threshold
                 )
+                if "receptor_contacts" in scores_to_include:
+                    scores["receptor_contacts"] = contacts
+                if "n_contacts" in scores_to_include:
+                    scores["n_contacts"] = len(contacts)
             elif has_alphafold ^ has_boltz:
-                scores["receptor_contacts"] = scores.get("alphafold_receptor_contacts") or scores.get("boltz_receptor_contacts")
+                # Only one method available - provide generic aliases
+                if "receptor_contacts" in scores_to_include:
+                    scores["receptor_contacts"] = scores.get("alphafold_receptor_contacts") or scores.get("boltz_receptor_contacts")
+                if "n_contacts" in scores_to_include:
+                    scores["n_contacts"] = scores.get("alphafold_n_contacts") or scores.get("boltz_n_contacts")
 
         # Generic confidence scores (previously exclusive; now include both method-specific if both present)
         if "peptide_plddt" in scores_to_include:
@@ -1097,9 +1168,19 @@ if __name__ == "__main__":
     available_no_bs = scorer.get_available_scores(structure_file=structure_file_path)
     print("Available scores without binding site:", len(available_no_bs))
 
+    # Test n_contacts vs binding_site_n_contacts distinction
+    print("\nContact score availability:")
+    print("With binding site params:")
+    contact_scores_with_bs = [s for s in available_with_bs if 'contacts' in s]
+    print(f"  Contact scores: {contact_scores_with_bs}")
+    
+    print("Without binding site params:")
+    contact_scores_no_bs = [s for s in available_no_bs if 'contacts' in s]
+    print(f"  Contact scores: {contact_scores_no_bs}")
+
     # Single score example
     scores = scorer.score(
         scores_to_include=["molecular_weight"], 
         structure_file=structure_file_path
     )
-    print(f"Molecular weight score: {scores}")
+    print(f"\nMolecular weight score: {scores}")

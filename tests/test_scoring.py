@@ -102,13 +102,17 @@ class TestScorer:
                 binding_site_residue_indices=binding_site_indices
             )
             
-            # Check for binding site related scores
-            binding_site_score_names = ['in_binding_site', 'in_binding_site_score', 'n_contacts']
+            # Check for binding site related scores (those that require binding site parameters)
+            binding_site_score_names = ['in_binding_site', 'in_binding_site_score', 'binding_site_n_contacts']
             
             # Without binding site params - should have NO binding site scores
             bs_scores_no_params = [s for s in available_no_bs 
                                  if any(bs_name in s for bs_name in binding_site_score_names)]
             assert len(bs_scores_no_params) == 0, f"Found binding site scores without params: {bs_scores_no_params}"
+            
+            # But should have generic n_contacts (which doesn't require binding site)
+            n_contacts_scores = [s for s in available_no_bs if 'n_contacts' in s and 'binding_site' not in s]
+            assert len(n_contacts_scores) > 0, "Expected n_contacts to be available without binding site params"
             
             # With binding site params - should have binding site scores  
             bs_scores_with_params = [s for s in available_with_bs 
@@ -117,8 +121,8 @@ class TestScorer:
             
             # Should have method-specific binding site scores
             expected_bs_scores = [
-                'alphafold_in_binding_site', 'alphafold_in_binding_site_score', 'alphafold_n_contacts',
-                'boltz_in_binding_site', 'boltz_in_binding_site_score', 'boltz_n_contacts'
+                'alphafold_in_binding_site', 'alphafold_in_binding_site_score', 'alphafold_binding_site_n_contacts',
+                'boltz_in_binding_site', 'boltz_in_binding_site_score', 'boltz_binding_site_n_contacts'
             ]
             for score in expected_bs_scores:
                 assert score in available_with_bs, f"Missing expected binding site score: {score}"
@@ -277,6 +281,58 @@ class TestScorer:
                 json.dump({'iptm': 0.7}, f)
             available_both = scorer.get_available_scores(processed_dir=temp_dir)
             assert 'inter_model_rmsd' in available_both, "inter_model_rmsd should be available with both models"
+
+    def test_n_contacts_vs_binding_site_n_contacts_distinction(self):
+        """Test that n_contacts and binding_site_n_contacts are distinct and available appropriately"""
+        import tempfile
+        import json
+        
+        scorer = Scorer()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create fake metrics files for both models
+            with open(os.path.join(temp_dir, 'alphafold_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.8}, f)
+            with open(os.path.join(temp_dir, 'boltz_metrics.json'), 'w') as f:
+                json.dump({'iptm': 0.7}, f)
+            
+            # Test WITHOUT binding site parameters
+            available_no_bs = scorer.get_available_scores(processed_dir=temp_dir)
+            
+            # n_contacts should be available (counts any peptide-protein contacts)
+            assert 'alphafold_n_contacts' in available_no_bs, "alphafold_n_contacts should be available without binding site params"
+            assert 'boltz_n_contacts' in available_no_bs, "boltz_n_contacts should be available without binding site params"
+            
+            # binding_site_n_contacts should NOT be available
+            assert 'alphafold_binding_site_n_contacts' not in available_no_bs, "alphafold_binding_site_n_contacts should NOT be available without binding site params"
+            assert 'boltz_binding_site_n_contacts' not in available_no_bs, "boltz_binding_site_n_contacts should NOT be available without binding site params"
+            assert 'binding_site_n_contacts' not in available_no_bs, "binding_site_n_contacts should NOT be available without binding site params"
+            
+            # Test WITH binding site parameters  
+            binding_site_indices = list(range(1, 10))
+            available_with_bs = scorer.get_available_scores(
+                processed_dir=temp_dir,
+                binding_site_residue_indices=binding_site_indices
+            )
+            
+            # BOTH types should be available
+            assert 'alphafold_n_contacts' in available_with_bs, "alphafold_n_contacts should still be available with binding site params"
+            assert 'boltz_n_contacts' in available_with_bs, "boltz_n_contacts should still be available with binding site params"
+            assert 'alphafold_binding_site_n_contacts' in available_with_bs, "alphafold_binding_site_n_contacts should be available with binding site params"
+            assert 'boltz_binding_site_n_contacts' in available_with_bs, "boltz_binding_site_n_contacts should be available with binding site params"
+            
+            # Test single structure file (no method prefixes)
+            # Note: We can't actually test scoring without a real structure file, but we can test availability
+            structure_available_no_bs = scorer.get_available_scores(structure_file="/fake/path.pdb")
+            assert 'n_contacts' in structure_available_no_bs, "n_contacts should be available for single structure"
+            assert 'binding_site_n_contacts' not in structure_available_no_bs, "binding_site_n_contacts should NOT be available without binding site params"
+            
+            structure_available_with_bs = scorer.get_available_scores(
+                structure_file="/fake/path.pdb",
+                binding_site_residue_indices=binding_site_indices
+            )
+            assert 'n_contacts' in structure_available_with_bs, "n_contacts should be available for single structure with binding site"
+            assert 'binding_site_n_contacts' in structure_available_with_bs, "binding_site_n_contacts should be available with binding site params"
 
 
 class TestPeptideProperties:
