@@ -1,367 +1,311 @@
-"""
-Acquisition functions for discrete candidate optimization.
-
-TODO: Investigate proper BoTorch multi-objective acquisition functions 
-      (qLogExpectedHypervolumeImprovement) that work with discrete candidates.
-      Current EHVI implementation uses a simplified heuristic approach.
-
-Currently only supports q=1 (sequential candidate evaluation).
-"""
-
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Union
+from scipy.stats import norm
 
-import torch
-from torch import Tensor, Size
+available_acquisition_functions = [
+    "expected_improvement",
+    "standard_deviation",
+    "upper_confidence_bound",
+    "probability_of_improvement",
+    "mean",
+    # multiobjective
+    "parego_chebyshev_ei",
+    "parego_chebyshev_ucb",
+]
 
-from botorch.models.model import Model
-from botorch.posteriors import GPyTorchPosterior
-from gpytorch.distributions import MultivariateNormal
-
-from botorch.acquisition import qUpperConfidenceBound
-from botorch.acquisition.logei import qLogExpectedImprovement
-from botorch.sampling import SobolQMCNormalSampler
-
-
-# Publicly exposed names
-available_acquisition_functions = {
-    "expected_improvement", "upper_confidence_bound", "expected_hypervolume_improvement",
-    "mean", "standard_deviation" 
-}
-
-
-def _is_multiobjective_predictions(predictions: Dict) -> bool:
-    if not predictions:
-        raise ValueError("predictions is empty.")
-    sample = next(iter(predictions.values()))
-    return isinstance(sample, dict)
-
-
-def _ordered_objective_names_from_predictions(
-    predictions: Dict[str, Dict[str, Tuple[float, float]]]
-) -> List[str]:
-    first = next(iter(predictions.values()))
-    if not isinstance(first, dict) or not first:
-        raise ValueError("Multiobjective predictions must be {item: {obj: (mean, std), ...}}.")
-    return list(first.keys())
-
-
-def _predictions_to_arrays(
-    predictions: Dict[str, Union[Tuple[float, float], Dict[str, Tuple[float, float]]]]
-) -> Tuple[List[str], Optional[List[str]], np.ndarray, np.ndarray]:
-    """
-    Returns:
-      items: list of peptide names in a stable order
-      obj_names: list of objective names if multiobjective, else None
-      mu: [N, M] mean array
-      sd: [N, M] std array
-    """
-    items = list(predictions.keys())
-    if _is_multiobjective_predictions(predictions):
-        obj_names = _ordered_objective_names_from_predictions(predictions)
-        mu = np.array([[predictions[it][o][0] for o in obj_names] for it in items], dtype=float)
-        sd = np.array([[predictions[it][o][1] for o in obj_names] for it in items], dtype=float)
-        return items, obj_names, mu, sd
-    else:
-        mu = np.array([[predictions[it][0]] for it in items], dtype=float)
-        sd = np.array([[predictions[it][1]] for it in items], dtype=float)
-        return items, None, mu, sd
-
-
-def _objectives_to_tensor_and_indices(
-    items: List[str],
-    obj_names: Optional[List[str]],
-    objectives: Dict[str, Union[float, Dict[str, float]]],
-) -> Tuple[Tensor, Tensor]:
-    """
-    Map observed outcomes to a tensor Y_obs and baseline indices aligned with items.
-    Only overlapping peptides are used.
-    """
-    item_to_idx = {it: i for i, it in enumerate(items)}
-    obs_rows = []
-    baseline_idx = []
-    if obj_names is None:
-        for it, val in objectives.items():
-            if it in item_to_idx:
-                obs_rows.append([float(val)])
-                baseline_idx.append([item_to_idx[it]])
-    else:
-        for it, valdict in objectives.items():
-            if it in item_to_idx:
-                row = [float(valdict[o]) for o in obj_names]
-                obs_rows.append(row)
-                baseline_idx.append([item_to_idx[it]])
-
-    if not obs_rows:
-        Y = torch.empty(0, 1 if obj_names is None else len(obj_names), dtype=torch.double)
-        Xb = torch.empty(0, 1, dtype=torch.long)
-    else:
-        Y = torch.tensor(np.asarray(obs_rows, dtype=float), dtype=torch.double)
-        Xb = torch.tensor(np.asarray(baseline_idx, dtype=int), dtype=torch.long)
-
-    return Y, Xb
-
-class TablePosteriorModel(Model):
-    """
-    Fixed BoTorch Model over a discrete candidate set.
-    Posterior is independent across candidates and across objectives.
-    """
-
-    def __init__(self, mu: np.ndarray, sd: np.ndarray, device=None, dtype=torch.double):
-        super().__init__()
-        assert mu.shape == sd.shape and mu.ndim == 2, "mu and sd must be [N, M]"
-        self.N, self.M = mu.shape
-        self._mu = torch.as_tensor(mu, dtype=dtype, device=device)
-        self._sd = torch.as_tensor(sd, dtype=dtype, device=device).clamp_min(1e-12)
-
-    @property
-    def num_outputs(self) -> int:
-        return self.M
-
-    def posterior(
-        self,
-        X: Tensor,
-        output_indices=None,
-        observation_noise: bool = False,
-        **kwargs,
-    ) -> GPyTorchPosterior:
-        """
-        Return a posterior distribution for the given input indices.
-        For X of shape [..., q, 1], returns posterior with proper BoTorch shapes.
-        """
-        # Handle [1, q, 1] -> [q, 1] conversion for acquisition functions
-        if X.dim() == 3 and X.shape[0] == 1:
-            X = X.squeeze(0)  # [q, 1]
-            
-        # X: [q, 1] -> idx: [q]
-        idx = X.squeeze(-1).long()
-        q = idx.shape[0]
-        
-        # Look up mean and std for each query point
-        mu = self._mu[idx]  # [q, M]
-        sd = self._sd[idx]  # [q, M]
-        
-        # For BoTorch compatibility: create a multivariate normal distribution
-        # Flatten mean and create block diagonal covariance
-        mu_flat = mu.reshape(-1)  # [q*M]
-        var_flat = (sd ** 2).reshape(-1)  # [q*M]
-        cov = torch.diag(var_flat)  # [q*M, q*M]
-        
-        # Create MVN with batch_shape=[] and event_shape=[q*M]
-        mvn = MultivariateNormal(mu_flat, covariance_matrix=cov)
-        
-        # Create a simple posterior wrapper
-        class TablePosterior(GPyTorchPosterior):
-            def __init__(self, mvn_dist, q_val, m_val, mu_tensor, var_tensor):
-                super().__init__(mvn_dist)
-                self.q_val = q_val
-                self.m_val = m_val
-                self._mean = mu_tensor  # Store original [q, M] mean
-                self._variance = var_tensor  # Store original [q, M] variance
-            
-            @property
-            def mean(self):
-                return self._mean  # [q, M]
-            
-            @property
-            def variance(self):
-                return self._variance  # [q, M]
-                
-            def sample(self, sample_shape: Size = Size(), base_samples: Optional[Tensor] = None) -> Tensor:
-                """Sample from the posterior. Returns tensor of shape [..., q, M]."""
-                # Sample from the flat MVN using the parent class
-                flat_samples = self.mvn.sample(sample_shape)  # [..., q*M]
-                # Reshape to [..., q, M]
-                new_shape = flat_samples.shape[:-1] + (self.q_val, self.m_val)
-                return flat_samples.reshape(new_shape)
-        
-        return TablePosterior(mvn, q, self.M, mu, sd ** 2)
-
+def _simplex_random_weights(m, rng):
+    w = rng.gamma(1.0, 1.0, size=m)
+    w /= np.sum(w)
+    # avoid degeneracy
+    w = np.maximum(w, 1e-6)
+    w /= np.sum(w)
+    return w
 
 class AcquisitionFunction:
-    """
-    Acquisition functions for discrete candidate optimization.
-      - expected_improvement: qLogExpectedImprovement for single objective
-      - upper_confidence_bound: qUpperConfidenceBound for single objective  
-      - expected_hypervolume_improvement: Simplified heuristic for multi-objective
-      - mean: Pure exploitation (highest predicted value)
-      - standard_deviation: Pure exploration (highest uncertainty)
-    """
+    def __init__(self, rng_seed: int = 123):
+        self.best_so_far_ei = 0.0
+        self.best_so_far_pi = 0.0
+        self.rng = np.random.default_rng(rng_seed)
 
-    def __init__(self):
-        pass
+        # For ParEGO running reference points
+        self._ideal = None   # z*: per-objective ideal
+        self._nadir = None   # approximate nadir for normalization
 
-    def compute_acquisition(
-        self,
-        predictions: Dict[str, Union[Tuple[float, float], Dict[str, Tuple[float, float]]]],
-        acquisition_function: str,
-        *,
-        objectives: Optional[Dict[str, Union[float, Dict[str, float]]]] = None,
-        num_mc: int = 256,
-        kappa: float = 1.96,
-        device: Optional[torch.device] = None,
-    ) -> Dict[str, float]:
+    def compute_acquisition(self, predictions: dict, acquisition_function: str, maximize: bool = True, **kwargs):
         """
-        Compute acquisition values on a discrete candidate set.
-
+        Single-objective predictions: {peptide: (mean, std)}
+        Multiobjective predictions: {peptide: {obj: (mean, std), ...}}
+        
         Args:
-            predictions: Single-objective {name: (mean, std)} or 
-                        multi-objective {name: {obj: (mean, std), ...}} predictions
-            acquisition_function: One of available_acquisition_functions
-            objectives: Observed outcomes dict (required for EI and EHVI)
-            num_mc: MC samples for BoTorch acquisitions
-            kappa: For UCB, beta = kappa**2  
-            device: Torch device for computations
-            
-        Returns:
-            Dict mapping candidate names to acquisition scores
+            maximize: For single-objective, whether to maximize (True) or minimize (False).
+                     For multi-objective, use objective_directions parameter instead.
         """
-        if acquisition_function not in available_acquisition_functions:
-            raise ValueError(f"Unknown acquisition '{acquisition_function}'. Allowed: {available_acquisition_functions}")
 
-        # Handle simple acquisition functions first
-        if acquisition_function in ["mean", "standard_deviation"]:
-            return self._compute_simple_acquisition(predictions, acquisition_function, objectives, kappa)
-
-        # Handle BoTorch acquisition functions
-        items, obj_names, mu_np, sd_np = _predictions_to_arrays(predictions)
-        N, M = mu_np.shape
-        device = device or torch.device("cpu")
-
-        model = TablePosteriorModel(mu_np, sd_np, device=device, dtype=torch.double)
-        # indices tensor for candidates
-        idx_tensor = torch.arange(N, dtype=torch.long, device=device).unsqueeze(-1)  # [N, 1]
-
-        # Single-objective
-        if acquisition_function in {"expected_improvement", "upper_confidence_bound"}:
-            if M != 1:
-                raise ValueError(f"'{acquisition_function}' requires single-objective predictions.")
-            if acquisition_function == "expected_improvement":
-                if not objectives:
-                    raise ValueError("objectives is required for expected_improvement to compute best_f.")
-                Y_obs, _ = _objectives_to_tensor_and_indices(items, None, objectives)
-                if Y_obs.numel() == 0:
-                    raise ValueError("No overlap between objectives and predictions. Cannot compute best_f for expected_improvement.")
-                best_f = Y_obs.max().item()
-                sampler = SobolQMCNormalSampler(sample_shape=torch.Size([int(num_mc)]))
-                acq = qLogExpectedImprovement(model=model, best_f=best_f, sampler=sampler)
+        # Detect multiobjective if first value is a dict
+        first_val = next(iter(predictions.values()))
+        if isinstance(first_val, dict) and acquisition_function.startswith("parego_chebyshev"):
+            if acquisition_function == "parego_chebyshev_ei":
+                return self.parego_chebyshev_ei(predictions, **kwargs)
+            elif acquisition_function == "parego_chebyshev_ucb":
+                return self.parego_chebyshev_ucb(predictions, **kwargs)
             else:
-                beta = float(kappa ** 2)
-                acq = qUpperConfidenceBound(model=model, beta=beta)
+                raise ValueError(f"Unknown MOO acquisition {acquisition_function}")
 
-            scores = {}
-            with torch.no_grad():
-                for i, name in enumerate(items):
-                    x_i = idx_tensor[i : i + 1]          # [1, 1]
-                    val = acq(x_i).item()
-                    scores[name] = float(val)
-            return scores
-
-        # Multiobjective
-        if objectives is None:
-            raise ValueError(f"'objectives' is required for {acquisition_function}.")
-        if obj_names is None:
-            raise ValueError(f"'{acquisition_function}' requires multiobjective predictions.")
-
-        Y_obs, X_baseline = _objectives_to_tensor_and_indices(items, obj_names, objectives)
-        if Y_obs.numel() == 0:
-            raise ValueError("No overlap between objectives and predictions. Provide objectives for some candidates.")
-
-        if acquisition_function == "expected_hypervolume_improvement":
-            # Simplified EHVI: Compute hypervolume improvement heuristic for each candidate
-            # TODO: Replace with proper BoTorch qLogExpectedHypervolumeImprovement
-            
-            scores = {}
-            with torch.no_grad():
-                for i, name in enumerate(items):
-                    x_i = idx_tensor[i : i + 1]  # [1, 1]
-                    posterior = model.posterior(x_i)
-                    pred_mean = posterior.mean.squeeze(0)  # [M] - predicted mean for this candidate
-                    pred_point = pred_mean.numpy()
-                    current_points = Y_obs.numpy()  # [N_obs, M] - existing Pareto front
-                    
-                    # Hypervolume improvement heuristic based on dominance relationships
-                    dominates = np.all(pred_point >= current_points, axis=1)
-                    dominated_by = np.any(pred_point <= current_points, axis=1)
-                    
-                    if np.any(dominates):
-                        # Dominates existing points - highest value
-                        hv_improvement = 1.0 + np.sum(dominates)
-                    elif not np.any(dominated_by):
-                        # Non-dominated - medium value  
-                        hv_improvement = 1.0
-                    else:
-                        # Dominated - lower value based on distance to Pareto front
-                        min_distances = np.min(np.abs(current_points - pred_point), axis=0)
-                        hv_improvement = 1.0 / (1.0 + np.sum(min_distances))
-                    
-                    scores[name] = float(hv_improvement)
-            
-            return scores
-        else:
-            raise RuntimeError("Internal routing error.")
-
-    def _compute_simple_acquisition(
-        self, 
-        predictions: Dict[str, Tuple[float, float]], 
-        acquisition_function: str,
-        objectives: Optional[Dict[str, float]] = None,
-        kappa: float = 1.96
-    ) -> Dict[str, float]:
-        """Compute simple acquisition functions using only predictions."""
-        # Only handle single-objective predictions for simple functions
-        if not all(isinstance(v, tuple) and len(v) == 2 for v in predictions.values()):
-            raise ValueError(f"Simple acquisition function '{acquisition_function}' requires single-objective predictions.")
-        
+        # Single-objective path
         peptides = list(predictions.keys())
-        means = np.array([predictions[p][0] for p in peptides], dtype=float)
-        stds = np.array([predictions[p][1] for p in peptides], dtype=float)
+        means = np.array([predictions[p][0] for p in peptides])
+        stds  = np.array([predictions[p][1] for p in peptides])
         
-        if acquisition_function == "standard_deviation":
+        if acquisition_function == "expected_improvement":
+            return self.expected_improvement(peptides, means, stds, maximize=maximize)
+        elif acquisition_function == "upper_confidence_bound":
+            return self.upper_confidence_bound(peptides, means, stds, maximize=maximize, **kwargs)
+        elif acquisition_function == "probability_of_improvement":
+            return self.probability_of_improvement(peptides, means, stds, maximize=maximize)
+        elif acquisition_function == "standard_deviation":
             return self.standard_deviation(peptides, stds)
         elif acquisition_function == "mean":
-            return self.mean(peptides, means)
+            return self.mean(peptides, means, maximize=maximize)
         else:
-            raise ValueError(f"Unknown simple acquisition function: {acquisition_function}")
+            raise ValueError(f"Acquisition function '{acquisition_function}' not recognized.")
 
-    def standard_deviation(self, peptides: list, stds: np.ndarray):
-        """Standard deviation as an acquisition function. Pure exploration."""
+    def expected_improvement(self, peptides: list, means: np.ndarray, stds: np.ndarray, maximize: bool = True):
+        means = np.array(means, dtype=float)
+        stds = np.array(stds, dtype=float)
+
+        if maximize:
+            improvement = means - self.best_so_far_ei
+            current_best_pred = np.max(means)
+            if current_best_pred > self.best_so_far_ei:
+                self.best_so_far_ei = current_best_pred
+        else:
+            improvement = self.best_so_far_ei - means  # For minimization, improvement is negative of usual
+            current_best_pred = np.min(means)
+            if current_best_pred < self.best_so_far_ei:
+                self.best_so_far_ei = current_best_pred
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            Z = np.divide(improvement, stds, out=np.zeros_like(improvement), where=(stds > 1e-12))
+
+        ei = improvement * norm.cdf(Z) + stds * norm.pdf(Z)
+        ei[stds <= 1e-12] = 0.0
+
+        return {peptide: float(value) for peptide, value in zip(peptides, ei)}
+
+    def upper_confidence_bound(self, peptides: list, means, stds, kappa=1.96, maximize: bool = True):
+        means = np.array(means, dtype=float)
+        stds = np.array(stds, dtype=float)
+        
+        if maximize:
+            # For maximization: mean + kappa * std (optimistic upper bound)
+            ucb = means + kappa * stds
+        else:
+            # For minimization: mean - kappa * std (optimistic lower bound)
+            ucb = means - kappa * stds
+            
+        return {peptide: float(value) for peptide, value in zip(peptides, ucb)}
+
+    def probability_of_improvement(self, peptides, means, stds, maximize=True):
+        means = np.array(means, dtype=float)
+        stds = np.array(stds, dtype=float)
+
+        if maximize:
+            improvement = means - self.best_so_far_pi
+        else:
+            improvement = self.best_so_far_pi - means
+            
+        with np.errstate(divide="ignore", invalid="ignore"):
+            Z = np.divide(improvement, stds, out=np.zeros_like(improvement), where=(stds > 1e-12))
+        pi = norm.cdf(Z)
+        pi[stds <= 1e-12] = 0.0
+
+        if maximize:
+            current_best_pred = np.max(means)
+            if current_best_pred > self.best_so_far_pi:
+                self.best_so_far_pi = current_best_pred
+        else:
+            current_best_pred = np.min(means)
+            if current_best_pred < self.best_so_far_pi:
+                self.best_so_far_pi = current_best_pred
+
+        return {peptide: float(value) for peptide, value in zip(peptides, pi)}
+
+    def standard_deviation(self, peptides, stds):
         return {peptide: float(std) for peptide, std in zip(peptides, stds)}
 
-    def mean(self, peptides: list, means: np.ndarray):
-        """Mean as an acquisition function (pure exploitation)."""
+    def mean(self, peptides, means, maximize=True):
         return {peptide: float(mean) for peptide, mean in zip(peptides, means)}
 
+    def _extract_arrays(self, predictions_moo: dict, objective_order: list | None):
+        """Return peptides, obj_names, means [N,M], stds [N,M]."""
+        peptides = list(predictions_moo.keys())
+        if objective_order is None:
+            obj_names = list(next(iter(predictions_moo.values())).keys())
+        else:
+            obj_names = list(objective_order)
+
+        N = len(peptides)
+        M = len(obj_names)
+        means = np.zeros((N, M), dtype=float)
+        stds  = np.zeros((N, M), dtype=float)
+        for i, p in enumerate(peptides):
+            for j, o in enumerate(obj_names):
+                m, s = predictions_moo[p][o]
+                means[i, j] = float(m)
+                stds[i, j]  = float(s)
+        return peptides, obj_names, means, stds
+
+    def _update_ref_points(self, means: np.ndarray, directions: np.ndarray):
+        """
+        Update running ideal and nadir using current predictive means.
+        directions: +1 for maximize, -1 for minimize
+        We convert to minimization internally by flipping maximizing objectives.
+        """
+        # Convert to minimization space
+        Y = means.copy()
+        Y[:, directions == 1] *= -1.0
+
+        z_star = np.min(Y, axis=0)
+        z_nadir = np.max(Y, axis=0)
+
+        if self._ideal is None:
+            self._ideal = z_star
+            self._nadir = z_nadir
+        else:
+            self._ideal = np.minimum(self._ideal, z_star)
+            self._nadir = np.maximum(self._nadir, z_nadir)
+
+        # Guard against zero range
+        span = np.maximum(self._nadir - self._ideal, 1e-12)
+        return self._ideal, self._nadir, span
+
+    def _normalize_min_space(self, samples: np.ndarray, ideal: np.ndarray, span: np.ndarray):
+        """
+        Normalize in minimization space to [0,1] roughly.
+        samples shape: [..., M]
+        """
+        return (samples - ideal) / span
+
+    def _aug_tchebycheff(self, f_norm: np.ndarray, lam: np.ndarray, rho: float = 0.05):
+        """
+        f_norm shape: [..., M] in minimization space
+        lam shape: [M]
+        """
+        cheb = np.max(lam * f_norm, axis=-1)
+        aug = cheb + rho * np.sum(lam * f_norm, axis=-1)
+        return aug
+
+    def parego_chebyshev_ei(
+        self,
+        predictions_moo: dict,
+        objective_order: list | None = None,
+        objective_directions: dict | None = None,
+        weights: np.ndarray | None = None,
+        rho: float = 0.05,
+        n_mc: int = 256,
+        best_scalar_so_far: float | None = None,
+        rng_seed: int | None = None,
+    ):
+        """
+        ParEGO using augmented Tchebycheff scalarization with EI computed by Monte Carlo.
+
+        predictions_moo: {peptide: {obj: (mean, std), ...}, ...}
+        objective_directions: {obj: "max" or "min"}; default = "max" for all
+        weights: optional simplex weights; default = random simplex
+        best_scalar_so_far: running best value of the scalarized objective in minimization space.
+                            If None, it will be estimated from current means.
+        """
+        rng = self.rng if rng_seed is None else np.random.default_rng(rng_seed)
+
+        peptides, obj_names, means, stds = self._extract_arrays(predictions_moo, objective_order)
+        M = len(obj_names)
+        N = len(peptides)
+
+        # Directions
+        if objective_directions is None:
+            directions = np.ones(M, dtype=int)  # maximize by default
+        else:
+            directions = np.array([1 if objective_directions[o].lower().startswith("max") else -1 for o in obj_names], dtype=int)
+
+        # Update reference points and spans using means
+        ideal, nadir, span = self._update_ref_points(means, directions)
+
+        # Choose weights
+        lam = _simplex_random_weights(M, rng) if weights is None else np.asarray(weights, dtype=float)
+        lam = np.maximum(lam, 1e-9)
+        lam /= np.sum(lam)
+
+        # Build Monte Carlo samples of objectives at each candidate
+        # Convert to minimization space: if direction is maximize, flip sign
+        flip = np.where(directions == 1, -1.0, 1.0)  # +1 maximize -> multiply by -1
+        # samples: [N, n_mc, M]
+        eps = rng.standard_normal(size=(N, n_mc, M))
+        samples = means[:, None, :] + stds[:, None, :] * eps
+        samples = samples * flip  # to minimization
+        # normalize
+        samples_norm = self._normalize_min_space(samples, ideal, span)
+
+        # Scalarize each sample
+        g_samples = self._aug_tchebycheff(samples_norm, lam, rho=rho)  # [N, n_mc], lower is better
+
+        # Current scalarized mean estimate to set baseline if needed
+        means_min = means * flip
+        means_norm = self._normalize_min_space(means_min, ideal, span)
+        g_mean = self._aug_tchebycheff(means_norm, lam, rho=rho)  # [N]
+
+        if best_scalar_so_far is None:
+            # For EI we need a baseline to improve on. Use the best current mean scalarization.
+            best_scalar_so_far = float(np.min(g_mean))
+
+        # Improvement in minimization: I = max(0, best_so_far - g)
+        improv = np.maximum(0.0, best_scalar_so_far - g_samples)
+        ei = np.mean(improv, axis=1)
+
+        return {peptides[i]: float(ei[i]) for i in range(N)}
+
+    def parego_chebyshev_ucb(
+        self,
+        predictions_moo: dict,
+        objective_order: list | None = None,
+        objective_directions: dict | None = None,
+        weights: np.ndarray | None = None,
+        rho: float = 0.05,
+        kappa: float = 1.0,
+    ):
+        """
+        Fast surrogate: UCB in Chebyshev space.
+        Build an optimistic point per objective, normalize, then Chebyshev scalarize.
+        """
+        peptides, obj_names, means, stds = self._extract_arrays(predictions_moo, objective_order)
+        M = len(obj_names)
+        N = len(peptides)
+
+        # Directions
+        if objective_directions is None:
+            directions = np.ones(M, dtype=int)
+        else:
+            directions = np.array([1 if objective_directions[o].lower().startswith("max") else -1 for o in obj_names], dtype=int)
+
+        # Update reference points
+        ideal, nadir, span = self._update_ref_points(means, directions)
+
+        # We form optimistic points in minimization space
+        flip = np.where(directions == 1, -1.0, 1.0)
+
+        # For minimization, LCB = mean - kappa*std; for maximization, UCB = mean + kappa*std
+        # After flipping to minimization space, a single formula works:
+        optimistic = means + (directions * kappa) * stds  # maximize -> mean + kappa*std, minimize -> mean - kappa*std
+        optimistic_min = optimistic * flip
+        optimistic_norm = self._normalize_min_space(optimistic_min, ideal, span)
+
+        lam = _simplex_random_weights(M, self.rng) if weights is None else np.asarray(weights, dtype=float)
+        lam = np.maximum(lam, 1e-9)
+        lam /= np.sum(lam)
+
+        g_ucb = self._aug_tchebycheff(optimistic_norm, lam, rho=rho)
+        # We return negative because higher acquisition is better in your API
+        scores = -g_ucb
+        return {peptides[i]: float(scores[i]) for i in range(N)}
 
 
 if __name__ == "__main__":
-    """Demo of acquisition functions."""
-    acq = AcquisitionFunction()
-    
-    # Single-objective test data
-    preds = {"p1": (0.2, 0.1), "p2": (0.5, 0.2), "p3": (0.3, 0.05)}
-    objs = {"p1": 0.1, "p3": 0.25}
-    
-    # Multi-objective test data
-    preds_mo = {
-        "p1": {"objA": (0.2, 0.1), "objB": (0.7, 0.2)},
-        "p2": {"objA": (0.6, 0.2), "objB": (0.4, 0.1)},
-        "p3": {"objA": (0.3, 0.05), "objB": (0.5, 0.15)},
-    }
-    objs_mo = {
-        "p1": {"objA": 0.10, "objB": 0.65},
-        "p3": {"objA": 0.25, "objB": 0.45},
-    }
-    
-    # Test all acquisition functions
-    scores_ei = acq.compute_acquisition(preds, "expected_improvement", objectives=objs)
-    scores_ucb = acq.compute_acquisition(preds, "upper_confidence_bound", kappa=1.96)
-    scores_ehvi = acq.compute_acquisition(preds_mo, "expected_hypervolume_improvement", objectives=objs_mo)
-    scores_std = acq.compute_acquisition(preds, "standard_deviation")
-    scores_mean = acq.compute_acquisition(preds, "mean")
-
-    print("Expected Improvement:", scores_ei)
-    print("Upper Confidence Bound:", scores_ucb)
-    print("Expected Hypervolume Improvement:", scores_ehvi)
-    print("Standard Deviation:", scores_std)
-    print("Mean:", scores_mean)
+    pass
