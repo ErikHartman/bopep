@@ -9,7 +9,7 @@ from bopep.scoring.scorer import Scorer
 from bopep.surrogate_model import SurrogateModelManager
 from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.search.utils import _validate_surrogate_model_kwargs
-from bopep.search.acquisition_functions import AcquisitionFunction
+from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.logging.logger import Logger
 from bopep.genetic_algorithm.mutate import PeptideMutator
 import torch

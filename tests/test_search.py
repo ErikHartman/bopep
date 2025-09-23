@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from bopep.search.acquisition_functions import AcquisitionFunction
+from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.search.selection import PeptideSelector
 
 

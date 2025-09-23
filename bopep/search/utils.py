@@ -3,7 +3,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Union
 import torch
 
-from bopep.search.acquisition_functions import available_acquistion_functions
+from bopep.bayes.acquisition import available_acquisition_functions
 
 def _save_model(save_path: str, model, surrogate_model_kwargs: dict, best_hyperparams: dict):
         """
@@ -94,10 +94,10 @@ def _validate_args(
         if "acquisition" not in phase:
             raise ValueError(f"Phase {idx} missing required key 'acquisition'")
 
-        if phase["acquisition"] not in available_acquistion_functions:
+        if phase["acquisition"] not in available_acquisition_functions:
             raise ValueError(
                 f"Invalid acquisition function in phase {idx}: {phase['acquisition']}. "
-                f"Must be one of: {', '.join(available_acquistion_functions)}"
+                f"Must be one of: {', '.join(available_acquisition_functions)}"
             )
 
         if "iterations" not in phase:
