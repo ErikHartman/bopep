@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.stats import norm
+from typing import Dict, List, Optional, Union
 
 available_acquisition_functions = [
     "expected_improvement",
@@ -135,7 +136,7 @@ class AcquisitionFunction:
     def mean(self, peptides, means, maximize=True):
         return {peptide: float(mean) for peptide, mean in zip(peptides, means)}
 
-    def _extract_arrays(self, predictions_moo: dict, objective_order: list | None):
+    def _extract_arrays(self, predictions_moo: dict, objective_order: Union[list, None]):
         """Return peptides, obj_names, means [N,M], stds [N,M]."""
         peptides = list(predictions_moo.keys())
         if objective_order is None:
@@ -197,13 +198,13 @@ class AcquisitionFunction:
     def parego_chebyshev_ei(
         self,
         predictions_moo: dict,
-        objective_order: list | None = None,
-        objective_directions: dict | None = None,
-        weights: np.ndarray | None = None,
+        objective_order: Union[list, None] = None,
+        objective_directions: Union[dict, None] = None,
+        weights: Union[np.ndarray, None] = None,
         rho: float = 0.05,
         n_mc: int = 256,
-        best_scalar_so_far: float | None = None,
-        rng_seed: int | None = None,
+        best_scalar_so_far: Union[float, None] = None,
+        rng_seed: Union[int, None] = None,
     ):
         """
         ParEGO using augmented Tchebycheff scalarization with EI computed by Monte Carlo.
@@ -265,9 +266,9 @@ class AcquisitionFunction:
     def parego_chebyshev_ucb(
         self,
         predictions_moo: dict,
-        objective_order: list | None = None,
-        objective_directions: dict | None = None,
-        weights: np.ndarray | None = None,
+        objective_order: Union[list, None] = None,
+        objective_directions: Union[dict, None] = None,
+        weights: Union[np.ndarray, None] = None,
         rho: float = 0.05,
         kappa: float = 1.0,
     ):
