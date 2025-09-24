@@ -40,7 +40,6 @@ def main():
     boga = BoGA(
         # Target and sequence parameters
         target_structure_path=target_structure_path,
-        schedule=schedule,    # New schedule parameter
         initial_sequences=starting_sequence,  # Single sequence to mutate
         min_sequence_length=8,
         max_sequence_length=25,
@@ -112,8 +111,8 @@ def main():
     print(f"Surrogate model: MLP + Deep Evidential Regression")
     print(f"Objective function: bopep_objective_v1")
     print(f"Initial population: {boga.n_init} sequences")
-    print(f"Schedule phases: {len(boga.schedule)}")
-    for i, phase in enumerate(boga.schedule, 1):
+    print(f"Schedule phases: {len(schedule)}")
+    for i, phase in enumerate(schedule, 1):
         print(f"  Phase {i}: {phase['acquisition']} for {phase['generations']} generations (m_select={phase['m_select']}, k_pool={phase['k_pool']}, mutation={phase['mutation_mode']})")
 
     print(f"Logging enabled: {boga.logger is not None}")
@@ -123,7 +122,7 @@ def main():
     
     # Run the genetic algorithm
     print("Starting BoGA optimization...")
-    final_results = boga.run()
+    final_results = boga.run(schedule=schedule)
     
     # Display results
     print("\n" + "="*60)

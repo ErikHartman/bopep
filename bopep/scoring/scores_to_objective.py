@@ -32,7 +32,13 @@ class ScoresToObjective:
             objective_function = bopep_objective_v1
         return objective_function(scores, **kwargs)
     
-    
+
+def mo_objective(scores: dict) -> dict:
+    objectives = {}
+    for pep, ps in scores.items():
+        objectives[pep] = {"interface_dG": ps["interface_dG"], "iptm": ps["iptm"]}
+    return objectives
+
 def bopep_objective_v1(scores: dict) -> dict:
     """
     regression_equation_string = "-rosetta_score - (distance_score + 3.0185924)*(interface_dG - 2.4250882)"

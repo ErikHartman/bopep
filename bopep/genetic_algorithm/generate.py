@@ -9,7 +9,7 @@ from bopep.scoring.scorer import Scorer
 from bopep.surrogate_model import SurrogateModelManager
 from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.search.utils import _validate_surrogate_model_kwargs
-from bopep.search.acquisition_functions import AcquisitionFunction
+from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.logging.logger import Logger
 from bopep.genetic_algorithm.mutate import PeptideMutator
 import torch
@@ -21,7 +21,6 @@ class BoGA:
     def __init__(
         self,
         target_structure_path: str,
-        schedule: List[Dict[str, Any]],
         initial_sequences: Union[str, List[str]],
 
         n_init : int = 130,
@@ -62,7 +61,6 @@ class BoGA:
         self.max_sequence_length = max_sequence_length
         self.min_sequence_length = min_sequence_length
         self.n_init = n_init
-        self.schedule = schedule
         self.objective_function = objective_function
         self.objective_function_kwargs = objective_function_kwargs or {}
         self.scoring_kwargs = scoring_kwargs
@@ -256,7 +254,7 @@ class BoGA:
             iteration=iteration
         )
 
-    def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Tuple[float, Dict[str, Any]]:
+    def _train_model(self, embeddings: Dict[str, Any], objectives: Dict[str, float]) -> Dict[str, Any]:
         """
         Train the model with automatic validation split. Manager decides whether to validate based on sample size.
         """
@@ -271,8 +269,14 @@ class BoGA:
     def _select_top_objectives(self, objectives: Dict[str, float], k: int) -> List[str]:
         return [seq for seq, _ in sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:k]]
 
-    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str) -> List[str]:
-        acquisition_values = self.acquisition_function_obj.compute_acquisition(predictions, acquisition_function)
+    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
+        if acquisition_kwargs is None:
+            acquisition_kwargs = {}
+        acquisition_values = self.acquisition_function_obj.compute_acquisition(
+            predictions, 
+            acquisition_function, 
+            **acquisition_kwargs
+        )
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
     def _configure_mutation_for_phase(self, phase: Dict[str, Any], phase_index: int, objectives: Dict[str, float]) -> None:
@@ -322,7 +326,7 @@ class BoGA:
         
         return scores, evaluated_sequences, last_iteration
 
-    def run(self) -> Dict[str, float]:
+    def run(self, schedule: List[Dict[str, Any]]) -> Dict[str, float]:
         if self.continue_from_logs:
             print(f"Loading previous results from {self.continue_from_logs}")
             scores, self._evaluated_sequences, last_iteration = self._load_from_logs(self.continue_from_logs)
@@ -373,7 +377,7 @@ class BoGA:
 
         # Run through schedule phases
         global_generation = last_iteration  # Continue from last iteration when resuming
-        for phase_index, phase in enumerate(self.schedule, start=1):
+        for phase_index, phase in enumerate(schedule, start=1):
             acquisition_function = phase['acquisition']
             generations = phase['generations']
             m_select = phase['m_select']
@@ -405,7 +409,7 @@ class BoGA:
                 training_embeddings, candidate_embeddings = self._embed_generation(scored_seqs, pool)
 
                 # Init fresh model with training embeddings to determine input_dim
-                self.surrogate_manager.initialize_model(embeddings=training_embeddings)
+                self.surrogate_manager.initialize_model(embeddings=training_embeddings, objectives=objectives)
 
                 # Train surrogate or model only based on interval
                 if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0:
@@ -413,13 +417,17 @@ class BoGA:
                     self._optimize_hyperparameters(training_embeddings, objectives, iteration=global_generation)
 
                 print("Training surrogate model...")
-                val_loss, metrics = self._train_model(training_embeddings, objectives)
+                metrics = self._train_model(training_embeddings, objectives)
+
+                # Extract loss - use validation loss if available, otherwise training loss
+                loss = metrics["val_mse"] if metrics["val_mse"] is not None else metrics["train_mse"]
 
                 # Predict on pool using candidate embeddings
                 preds = self.surrogate_manager.predict(candidate_embeddings)
 
                 # Select candidates using acquisition function
-                candidates = self._select_top_predictions(preds, m_select, acquisition_function)
+                acquisition_kwargs = phase.get("acquisition_kwargs", {})
+                candidates = self._select_top_predictions(preds, m_select, acquisition_function, acquisition_kwargs)
 
                 print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
 
@@ -430,7 +438,7 @@ class BoGA:
                 new_objectives = self.scores_to_objective.create_objective(new_scores, self.objective_function, **self.objective_function_kwargs)
                 
                 if self.logger:
-                    self.logger.log_model_metrics(val_loss, iteration=global_generation, metrics=metrics)
+                    self.logger.log_model_metrics(loss, iteration=global_generation, metrics=metrics)
                     self.logger.log_scores(new_scores, iteration=global_generation, acquisition_name=acquisition_function)
                     self.logger.log_objectives(new_objectives, iteration=global_generation, acquisition_name=acquisition_function)
                     

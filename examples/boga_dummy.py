@@ -4,7 +4,10 @@ BoGA (Genetic Algorithm) Example with Mocked Docking/Scoring
 
 This example demonstrates:
 1. Basic BoGA usage with fast surrogate models and mocked operations
-2. Continuation from previous runs using log-based checkpointing
+2. Continuation from previous runs using log-based ch                # Continuation settings
+                continue_from_logs=previous_log_dir,  # Load from previous run
+                log_dir=continue_log_dir,
+            )ting
 
 The example uses patching to simulate expensive docking/scoring operations,
 making it suitable for testing and development without Docker dependencies.
@@ -107,13 +110,15 @@ def run_basic_example():
         with patch('bopep.docking.docker.Docker.dock_peptides', mock_dock_peptides), \
              patch('bopep.scoring.scorer.Scorer.score_batch', mock_score_batch):
             
+            # Define the optimization schedule
+            schedule = [
+                {"acquisition": "expected_improvement", "generations": 3, "m_select": 5, "k_pool": 20, "mutation_mode": "uniform"},
+                {"acquisition": "upper_confidence_bound", "generations": 2, "m_select": 3, "k_pool": 15, "mutation_mode": "blosum"},
+            ]
+            
             # Create BoGA instance
             boga = BoGA(
                 target_structure_path=dummy_pdb,  # Use dummy PDB file
-                schedule=[
-                    {"acquisition": "expected_improvement", "generations": 3, "m_select": 5, "k_pool": 20},
-                    {"acquisition": "upper_confidence_bound", "generations": 2, "m_select": 3, "k_pool": 15},
-                ],
                 initial_sequences=["ACDEFGHIKLMN", "FYWLIV"],  # Starter sequences
                 n_init=8,
                 min_sequence_length=8,
@@ -126,6 +131,7 @@ def run_basic_example():
                     'hidden_sizes': [64, 32],
                     'dropout_rate': 0.1,
                     'n_epochs': 10,  # Fast training
+                    'hpo_interval': 3,  # Tune every 3 generations
                 },
                 
                 # Custom objective
@@ -149,16 +155,13 @@ def run_basic_example():
                 
                 # Logging
                 log_dir=log_dir,
-                
-                # Hyperparameter tuning
-                hpo_interval=3,  # Tune every 3 generations
             )
             
             print(f"Starting basic BoGA run...")
             print(f"Logs will be saved to: {log_dir}")
             
             # Run the optimization
-            results = boga.run()
+            results = boga.run(schedule=schedule)
             
             print(f"\n=== BASIC EXAMPLE RESULTS ===")
             print(f"Total sequences evaluated: {len(results)}")
@@ -197,13 +200,15 @@ def run_continuation_example(previous_log_dir):
         with patch('bopep.docking.docker.Docker.dock_peptides', mock_dock_peptides), \
              patch('bopep.scoring.scorer.Scorer.score_batch', mock_score_batch):
             
+            # Define the continuation schedule
+            continuation_schedule = [
+                {"acquisition": "probability_of_improvement", "generations": 2, "m_select": 4, "k_pool": 15, "mutation_mode": "blosum"},  # Different acquisition strategy
+                {"acquisition": "expected_improvement", "generations": 2, "m_select": 3, "k_pool": 12, "mutation_mode": "uniform"},
+            ]
+            
             # Create BoGA instance for continuation
             boga_continue = BoGA(
                 target_structure_path=dummy_pdb,  # Use dummy PDB file
-                schedule=[
-                    {"acquisition": "probability_of_improvement", "generations": 2, "m_select": 4, "k_pool": 15},  # Different acquisition strategy
-                    {"acquisition": "expected_improvement", "generations": 2, "m_select": 3, "k_pool": 12},
-                ],
                 initial_sequences=["DUMMY"],  # Won't be used when continuing
                 n_init=5,  # Won't be used when continuing
                 
@@ -214,6 +219,7 @@ def run_continuation_example(previous_log_dir):
                     'hidden_sizes': [64, 32],
                     'dropout_rate': 0.1,
                     'n_epochs': 10,
+                    'hpo_interval': 2,  # Tune every 2 generations
                 },
                 
                 # Custom objective
@@ -238,9 +244,6 @@ def run_continuation_example(previous_log_dir):
                 # Continuation settings
                 continue_from_logs=previous_log_dir,  # Load from previous run
                 log_dir=continue_log_dir,  # New log directory
-                
-                # Hyperparameter tuning
-                hpo_interval=2,
             )
             
             print(f"Starting continuation run...")
@@ -248,7 +251,7 @@ def run_continuation_example(previous_log_dir):
             print(f"New logs will be saved to: {continue_log_dir}")
             
             # Run the continued optimization
-            results = boga_continue.run()
+            results = boga_continue.run(schedule=continuation_schedule)
             
             print(f"\n=== CONTINUATION RESULTS ===")
             print(f"Total sequences evaluated: {len(results)}")

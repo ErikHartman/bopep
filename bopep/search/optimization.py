@@ -7,7 +7,7 @@ from bopep.docking.docker import Docker
 from bopep.scoring.scorer import Scorer
 from bopep.surrogate_model.manager import SurrogateModelManager
 from bopep.logging.logger import Logger
-from bopep.search.acquisition_functions import AcquisitionFunction
+from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.search.utils import (_validate_dependencies, _validate_args, _validate_surrogate_model_kwargs)
 from bopep.search.structure_utils import _check_binding_site_residue_indices
 from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
@@ -116,6 +116,8 @@ class BoPep:
         Args:
             schedule: List of dictionaries defining the optimization phases.
                 Each dict should have 'acquisition' and 'iterations' keys.
+                Optionally can include 'acquisition_kwargs' for multi-objective
+                acquisition functions (e.g., parego_chebyshev_ei).
             batch_size: Number of peptides to dock in each iteration.
             target_structure_path: Path to the target structure PDB file.
             embeddings: Dictionary of peptide embeddings {peptide: embedding}. Required for fresh initialization.
@@ -246,7 +248,7 @@ class BoPep:
         )
         
         # Initialize the model with optimized hyperparameters
-        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs)
+        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs, objectives)
         
         # Save initial checkpoint
         logging.info("Creating initial checkpoint")
@@ -313,7 +315,7 @@ class BoPep:
         )
         
         # Initialize the model with optimized hyperparameters
-        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs)
+        self.surrogate_manager.initialize_model(self.best_hyperparams, docked_embs, objectives)
 
         # Save initial checkpoint for continued run
         logging.info("Creating initial checkpoint for continued run")
@@ -353,12 +355,13 @@ class BoPep:
                 # Initialize fresh model for each iteration
                 # Use embeddings from current docked peptides for initialization
                 current_docked_embs = {p: self.embeddings[p] for p in self.docked_peptides}
-                self.surrogate_manager.initialize_model(self.best_hyperparams, current_docked_embs)
-
+                
                 # Turn scores into a scalarized score dict of peptide: score
                 objectives = self.scores_to_objective.create_objective(
                     scores, self.objective_function, **self.objective_function_kwargs
                 )
+                
+                self.surrogate_manager.initialize_model(self.best_hyperparams, current_docked_embs, objectives)
 
                 # Log the new objective values
                 new_objective_peptides = set(objectives.keys()) - all_logged_objectives
@@ -387,7 +390,7 @@ class BoPep:
                         random_state=self.hpo_kwargs.get("random_state", 42),
                         iteration=global_iteration
                     )
-                    self.surrogate_manager.initialize_model(embeddings=docked_embeddings)
+                    self.surrogate_manager.initialize_model(embeddings=docked_embeddings, objectives=objectives)
 
                     # Log hyperparameters
                     if self.surrogate_manager.best_hyperparams:
@@ -403,13 +406,16 @@ class BoPep:
                 )
 
                 # Train the model with automatic (optional) validation split
-                loss, metrics = self.surrogate_manager.train_with_validation_split(
+                metrics = self.surrogate_manager.train_with_validation_split(
                     embeddings=docked_embeddings,
                     objectives=objectives,
                     validation_size=n_validate,
                     min_training_samples=self.MIN_TRAINING_SAMPLES,
                     min_validation_samples=self.MIN_VALIDATION_SAMPLES
                 )
+
+                # Extract loss - use validation loss if available, otherwise training loss
+                loss = metrics["val_mse"] if metrics["val_mse"] is not None else metrics["train_mse"]
 
                 # Log the loss and metrics
                 self.logger.log_model_metrics(loss, global_iteration, metrics)
@@ -424,9 +430,11 @@ class BoPep:
                 self.logger.log_predictions(predictions, global_iteration)
 
                 # Compute acquisition
+                acquisition_kwargs = phase.get("acquisition_kwargs", {})
                 acquisition_values = self.acquisition_function_obj.compute_acquisition(
                     predictions=predictions,
                     acquisition_function=acquisition,
+                    **acquisition_kwargs
                 )  # acquisition_values is {peptide: acquisition_value}
 
                 # Log acquisition

@@ -53,11 +53,15 @@ class VariableLengthDataset(Dataset):
     """
     Stores (embedding, score) pairs.
     Each embedding can have shape (D,) for MLP or (L, D) for a variable-length embedding.
-    Scores can be single values (float) or multiple values (List[float]) for multi-objective.
+    
+    Supported objective formats:
+    - Single objective: Dict[str, float] -> {peptide: score, peptide: score}
+    - Multi objective: Dict[str, Dict[str, float]] -> {peptide: {name: score, name: score}}
     """
 
     def __init__(
-        self, embedding_dict: Dict[str, np.ndarray], objective_dict: Dict[str, Union[float, List[float]]]
+        self, embedding_dict: Dict[str, np.ndarray], 
+        objective_dict: Dict[str, Union[float, Dict[str, float]]]
     ):
         super().__init__()
         self.peptides = list(embedding_dict.keys())
@@ -65,13 +69,19 @@ class VariableLengthDataset(Dataset):
             torch.tensor(embedding_dict[p], dtype=torch.float32) for p in self.peptides
         ]
         
-        # Handle both single and multi-objective scores
+        # Handle different objective formats
         self.scores = []
         for p in self.peptides:
             score = objective_dict[p]
-            if isinstance(score, (list, np.ndarray)):
-                # Multi-objective: convert list to tensor
-                self.scores.append(torch.tensor(score, dtype=torch.float32))
+            
+            if isinstance(score, dict):
+                # Multi-objective: extract values from dict {obj_name: score}
+                score_values = []
+                for obj_name in sorted(score.keys()):  # Sort for consistent ordering
+                    obj_val = score[obj_name]
+                    score_values.append(obj_val)
+                self.scores.append(torch.tensor(score_values, dtype=torch.float32))
+                
             else:
                 # Single objective: convert float to tensor
                 self.scores.append(torch.tensor(score, dtype=torch.float32))
@@ -125,13 +135,15 @@ class BasePredictionModel(torch.nn.Module):
     """
     def __init__(self):
         super().__init__()
+        self._objective_names = None  # Store objective names for named multi-objective
+        self._is_named_multiobjective = False
 
     def fit_dict(
         self,
         embedding_dict: Dict[str, np.ndarray],
-        objective_dict: Dict[str, Union[float, List[float]]],
+        objective_dict: Dict[str, Union[float, Dict[str, float]]],
         val_embedding_dict: Optional[Dict[str, np.ndarray]] = None,
-        val_objective_dict: Optional[Dict[str, Union[float, List[float]]]] = None,
+        val_objective_dict: Optional[Dict[str, Union[float, Dict[str, float]]]] = None,
         epochs: int = 100,
         batch_size: int = 32,
         learning_rate: float = 1e-3,
@@ -145,7 +157,9 @@ class BasePredictionModel(torch.nn.Module):
 
         Args:
             embedding_dict: {peptide: embedding_array}
-            objective_dict: {peptide: score} for single-objective or {peptide: [score1, score2, ...]} for multi-objective
+            objective_dict: {peptide: score} for single-objective, 
+                          {peptide: [score1, score2, ...]} for multi-objective, or
+                          {peptide: {"obj1": (mean, std), "obj2": (mean, std)}} for named multi-objective
             val_embedding_dict: Optional validation embeddings
             val_objective_dict: Optional validation scores (same format as objective_dict)
             epochs: Number of training epochs
@@ -163,6 +177,16 @@ class BasePredictionModel(torch.nn.Module):
         early stopping and LR scheduling are based on val_loss. Otherwise,
         training-only early stopping is used on training loss.
         """
+        # Detect and store objective format
+        sample_objective = next(iter(objective_dict.values()))
+        if isinstance(sample_objective, dict):
+            # Named multi-objective
+            self._is_named_multiobjective = True
+            self._objective_names = sorted(sample_objective.keys())  # Sort for consistent ordering
+        else:
+            self._is_named_multiobjective = False
+            self._objective_names = None
+            
         if device is None:
             device = next(self.parameters()).device
         if criterion is None:
@@ -305,7 +329,8 @@ class BasePredictionModel(torch.nn.Module):
             
         Returns:
             For single objective: {pep: (mean, std), ...}
-            For multi-objective: {pep: ([mean1, mean2, ...], [std1, std2, ...]), ...}
+            For named multi-objective: {pep: {obj_name: (mean, std), ...}, ...}
+            For legacy multi-objective: {pep: ([mean1, mean2, ...], [std1, std2, ...]), ...}
         """
 
         if device is None:
@@ -352,22 +377,24 @@ class BasePredictionModel(torch.nn.Module):
         
         predictions_dict = {}
         
-        if n_objectives == 1:
+        if self._is_named_multiobjective and self._objective_names:
+            # Named multi-objective: return dict of {obj_name: (mean, std)} for each peptide
+            mean_array = all_means.numpy()  # Shape: (n_peptides, n_objectives)
+            std_array = all_stds.numpy()
+            
+            for i, pep in enumerate(peptides):
+                obj_predictions = {}
+                for j, obj_name in enumerate(self._objective_names):
+                    obj_predictions[obj_name] = (float(mean_array[i, j]), float(std_array[i, j]))
+                predictions_dict[pep] = obj_predictions
+                
+        elif n_objectives == 1:
             # Single objective: convert to (mean, std) tuples
             mean_array = all_means.view(-1).numpy()
             std_array = all_stds.view(-1).numpy()
             
             for i, pep in enumerate(peptides):
                 predictions_dict[pep] = (float(mean_array[i]), float(std_array[i]))
-        else:
-            # Multi-objective: convert to ([means], [stds]) tuples
-            mean_array = all_means.numpy()  # Shape: (n_peptides, n_objectives)
-            std_array = all_stds.numpy()
-            
-            for i, pep in enumerate(peptides):
-                mean_values = [float(mean_array[i, j]) for j in range(n_objectives)]
-                std_values = [float(std_array[i, j]) for j in range(n_objectives)]
-                predictions_dict[pep] = (mean_values, std_values)
 
         return predictions_dict
     
