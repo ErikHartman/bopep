@@ -309,4 +309,12 @@ class AcquisitionFunction:
 
 
 if __name__ == "__main__":
-    pass
+    # example
+    acq = AcquisitionFunction()
+    preds = {
+        "pep1": {"obj1": (0.5, 0.1), "obj2": (1.0, 0.2)},
+        "pep2": {"obj1": (0.6, 0.15), "obj2": (0.9, 0.25)},
+        "pep3": {"obj1": (0.4, 0.05), "obj2": (1.1, 0.1)},
+    }
+    print(acq.parego_chebyshev_ei(preds))
+    print(acq.parego_chebyshev_ucb(preds))

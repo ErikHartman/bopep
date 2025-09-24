@@ -7,7 +7,6 @@ statsmodels
 tqdm
 joblib
 torch
-botorch
 biopython
 fair-esm
 pytest>=6.0
