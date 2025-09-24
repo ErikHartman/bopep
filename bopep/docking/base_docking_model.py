@@ -90,11 +90,21 @@ class BaseDockingModel(ABC):
         # Process raw output to standardized format
         processed_dirs = []
         print(f"Processing {len(raw_docked_dirs)} docked structures...")
-        for i, (raw_dir, peptide) in enumerate(zip(raw_docked_dirs, peptides_to_dock), 1):
-            if os.path.exists(raw_dir):
-                print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {peptide}")
-                processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
-                processed_dirs.append(processed_dir)
+        
+        if len(self.gpu_ids) > 1 and len(peptides_to_dock) > 1:
+            # Parallel processing case: raw_docked_dirs contains (peptide, raw_dir) tuples
+            for i, (peptide, raw_dir) in enumerate(raw_docked_dirs, 1):
+                if raw_dir and os.path.exists(raw_dir):
+                    print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {peptide}")
+                    processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
+                    processed_dirs.append(processed_dir)
+        else:
+            # Sequential processing case: raw_docked_dirs contains just raw directories
+            for i, (raw_dir, peptide) in enumerate(zip(raw_docked_dirs, peptides_to_dock), 1):
+                if raw_dir and os.path.exists(raw_dir):
+                    print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {peptide}")
+                    processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
+                    processed_dirs.append(processed_dir)
         
         # Combine with previously docked results
         all_processed_dirs = processed_dirs + previously_docked_dirs
@@ -161,12 +171,12 @@ class BaseDockingModel(ABC):
         
         print(f"Starting parallel docking across {len(process_args)} GPU processes...")
         with context.Pool(processes=len(process_args)) as pool:
-            all_docked_dirs = pool.starmap(self._dock_peptides_for_gpu, process_args)
+            all_docked_results = pool.starmap(self._dock_peptides_for_gpu, process_args)
         
-        # Flatten the list of lists
-        flattened_dirs = [dir_path for dirs in all_docked_dirs for dir_path in dirs]
-        print(f"Parallel docking complete! Processed {len(flattened_dirs)} peptides.")
-        return flattened_dirs
+        # Flatten the list of lists - each result is now (peptide, raw_dir) tuple
+        flattened_results = [result for results in all_docked_results for result in results]
+        print(f"Parallel docking complete! Processed {len(flattened_results)} peptides.")
+        return flattened_results
     
     @abstractmethod
     def _get_method_parameters(self) -> dict:
@@ -176,7 +186,13 @@ class BaseDockingModel(ABC):
     @abstractmethod
     def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
                               target_sequence: str, target_name: str, raw_output_dir: str,
-                              method_params: dict) -> List[str]:
+                              method_params: dict) -> List[tuple]:
+        """
+        Process peptides on a specific GPU.
+        
+        Returns:
+            List of (peptide_sequence, raw_dir_path) tuples
+        """
         pass
     
     def _create_raw_peptide_dir(self, target_name: str, peptide_sequence: str) -> str:

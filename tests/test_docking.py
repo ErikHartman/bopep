@@ -1,5 +1,12 @@
 import pytest
+import os
+import tempfile
+import shutil
+import json
+from typing import List, Tuple
+from unittest.mock import patch, MagicMock
 from bopep.docking.docker import Docker
+from bopep.docking.base_docking_model import BaseDockingModel
 from bopep.structure.parser import extract_sequence_from_structure
 
 
@@ -56,3 +63,179 @@ class TestDockingUtils:
         """Test sequence extraction from nonexistent file"""
         with pytest.raises(FileNotFoundError):
             extract_sequence_from_structure("nonexistent.pdb")
+
+
+class MockDockingModel(BaseDockingModel):
+    """Mock docking model for testing parallel processing logic."""
+    
+    def __init__(self, **kwargs):
+        self.method_name = "mock"
+        super().__init__(**kwargs)
+    
+    def dock(self, peptide_sequences: List[str], target_structure: str, 
+             target_sequence: str, target_name: str) -> List[str]:
+        return self._dock_with_common_logic(peptide_sequences, target_structure, 
+                                          target_sequence, target_name)
+    
+    def _dock_single_peptide(self, peptide_sequence: str, target_structure: str,
+                           target_sequence: str, target_name: str, gpu_id: str = "0") -> str:
+        """Mock single peptide docking - creates a fake raw directory."""
+        raw_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
+        # Create a fake output file to indicate successful "docking"
+        with open(os.path.join(raw_dir, f"mock_output_{peptide_sequence}.txt"), "w") as f:
+            f.write(f"Mock docking output for {peptide_sequence} on GPU {gpu_id}")
+        return raw_dir
+    
+    def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
+                          target_name: str) -> str:
+        """Mock raw output processing."""
+        processed_dir = self._create_processed_peptide_dir(target_name, peptide_sequence)
+        
+        # Verify the raw directory contains the expected peptide's data
+        expected_file = os.path.join(raw_peptide_dir, f"mock_output_{peptide_sequence}.txt")
+        if not os.path.exists(expected_file):
+            raise ValueError(f"MAPPING ERROR: Raw directory {raw_peptide_dir} does not contain "
+                           f"expected output for peptide {peptide_sequence}!")
+        
+        # Copy mock data to processed directory
+        shutil.copy2(expected_file, os.path.join(processed_dir, f"processed_{peptide_sequence}.txt"))
+        
+        # Create metrics file
+        metrics = {
+            "peptide_sequence": peptide_sequence,
+            "target_name": target_name,
+            "docking_method": "mock",
+            "test_metric": f"value_for_{peptide_sequence}"
+        }
+        self._save_metrics_json(metrics, processed_dir, prefix="mock_metrics")
+        
+        return processed_dir
+    
+    def _get_method_parameters(self) -> dict:
+        return {"mock_param": "test_value"}
+    
+    @staticmethod
+    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
+                              target_sequence: str, target_name: str, raw_output_dir: str,
+                              method_params: dict) -> List[Tuple[str, str]]:
+        """Mock GPU docking that returns (peptide, raw_dir) tuples."""
+        output_dir = os.path.dirname(os.path.dirname(raw_output_dir))
+        
+        temp_docker = MockDockingModel(
+            output_dir=output_dir,
+            gpu_ids=[gpu_id],
+            **method_params
+        )
+        
+        docked_results = []
+        for peptide in peptides:
+            raw_dir = temp_docker._dock_single_peptide(
+                peptide, target_structure, target_sequence, target_name, gpu_id
+            )
+            if raw_dir:
+                docked_results.append((peptide, raw_dir))
+        
+        return docked_results
+
+
+class TestParallelProcessing:
+    """Test parallel processing peptide-to-directory mapping."""
+    
+    def test_parallel_peptide_mapping(self):
+        """
+        Test that parallel processing maintains correct peptide-to-directory mapping.
+        
+        This is a regression test for a bug where peptides distributed across multiple GPUs
+        would get their results mixed up due to incorrect ordering when results are collected.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Test peptides - use a mix that would expose ordering bugs
+            peptides = ["PEPTIDE_A", "PEPTIDE_B", "PEPTIDE_C", "PEPTIDE_D", "PEPTIDE_E", "PEPTIDE_F"]
+            target_name = "test_target"
+            
+            # Create mock docker with multiple GPUs to trigger parallel processing
+            docker = MockDockingModel(
+                output_dir=temp_dir,
+                gpu_ids=["0", "1"],  # 2 GPUs will trigger parallel processing
+                overwrite_results=True
+            )
+            
+            # Mock the target structure and sequence
+            mock_target = os.path.join(temp_dir, "mock_target.pdb")
+            with open(mock_target, "w") as f:
+                f.write("MOCK PDB CONTENT")
+            
+            mock_sequence = "MOCKSEQUENCE"
+            
+            # Run the docking simulation
+            processed_dirs = docker.dock(peptides, mock_target, mock_sequence, target_name)
+            
+            # Verify we got results for all peptides
+            assert len(processed_dirs) == len(peptides)
+            
+            # Verify each processed directory contains the correct peptide's data
+            for processed_dir in processed_dirs:
+                dir_name = os.path.basename(processed_dir)
+                expected_peptide = dir_name.replace(f"{target_name}_", "")
+                
+                # Check that the processed file exists and contains the right peptide
+                processed_file = os.path.join(processed_dir, f"processed_{expected_peptide}.txt")
+                assert os.path.exists(processed_file), f"Directory {dir_name} missing file for {expected_peptide}"
+                
+                # Check metrics file contains correct peptide
+                metrics_file = os.path.join(processed_dir, "mock_metrics.json")
+                assert os.path.exists(metrics_file), f"Metrics file missing in {dir_name}"
+                
+                with open(metrics_file) as f:
+                    metrics = json.load(f)
+                assert metrics["peptide_sequence"] == expected_peptide, \
+                    f"Metrics in {dir_name} for wrong peptide: expected {expected_peptide}, got {metrics['peptide_sequence']}"
+    
+    def test_sequential_peptide_mapping(self):
+        """Test that sequential processing (single GPU) still works correctly."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            peptides = ["SEQ_A", "SEQ_B", "SEQ_C"]
+            target_name = "test_target"
+            
+            # Create mock docker with single GPU (sequential processing)
+            docker = MockDockingModel(
+                output_dir=temp_dir,
+                gpu_ids=["0"],  # Single GPU triggers sequential processing
+                overwrite_results=True
+            )
+            
+            mock_target = os.path.join(temp_dir, "mock_target.pdb")
+            with open(mock_target, "w") as f:
+                f.write("MOCK PDB CONTENT")
+            
+            mock_sequence = "MOCKSEQUENCE"
+            
+            # Run the docking simulation
+            processed_dirs = docker.dock(peptides, mock_target, mock_sequence, target_name)
+            
+            # Verify we got results for all peptides
+            assert len(processed_dirs) == len(peptides)
+            
+            # Verify mapping is correct (should work the same as parallel)
+            for processed_dir in processed_dirs:
+                dir_name = os.path.basename(processed_dir)
+                expected_peptide = dir_name.replace(f"{target_name}_", "")
+                
+                processed_file = os.path.join(processed_dir, f"processed_{expected_peptide}.txt")
+                assert os.path.exists(processed_file), f"Directory {dir_name} missing file for {expected_peptide}"
+    
+    def test_empty_peptide_list_parallel(self):
+        """Test parallel processing with empty peptide list."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docker = MockDockingModel(
+                output_dir=temp_dir,
+                gpu_ids=["0", "1"],
+                overwrite_results=True
+            )
+            
+            mock_target = os.path.join(temp_dir, "mock_target.pdb")
+            with open(mock_target, "w") as f:
+                f.write("MOCK PDB CONTENT")
+            
+            processed_dirs = docker.dock([], mock_target, "MOCK", "test")
+            assert processed_dirs == []

@@ -90,9 +90,12 @@ class BoltzDocker(BaseDockingModel):
     @staticmethod
     def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
                               target_sequence: str, target_name: str, raw_output_dir: str,
-                              method_params: dict) -> List[str]:
+                              method_params: dict) -> List[tuple]:
         """
         Process a batch of peptides on a specific GPU using Boltz.
+        
+        Returns:
+            List of (peptide_sequence, raw_dir_path) tuples
         """
         # raw_output_dir is like: /base/raw/boltz
         # We need to get back to /base (go up 2 levels: remove /boltz and /raw)
@@ -104,16 +107,17 @@ class BoltzDocker(BaseDockingModel):
             **method_params
         )
         
-        docked_dirs = []
+        docked_results = []
         for i, peptide in enumerate(peptides, 1):
             print(f"GPU {gpu_id} progress: {i}/{len(peptides)} - docking {peptide}")
             dir_path = temp_docker._dock_single_peptide(
                 peptide, target_structure, target_sequence, target_name, gpu_id
             )
-            docked_dirs.append(dir_path)
+            if dir_path:
+                docked_results.append((peptide, dir_path))
         
         
-        return docked_dirs
+        return docked_results
     
     def _create_yaml_config(self, peptide_sequence: str, target_sequence: str,
                            target_name: str, output_dir: str, target_structure: str) -> str:
