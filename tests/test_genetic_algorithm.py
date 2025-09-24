@@ -432,14 +432,12 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
         )
         
         assert boga.target_structure_path == "/fake/path.pdb"
-        assert boga.schedule == schedule
         assert boga.initial_sequences == "ACDEFG"
         assert boga.min_sequence_length == 6
         assert boga.max_sequence_length == 40
@@ -452,7 +450,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences=["ACDEFG", "HIJKLM"],
             n_init=50,
             min_sequence_length=4,
@@ -477,7 +474,6 @@ class TestBoGA:
         with pytest.raises(ValueError, match="pca_n_components must be specified"):
             BoGA(
                 target_structure_path="/fake/path.pdb",
-                schedule=schedule,
                 initial_sequences="ACDEFG",
                 pca_n_components=None,
                 surrogate_model_kwargs=basic_surrogate_kwargs
@@ -489,7 +485,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences=None,
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
@@ -505,7 +500,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
@@ -522,7 +516,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             n_init=20,
             pca_n_components=10,
@@ -539,7 +532,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             n_init=5,
             pca_n_components=3,
@@ -558,7 +550,6 @@ class TestBoGA:
         initial_seqs = ["ACDEFG", "HIKLMN", "NPQRSV"]  # Changed J to I and O to V to avoid invalid amino acids
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences=initial_seqs,
             n_init=5,
             pca_n_components=3,
@@ -577,7 +568,6 @@ class TestBoGA:
         initial_seqs = [f"ACDEFG{i:02d}A" for i in range(20)]  # 20 sequences
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences=initial_seqs,
             n_init=10,
             pca_n_components=5,
@@ -593,7 +583,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
@@ -633,7 +622,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
@@ -659,7 +647,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
@@ -683,7 +670,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
@@ -708,7 +694,6 @@ class TestBoGA:
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
@@ -748,7 +733,6 @@ HIKLMN,-8.2,0.6,1,phase1,2024-01-01
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             continue_from_logs=str(log_dir),
@@ -770,7 +754,6 @@ HIKLMN,-8.2,0.6,1,phase1,2024-01-01
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
@@ -794,7 +777,6 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences="ACDEFG",
             pca_n_components=3,
             continue_from_logs=str(log_dir),
@@ -829,9 +811,6 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         boga._dock_and_score = mock_dock_and_score
         
         # Extract just the first generation to see the starting iteration
-        # We'll mock the schedule to have 0 generations to avoid running the full loop
-        original_schedule = boga.schedule.copy()
-        boga.schedule = []  # Empty schedule to stop after setup
         
         # Run and capture the last_iteration that gets loaded
         scores, evaluated_seqs, last_iteration = boga._load_from_logs(str(log_dir))
@@ -847,7 +826,6 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
             boga1 = BoGA(
                 target_structure_path="/fake/path.pdb",
-                schedule=schedule,
                 initial_sequences="ACDEFG",
                 pca_n_components=10,
                 continue_from_logs=str(temp_dir),
@@ -860,7 +838,6 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
             boga2 = BoGA(
                 target_structure_path="/fake/path.pdb",
-                schedule=schedule,
                 initial_sequences="ACDEFG",
                 pca_n_components=10,
                 log_dir="/some/other/dir",
@@ -874,7 +851,6 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
             boga3 = BoGA(
                 target_structure_path="/fake/path.pdb",
-                schedule=schedule,
                 initial_sequences="ACDEFG",
                 pca_n_components=10,
                 log_dir="/some/log/dir",
@@ -898,7 +874,6 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences=["ACDEFG", "HIJKLM"],
             n_init=2,
             pca_n_components=5,
@@ -946,10 +921,8 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         with patch.object(boga.mutator, 'mutate_sequence') as mock_mutate:
             mock_mutate.side_effect = lambda parent, evaluated: f"{parent}X"  # Simple mutation
             
-            # Mock the run to stop after initial setup by making the schedule empty
-            boga.schedule = []
-            
-            result = boga.run()
+            # Mock the run to stop after initial setup by using empty schedule
+            result = boga.run(schedule=[])
         
         # Should return the objectives
         assert isinstance(result, dict)
@@ -961,7 +934,6 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
-            schedule=schedule,
             initial_sequences=123,  # Invalid type
             pca_n_components=10,
             surrogate_model_kwargs=basic_surrogate_kwargs
