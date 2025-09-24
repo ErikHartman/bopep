@@ -21,7 +21,6 @@ class BoGA:
     def __init__(
         self,
         target_structure_path: str,
-        schedule: List[Dict[str, Any]],
         initial_sequences: Union[str, List[str]],
 
         n_init : int = 130,
@@ -62,7 +61,6 @@ class BoGA:
         self.max_sequence_length = max_sequence_length
         self.min_sequence_length = min_sequence_length
         self.n_init = n_init
-        self.schedule = schedule
         self.objective_function = objective_function
         self.objective_function_kwargs = objective_function_kwargs or {}
         self.scoring_kwargs = scoring_kwargs
@@ -271,8 +269,14 @@ class BoGA:
     def _select_top_objectives(self, objectives: Dict[str, float], k: int) -> List[str]:
         return [seq for seq, _ in sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:k]]
 
-    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str) -> List[str]:
-        acquisition_values = self.acquisition_function_obj.compute_acquisition(predictions, acquisition_function)
+    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
+        if acquisition_kwargs is None:
+            acquisition_kwargs = {}
+        acquisition_values = self.acquisition_function_obj.compute_acquisition(
+            predictions, 
+            acquisition_function, 
+            **acquisition_kwargs
+        )
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
     def _configure_mutation_for_phase(self, phase: Dict[str, Any], phase_index: int, objectives: Dict[str, float]) -> None:
@@ -322,7 +326,7 @@ class BoGA:
         
         return scores, evaluated_sequences, last_iteration
 
-    def run(self) -> Dict[str, float]:
+    def run(self, schedule: List[Dict[str, Any]]) -> Dict[str, float]:
         if self.continue_from_logs:
             print(f"Loading previous results from {self.continue_from_logs}")
             scores, self._evaluated_sequences, last_iteration = self._load_from_logs(self.continue_from_logs)
@@ -373,7 +377,7 @@ class BoGA:
 
         # Run through schedule phases
         global_generation = last_iteration  # Continue from last iteration when resuming
-        for phase_index, phase in enumerate(self.schedule, start=1):
+        for phase_index, phase in enumerate(schedule, start=1):
             acquisition_function = phase['acquisition']
             generations = phase['generations']
             m_select = phase['m_select']
@@ -422,7 +426,8 @@ class BoGA:
                 preds = self.surrogate_manager.predict(candidate_embeddings)
 
                 # Select candidates using acquisition function
-                candidates = self._select_top_predictions(preds, m_select, acquisition_function)
+                acquisition_kwargs = phase.get("acquisition_kwargs", {})
+                candidates = self._select_top_predictions(preds, m_select, acquisition_function, acquisition_kwargs)
 
                 print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
 

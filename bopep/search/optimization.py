@@ -116,6 +116,8 @@ class BoPep:
         Args:
             schedule: List of dictionaries defining the optimization phases.
                 Each dict should have 'acquisition' and 'iterations' keys.
+                Optionally can include 'acquisition_kwargs' for multi-objective
+                acquisition functions (e.g., parego_chebyshev_ei).
             batch_size: Number of peptides to dock in each iteration.
             target_structure_path: Path to the target structure PDB file.
             embeddings: Dictionary of peptide embeddings {peptide: embedding}. Required for fresh initialization.
@@ -428,9 +430,11 @@ class BoPep:
                 self.logger.log_predictions(predictions, global_iteration)
 
                 # Compute acquisition
+                acquisition_kwargs = phase.get("acquisition_kwargs", {})
                 acquisition_values = self.acquisition_function_obj.compute_acquisition(
                     predictions=predictions,
                     acquisition_function=acquisition,
+                    **acquisition_kwargs
                 )  # acquisition_values is {peptide: acquisition_value}
 
                 # Log acquisition
