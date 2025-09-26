@@ -586,12 +586,30 @@ class BoPep:
                     )
 
     def _print_top_performers(self, objectives: dict, top_n: int = 10):
-        sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[
-            :top_n
-        ]
-        logging.info(f"Top {top_n} peptides:")
-        logging.info(f"{'Peptide':<20} | {'Objective':<10} ")
-        logging.info("-" * 60)
-        for peptide, obj_value in sorted_peptides:
-            logging.info(f"{peptide:<20} | {obj_value:<10.4f} ")
+        if not objectives:
+            return
+        
+        # Check if multiobjective case
+        sample_obj = next(iter(objectives.values()))
+        if isinstance(sample_obj, dict):
+            # Multi-objective case: show top performers for each objective
+            obj_names = list(sample_obj.keys())
+            logging.info(f"Top {top_n} peptides (multiobjective):")
+            
+            for obj_name in obj_names:
+                logging.info(f"\n--- {obj_name} ---")
+                sorted_peptides = sorted(objectives.items(), 
+                                       key=lambda x: x[1][obj_name], reverse=True)[:top_n]
+                logging.info(f"{'Peptide':<20} | {obj_name:<15}")
+                logging.info("-" * 40)
+                for peptide, obj_dict in sorted_peptides:
+                    logging.info(f"{peptide:<20} | {obj_dict[obj_name]:<15.4f}")
+        else:
+            # Single objective case (original)
+            sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            logging.info(f"Top {top_n} peptides:")
+            logging.info(f"{'Peptide':<20} | {'Objective':<10} ")
+            logging.info("-" * 60)
+            for peptide, obj_value in sorted_peptides:
+                logging.info(f"{peptide:<20} | {obj_value:<10.4f} ")
 

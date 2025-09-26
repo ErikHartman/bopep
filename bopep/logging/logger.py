@@ -125,15 +125,38 @@ class Logger:
                 wr.writerow(row)
 
 
-    def log_objectives(self, objectives: Dict[str, float], iteration: int, acquisition_name: str = "unknown"):
+    def log_objectives(self, objectives: Dict[str, Any], iteration: int, acquisition_name: str = "unknown"):
         timestamp = datetime.now().isoformat()
+        
+        # Check if we have single or multi-objective case
+        if not objectives:
+            return
+            
+        sample_obj = next(iter(objectives.values()))
+        is_multiobjective = isinstance(sample_obj, dict)
+        
         with open(self._objectives_file, "a", newline="") as f:
             wr = csv.writer(f)
-            if not self._objectives_header_written:
-                wr.writerow(["timestamp","iteration","peptide","objective_value","phase"])
-                self._objectives_header_written = True
-            for pep, val in objectives.items():
-                wr.writerow([timestamp, iteration, pep, val, acquisition_name])
+            
+            if is_multiobjective:
+                # Multi-objective case: collect all objective names and use as columns
+                all_objective_names = sorted({name for obj_dict in objectives.values() for name in obj_dict.keys()})
+                
+                if not self._objectives_header_written:
+                    wr.writerow(["timestamp", "iteration", "peptide", "phase"] + all_objective_names)
+                    self._objectives_header_written = True
+                
+                for pep, obj_dict in objectives.items():
+                    row = [timestamp, iteration, pep, acquisition_name] + [obj_dict.get(name) for name in all_objective_names]
+                    wr.writerow(row)
+            else:
+                # Single objective case: original format
+                if not self._objectives_header_written:
+                    wr.writerow(["timestamp", "iteration", "peptide", "objective_value", "phase"])
+                    self._objectives_header_written = True
+                
+                for pep, val in objectives.items():
+                    wr.writerow([timestamp, iteration, pep, val, acquisition_name])
 
 
     def log_model_metrics(self, loss: float, iteration: int, metrics: Optional[Dict[str, float]] = None):

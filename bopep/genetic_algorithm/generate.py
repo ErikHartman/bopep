@@ -129,6 +129,24 @@ class BoGA:
 
         self._evaluated_sequences  = set()
 
+    def _get_best_objective_display(self, objectives: Dict[str, Any]) -> str:
+        """Helper method to display best objectives for both single and multi-objective cases."""
+        if not objectives:
+            return "No objectives available"
+        
+        sample_obj = next(iter(objectives.values()))
+        if isinstance(sample_obj, dict):
+            # Multi-objective case: show best for each objective
+            obj_names = list(sample_obj.keys())
+            best_vals = {}
+            for obj_name in obj_names:
+                best_vals[obj_name] = max(obj[obj_name] for obj in objectives.values())
+            return f"{best_vals}"
+        else:
+            # Single objective case
+            best_val = max(objectives.values())
+            return f"{best_val:.4f}"
+
     def _generate_initial_sequences(self) -> List[str]:
         return [self.mutator.generate_random_sequence() for _ in range(self.n_init)]
 
@@ -359,7 +377,8 @@ class BoGA:
                 self.logger.log_scores(scores, iteration=0, acquisition_name="initial")
                 self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
 
-            print(f"Initial population - best objective: {max(objectives.values()):.4f}")
+            # Handle both single and multi-objective cases for best objective display
+            print(f"Initial population - best objective(s): {self._get_best_objective_display(objectives)}")
 
             # Initial hyperparameter tuning for fresh runs
             init_reduced = self._embed_peptides(list(scores.keys()))
@@ -368,7 +387,7 @@ class BoGA:
         else:
             print("Loaded objectives:")
             print(f"Total sequences: {len(objectives)}")
-            print(f"Best existing objective: {max(objectives.values()):.4f}")
+            print(f"Best existing objective(s): {self._get_best_objective_display(objectives)}")
             
             # For continued runs, optimize hyperparameters on existing data
             existing_reduced = self._embed_peptides(list(scores.keys()))
@@ -461,6 +480,6 @@ class BoGA:
         
         print(f"\n=== Final Results ===")
         print(f"Total sequences evaluated: {len(final_objectives)}")
-        print(f"Best final objective: {max(final_objectives.values()):.4f}")
+        print(f"Best final objective(s): {self._get_best_objective_display(final_objectives)}")
         
         return final_objectives
