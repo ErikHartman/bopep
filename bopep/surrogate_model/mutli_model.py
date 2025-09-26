@@ -1,20 +1,12 @@
-"""
-Multi-objective wrapper for surrogate models.
-
-This module provides a wrapper that manages multiple single-objective models
-for multi-objective optimization, integrating seamlessly with the existing
-model factory system.
-"""
-
 import torch
 import numpy as np
-from typing import Dict, Any, Optional, Union, List
+from typing import Dict, Optional, Union, List
 import logging
 
 from bopep.surrogate_model.helpers import BasePredictionModel
 
 
-class MultiObjectiveWrapper(BasePredictionModel):
+class MultiModelWrapper(BasePredictionModel):
     """
     A wrapper that manages multiple single-objective models for multi-objective optimization.
     
@@ -210,21 +202,21 @@ class MultiObjectiveWrapper(BasePredictionModel):
         
         return results
     
-    def to(self, device: Union[str, torch.device]) -> 'MultiObjectiveWrapper':
+    def to(self, device: Union[str, torch.device]) -> 'MultiModelWrapper':
         """Move all models to the specified device."""
         super().to(device)
         for model in self.models:
             model.to(device)
         return self
     
-    def train(self, mode: bool = True) -> 'MultiObjectiveWrapper':
+    def train(self, mode: bool = True) -> 'MultiModelWrapper':
         """Set training mode for all models."""
         super().train(mode)
         for model in self.models:
             model.train(mode)
         return self
     
-    def eval(self) -> 'MultiObjectiveWrapper':
+    def eval(self) -> 'MultiModelWrapper':
         """Set evaluation mode for all models."""
         super().eval()
         for model in self.models:
@@ -236,3 +228,49 @@ class MultiObjectiveWrapper(BasePredictionModel):
                 f"model_class={self.model_class.__name__}, "
                 f"n_objectives={self.n_objectives}, "
                 f"n_models={len(self.models)})")
+    
+if __name__ == "__main__":
+    # Simple test to verify functionality
+    from bopep.surrogate_model import NeuralNetworkEnsemble
+    
+    # Create dummy data
+    embedding_dict = {
+        'pep1': np.random.rand(10).astype(np.float32),
+        'pep2': np.random.rand(10).astype(np.float32),
+        'pep3': np.random.rand(10).astype(np.float32),
+    }
+    
+    objective_dict = {
+        'pep1': {'obj1': 1.0, 'obj2': 2.0},
+        'pep2': {'obj1': 1.5, 'obj2': 2.5},
+        'pep3': {'obj1': 2.0, 'obj2': 3.0},
+    }
+    
+    # Initialize multi-objective wrapper with NeuralNetworkEnsemble
+    multi_model = MultiModelWrapper(
+        model_class=NeuralNetworkEnsemble,
+        input_dim=10,
+        n_objectives=2,
+        network_type='mlp',
+        hidden_dims=[20, 10],
+        n_networks=3,
+        num_layers=2,
+        dropout_rate=0.1,
+    )
+    
+    # Train the model
+    loss = multi_model.fit_dict(
+        embedding_dict=embedding_dict,
+        objective_dict=objective_dict,
+        epochs=5,
+        batch_size=2,
+        learning_rate=0.001,
+    )
+    
+    print(f"Training loss: {loss}")
+    
+    # Make predictions
+    predictions = multi_model.predict_dict(embedding_dict)
+    print("Predictions:")
+    for pep, preds in predictions.items():
+        print(f"{pep}: {preds}")
