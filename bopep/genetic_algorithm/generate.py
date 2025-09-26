@@ -475,6 +475,7 @@ class BoGA:
 
         # Run through schedule phases
         global_generation = last_iteration  # Continue from last iteration when resuming
+        objective_directions = {}  # Default value in case schedule is empty
         for phase_index, phase in enumerate(schedule, start=1):
             acquisition_function = phase['acquisition']
             generations = phase['generations']
