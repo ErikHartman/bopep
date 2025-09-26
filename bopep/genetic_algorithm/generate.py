@@ -17,6 +17,9 @@ import torch
 class BoGA:
     """
     Genetic algorithm for peptide binder discovery using surrogate modeling.
+    
+    Use surrogate_model_kwargs to configure the surrogate model, including:
+    - model_type, network_type, multi_model (separate models per objective), etc.
     """
     def __init__(
         self,
@@ -128,24 +131,6 @@ class BoGA:
             self.logger = None
 
         self._evaluated_sequences  = set()
-
-    def _get_best_objective_display(self, objectives: Dict[str, Any]) -> str:
-        """Helper method to display best objectives for both single and multi-objective cases."""
-        if not objectives:
-            return "No objectives available"
-        
-        sample_obj = next(iter(objectives.values()))
-        if isinstance(sample_obj, dict):
-            # Multi-objective case: show best for each objective
-            obj_names = list(sample_obj.keys())
-            best_vals = {}
-            for obj_name in obj_names:
-                best_vals[obj_name] = max(obj[obj_name] for obj in objectives.values())
-            return f"{best_vals}"
-        else:
-            # Single objective case
-            best_val = max(objectives.values())
-            return f"{best_val:.4f}"
 
     def _print_leaderboard(self, objectives: Dict[str, Any], generation: int, top_n: int = 5, objective_directions: Dict[str, str] = None):
         """Print leaderboard for both single and multi-objective cases."""
@@ -369,13 +354,9 @@ class BoGA:
         else:
             # Single objective case: also add sampling diversity
             sorted_sequences = sorted(objectives.items(), key=lambda x: x[1], reverse=True)
-            
-            # Sample from top fraction to add diversity
             n_top = max(1, int(len(sorted_sequences) * top_fraction))
             n_top = max(n_top, k)  # Ensure we have at least k candidates
             top_candidates = [seq for seq, _ in sorted_sequences[:n_top]]
-            
-            # Sample k sequences from top candidates
             if len(top_candidates) <= k:
                 return top_candidates
             else:
@@ -462,6 +443,10 @@ class BoGA:
         # Convert initial scores to objectives
         objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
+        # Extract objective directions from the first phase (assuming they're consistent across phases)
+        first_phase_kwargs = schedule[0].get("acquisition_kwargs", {}) if schedule else {}
+        objective_directions = first_phase_kwargs.get("objective_directions", {})
+
         if not self.continue_from_logs:
             print("Initial objectives:")
             print(objectives)
@@ -471,8 +456,9 @@ class BoGA:
                 self.logger.log_scores(scores, iteration=0, acquisition_name="initial")
                 self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
 
-            # Handle both single and multi-objective cases for best objective display
-            print(f"Initial population - best objective(s): {self._get_best_objective_display(objectives)}")
+            # Show initial population leaderboard
+            print("Initial population results:")
+            self._print_leaderboard(objectives, 0, objective_directions=objective_directions)
 
             # Initial hyperparameter tuning for fresh runs
             init_reduced = self._embed_peptides(list(scores.keys()))
@@ -481,7 +467,8 @@ class BoGA:
         else:
             print("Loaded objectives:")
             print(f"Total sequences: {len(objectives)}")
-            print(f"Best existing objective(s): {self._get_best_objective_display(objectives)}")
+            print("Best existing performers:")
+            self._print_leaderboard(objectives, last_iteration, objective_directions=objective_directions)
             
             # For continued runs, optimize hyperparameters on existing data
             existing_reduced = self._embed_peptides(list(scores.keys()))
@@ -573,6 +560,7 @@ class BoGA:
         
         print(f"\n=== Final Results ===")
         print(f"Total sequences evaluated: {len(final_objectives)}")
-        print(f"Best final objective(s): {self._get_best_objective_display(final_objectives)}")
+        print("Final leaderboard:")
+        self._print_leaderboard(final_objectives, global_generation, objective_directions=objective_directions)
         
         return final_objectives

@@ -2,5 +2,6 @@ from bopep.surrogate_model.mc_dropout import MonteCarloDropout as MonteCarloDrop
 from bopep.surrogate_model.nn_ensemble import NeuralNetworkEnsemble as NeuralNetworkEnsemble
 from bopep.surrogate_model.deep_evidential_regression import DeepEvidentialRegression as DeepEvidentialRegression
 from bopep.surrogate_model.mve import MVE as MVE
+from bopep.surrogate_model.multi_objective import MultiObjectiveWrapper as MultiObjectiveWrapper
 from bopep.surrogate_model.hyperparameter_tuner import tune_hyperparams as tune_hyperparams
 from bopep.surrogate_model.manager import SurrogateModelManager as SurrogateModelManager
