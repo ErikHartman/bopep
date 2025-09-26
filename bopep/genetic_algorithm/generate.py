@@ -147,6 +147,43 @@ class BoGA:
             best_val = max(objectives.values())
             return f"{best_val:.4f}"
 
+    def _print_leaderboard(self, objectives: Dict[str, Any], generation: int, top_n: int = 5, objective_directions: Dict[str, str] = None):
+        """Print leaderboard for both single and multi-objective cases."""
+        if not objectives:
+            return
+        
+        print(f"Generation {generation} leaderboard:")
+        
+        sample_obj = next(iter(objectives.values()))
+        if isinstance(sample_obj, dict):
+            # Multi-objective case: show top performers for each objective (like optimization.py)
+            obj_names = list(sample_obj.keys())
+            print(f"Top {top_n} peptides (multiobjective):")
+            
+            for obj_name in obj_names:
+                print(f"\n--- {obj_name} ---")
+                
+                # Sort by direction
+                if objective_directions and obj_name in objective_directions:
+                    reverse_sort = objective_directions[obj_name] == "max"
+                else:
+                    reverse_sort = True  # Default to maximization
+                
+                sorted_peptides = sorted(objectives.items(), 
+                                       key=lambda x: x[1][obj_name], 
+                                       reverse=reverse_sort)[:top_n]
+                print(f"{'Peptide':<20} | {obj_name:<15}")
+                print("-" * 40)
+                for peptide, obj_dict in sorted_peptides:
+                    print(f"{peptide:<20} | {obj_dict[obj_name]:<15.4f}")
+        else:
+            # Single objective case: original behavior
+            sorted_leaderboard = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            print(f"{'Peptide':<20} | {'Objective':<10} ")
+            print("-" * 60)
+            for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
+                print(f"  {rank}. {seq} - Objective: {obj:.4f}")
+
     def _generate_initial_sequences(self) -> List[str]:
         return [self.mutator.generate_random_sequence() for _ in range(self.n_init)]
 
@@ -284,8 +321,65 @@ class BoGA:
             min_validation_samples=self.min_validation_samples
         )
 
-    def _select_top_objectives(self, objectives: Dict[str, float], k: int) -> List[str]:
-        return [seq for seq, _ in sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:k]]
+    def _select_top_objectives(self, objectives: Dict[str, Any], k: int, objective_directions: Dict[str, str] = None, top_fraction: float = 0.3) -> List[str]:
+        """
+        Select top k sequences based on objectives, with support for sampling from top contenders.
+        """
+        if not objectives:
+            return []
+        
+        # Check if single or multi-objective
+        sample_obj = next(iter(objectives.values()))
+        
+        if isinstance(sample_obj, dict):
+            # Multi-objective case: matrix-based sampling approach
+            obj_names = list(sample_obj.keys())
+            peptides = list(objectives.keys())
+            
+            # Create ranking matrix: each column is a different objective, sorted by rank
+            rankings = {}  # {objective_name: [peptide_list_sorted_by_that_objective]}
+            
+            for obj_name in obj_names:
+                # Sort peptides by this objective
+                if objective_directions and obj_name in objective_directions:
+                    reverse_sort = objective_directions[obj_name] == "max"
+                else:
+                    reverse_sort = True  # Default to maximization
+                
+                sorted_peptides = sorted(peptides, 
+                                       key=lambda p: objectives[p][obj_name], 
+                                       reverse=reverse_sort)
+                rankings[obj_name] = sorted_peptides
+            
+            # Sample from the top portion of each objective ranking
+            top_candidates = set()
+            n_top_per_objective = max(1, int(len(peptides) * top_fraction))
+            
+            for obj_name, ranked_peptides in rankings.items():
+                # Take top performers for this objective
+                top_for_this_obj = ranked_peptides[:n_top_per_objective]
+                top_candidates.update(top_for_this_obj)
+            
+            # Sample k sequences from the combined top candidates
+            top_candidates = list(top_candidates)
+            if len(top_candidates) <= k:
+                return top_candidates
+            else:
+                return random.sample(top_candidates, k)
+        else:
+            # Single objective case: also add sampling diversity
+            sorted_sequences = sorted(objectives.items(), key=lambda x: x[1], reverse=True)
+            
+            # Sample from top fraction to add diversity
+            n_top = max(1, int(len(sorted_sequences) * top_fraction))
+            n_top = max(n_top, k)  # Ensure we have at least k candidates
+            top_candidates = [seq for seq, _ in sorted_sequences[:n_top]]
+            
+            # Sample k sequences from top candidates
+            if len(top_candidates) <= k:
+                return top_candidates
+            else:
+                return random.sample(top_candidates, k)
 
     def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
         if acquisition_kwargs is None:
@@ -417,7 +511,9 @@ class BoGA:
 
                 # Generate new pool via mutation of top M
                 # For parent selection, always use objectives (exploitation)
-                parents = self._select_top_objectives(objectives, m_select)
+                acquisition_kwargs = phase.get("acquisition_kwargs", {})
+                objective_directions = acquisition_kwargs.get("objective_directions", {})
+                parents = self._select_top_objectives(objectives, m_select, objective_directions=objective_directions)
                 print(f"Selected top {len(parents)} parents for mutation")
                 
                 pool = self.mutator.mutate_pool(parents, k_pool, self._evaluated_sequences, objectives)
@@ -471,10 +567,7 @@ class BoGA:
 
                 current_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
-                print(f"Generation {global_generation} leaderboard:")
-                sorted_leaderboard = sorted(current_objectives.items(), key=lambda x: x[1], reverse=True)[:5]
-                for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
-                    print(f"  {rank}. {seq} - Objective: {obj:.4f}")
+                self._print_leaderboard(current_objectives, global_generation, objective_directions=objective_directions)
 
         final_objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
         
