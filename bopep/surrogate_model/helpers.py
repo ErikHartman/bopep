@@ -5,6 +5,52 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
 
 
+class ObjectiveMixin:
+    """
+    Mixin to handle objective structure detection and formatting.
+    Centralizes all objective-related logic in one place.
+    """
+    
+    def _setup_objectives(self, objective_dict: Dict[str, Union[float, Dict[str, float]]]):
+        """Setup objective structure from training data."""
+        sample_objective = next(iter(objective_dict.values()))
+        
+        if isinstance(sample_objective, dict):
+            # Multi-objective
+            self._objective_names = sorted(sample_objective.keys())
+            self._n_objectives = len(self._objective_names)
+        else:
+            # Single objective
+            self._objective_names = None
+            self._n_objectives = 1
+    
+    def _format_predictions(
+        self, 
+        peptides: List[str], 
+        mean_array: np.ndarray, 
+        std_array: np.ndarray
+    ) -> Dict[str, Union[Tuple[float, float], Dict[str, Tuple[float, float]]]]:
+        """Format predictions according to objective structure."""
+        predictions = {}
+        
+        if self._objective_names:
+            # Multi-objective: {peptide: {obj_name: (mean, std)}}
+            for i, pep in enumerate(peptides):
+                obj_predictions = {}
+                for j, obj_name in enumerate(self._objective_names):
+                    obj_predictions[obj_name] = (float(mean_array[i, j]), float(std_array[i, j]))
+                predictions[pep] = obj_predictions
+        else:
+            # Single objective: {peptide: (mean, std)}
+            mean_flat = mean_array.flatten() if mean_array.ndim > 1 else mean_array
+            std_flat = std_array.flatten() if std_array.ndim > 1 else std_array
+            
+            for i, pep in enumerate(peptides):
+                predictions[pep] = (float(mean_flat[i]), float(std_flat[i]))
+        
+        return predictions
+
+
 class DictHandler:
     """Utility class for handling dictionary inputs and outputs."""
 
@@ -129,14 +175,17 @@ def variable_length_collate_fn(batch):
     return x_padded, y_stacked, lengths
 
 
-class BasePredictionModel(torch.nn.Module):
+class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
     """
     Base class for all prediction models with optional validation-based early stopping.
     """
     def __init__(self):
         super().__init__()
-        self._objective_names = None  # Store objective names for named multi-objective
-        self._is_named_multiobjective = False
+        # Initialize objective-related attributes
+        self._objective_names = None
+        self._n_objectives = 1
+        # Initialize loss tracking
+        self.loss_history = {}
 
     def fit_dict(
         self,
@@ -158,8 +207,7 @@ class BasePredictionModel(torch.nn.Module):
         Args:
             embedding_dict: {peptide: embedding_array}
             objective_dict: {peptide: score} for single-objective, 
-                          {peptide: [score1, score2, ...]} for multi-objective, or
-                          {peptide: {"obj1": (mean, std), "obj2": (mean, std)}} for named multi-objective
+                            {peptide: {"obj1": (mean, std), "obj2": (mean, std)}} for multi-objective
             val_embedding_dict: Optional validation embeddings
             val_objective_dict: Optional validation scores (same format as objective_dict)
             epochs: Number of training epochs
@@ -177,15 +225,8 @@ class BasePredictionModel(torch.nn.Module):
         early stopping and LR scheduling are based on val_loss. Otherwise,
         training-only early stopping is used on training loss.
         """
-        # Detect and store objective format
-        sample_objective = next(iter(objective_dict.values()))
-        if isinstance(sample_objective, dict):
-            # Named multi-objective
-            self._is_named_multiobjective = True
-            self._objective_names = sorted(sample_objective.keys())  # Sort for consistent ordering
-        else:
-            self._is_named_multiobjective = False
-            self._objective_names = None
+        # Detect and store objective format using mixin method
+        self._setup_objectives(objective_dict)
             
         if device is None:
             device = next(self.parameters()).device
@@ -250,34 +291,94 @@ class BasePredictionModel(torch.nn.Module):
         best_state = None
         counter = 0
 
+        # Initialize loss tracking
+        self.loss_history = {
+            "epoch": [],
+            "train_loss": []
+        }
+        if val_loader:
+            self.loss_history["val_loss"] = []
+        
+        # For multi-objective models, track per-objective losses
+        if self._objective_names:
+            self.loss_history["total_loss"] = []
+            if val_loader:
+                self.loss_history["val_total_loss"] = []
+            for obj_name in self._objective_names:
+                self.loss_history[obj_name] = []
+                if val_loader:
+                    self.loss_history[f"val_{obj_name}"] = []
+
         for epoch in range(1, epochs + 1):
             # --- Training ---
             self.train()
             train_loss = 0.0
+            objective_losses = {obj_name: 0.0 for obj_name in (self._objective_names or [])}
+            
             for x, y, lengths in train_loader:
                 x, y = x.to(device), y.to(device)
                 optimizer.zero_grad()
                 loss = self._calculate_loss(x, y, lengths, criterion)
+                
+                # For multi-objective models, also track per-objective losses
+                if self._objective_names and hasattr(self, '_get_per_objective_losses'):
+                    per_obj_losses = self._get_per_objective_losses(x, y, lengths, criterion)
+                    for obj_name, obj_loss in per_obj_losses.items():
+                        objective_losses[obj_name] += obj_loss
+                
                 loss.backward()
                 if clip_grad_norm is not None:
                     torch.nn.utils.clip_grad_norm_(self.parameters(), clip_grad_norm)
                 optimizer.step()
                 train_loss += loss.item()
+            
             train_loss /= len(train_loader)
+            for obj_name in objective_losses:
+                objective_losses[obj_name] /= len(train_loader)
 
             # --- Validation (optional) ---
+            val_loss = None
+            val_objective_losses = {}
             if val_loader:
                 self.eval()
                 val_loss = 0.0
+                val_objective_losses = {obj_name: 0.0 for obj_name in (self._objective_names or [])}
+                
                 with torch.no_grad():
                     for x, y, lengths in val_loader:
                         x, y = x.to(device), y.to(device)
                         loss = self._calculate_loss(x, y, lengths, criterion)
                         val_loss += loss.item()
+                        
+                        # Track per-objective validation losses
+                        if self._objective_names and hasattr(self, '_get_per_objective_losses'):
+                            per_obj_losses = self._get_per_objective_losses(x, y, lengths, criterion)
+                            for obj_name, obj_loss in per_obj_losses.items():
+                                val_objective_losses[obj_name] += obj_loss
+                
                 val_loss /= len(val_loader)
+                for obj_name in val_objective_losses:
+                    val_objective_losses[obj_name] /= len(val_loader)
                 metric = val_loss
             else:
                 metric = train_loss
+
+            # Store loss history
+            self.loss_history["epoch"].append(epoch)
+            self.loss_history["train_loss"].append(train_loss)
+            if val_loader:
+                self.loss_history["val_loss"].append(val_loss)
+            
+            # Store multi-objective losses
+            if self._objective_names:
+                self.loss_history["total_loss"].append(train_loss)
+                if val_loader:
+                    self.loss_history["val_total_loss"].append(val_loss)
+                for obj_name in self._objective_names:
+                    if obj_name in objective_losses:
+                        self.loss_history[obj_name].append(objective_losses[obj_name])
+                    if val_loader and obj_name in val_objective_losses:
+                        self.loss_history[f"val_{obj_name}"].append(val_objective_losses[obj_name])
 
 
             scheduler.step(metric)
@@ -329,8 +430,7 @@ class BasePredictionModel(torch.nn.Module):
             
         Returns:
             For single objective: {pep: (mean, std), ...}
-            For named multi-objective: {pep: {obj_name: (mean, std), ...}, ...}
-            For legacy multi-objective: {pep: ([mean1, mean2, ...], [std1, std2, ...]), ...}
+            For multi-objective: {pep: {obj_name: (mean, std), ...}, ...}
         """
 
         if device is None:
@@ -372,31 +472,11 @@ class BasePredictionModel(torch.nn.Module):
         all_means = torch.cat(mean_list)  # Shape depends on n_objectives
         all_stds = torch.cat(std_list)
         
-        # Check if we have multi-objective outputs
-        n_objectives = getattr(self, 'n_objectives', 1)
+        # Convert to numpy and use mixin formatting
+        mean_array = all_means.numpy()
+        std_array = all_stds.numpy()
         
-        predictions_dict = {}
-        
-        if self._is_named_multiobjective and self._objective_names:
-            # Named multi-objective: return dict of {obj_name: (mean, std)} for each peptide
-            mean_array = all_means.numpy()  # Shape: (n_peptides, n_objectives)
-            std_array = all_stds.numpy()
-            
-            for i, pep in enumerate(peptides):
-                obj_predictions = {}
-                for j, obj_name in enumerate(self._objective_names):
-                    obj_predictions[obj_name] = (float(mean_array[i, j]), float(std_array[i, j]))
-                predictions_dict[pep] = obj_predictions
-                
-        elif n_objectives == 1:
-            # Single objective: convert to (mean, std) tuples
-            mean_array = all_means.view(-1).numpy()
-            std_array = all_stds.view(-1).numpy()
-            
-            for i, pep in enumerate(peptides):
-                predictions_dict[pep] = (float(mean_array[i]), float(std_array[i]))
-
-        return predictions_dict
+        return self._format_predictions(peptides, mean_array, std_array)
     
     def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
         """

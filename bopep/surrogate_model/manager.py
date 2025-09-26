@@ -1,8 +1,8 @@
 import torch
 import numpy as np
-from typing import Dict, Any, Optional, Tuple, Union, List
+from typing import Dict, Any, Optional, Tuple, Union
 import logging
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score
 from bopep.surrogate_model import (
     tune_hyperparams,
     NeuralNetworkEnsemble,
@@ -10,8 +10,10 @@ from bopep.surrogate_model import (
     DeepEvidentialRegression,
     MVE
 )
+from bopep.surrogate_model.multi_model import MultiModelWrapper
+from bopep.surrogate_model.helpers import ObjectiveMixin
 
-class SurrogateModelManager:
+class SurrogateModelManager(ObjectiveMixin):
     """
     Manages surrogate model operations including hyperparameter optimization,
     model initialization, training, and prediction. Used by both BoPep and BoGA.
@@ -62,21 +64,7 @@ class SurrogateModelManager:
             logging.info(f"Hyperparameter optimization complete. Best parameters: {self.best_hyperparams}")
         
         return self.best_hyperparams
-    
-    def _auto_detect_n_objectives(self, objectives: Dict[str, Union[float, Dict[str, float]]]) -> int:
-        """
-        Auto-detect the number of objectives from the objectives dict structure.
-        """
 
-        # Get a sample objective to examine structure
-        sample_objective = next(iter(objectives.values()))
-        
-        if isinstance(sample_objective, dict):
-            # Named multi-objective case: count the number of objective names
-            return len(sample_objective)
-        else:
-            # Single objective case: float/int value
-            return 1
 
     def initialize_model(self, hyperparams: Optional[Dict[str, Any]] = None, embeddings: Optional[Dict[str, Any]] = None, objectives: Optional[Dict[str, Union[float, Dict[str, float]]]] = None) -> None:
         """
@@ -112,61 +100,69 @@ class SurrogateModelManager:
         
         # Auto-detect or get n_objectives parameter
         if objectives:
-            n_objectives = self._auto_detect_n_objectives(objectives)
+            self._setup_objectives(objectives)
+            n_objectives = self._n_objectives
         else:
-            n_objectives = self.surrogate_model_kwargs.get('n_objectives', 1)        # Extract hyperparameters
+            n_objectives = self.surrogate_model_kwargs.get('n_objectives', 1)
+
+        # Extract hyperparameters
         hidden_dims = hyperparams.get('hidden_dims')
         hidden_dim = hyperparams.get('hidden_dim')
         num_layers = hyperparams.get('num_layers', 2)
         uncertainty_param = hyperparams.get('uncertainty_param')
         
-        # Initialize model based on type
-        if model_type == 'mve':
-            self.model = MVE(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                mve_regularization=uncertainty_param,
-                n_objectives=n_objectives
-            )
-        elif model_type == 'deep_evidential':
-            self.model = DeepEvidentialRegression(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                evidential_regularization=uncertainty_param,
-                n_objectives=n_objectives
-            )
-        elif model_type == 'mc_dropout':
-            self.model = MonteCarloDropout(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                dropout_rate=uncertainty_param,
-                n_objectives=n_objectives
-            )
-        elif model_type == 'nn_ensemble':
-            self.model = NeuralNetworkEnsemble(
-                input_dim=input_dim,
-                hidden_dims=hidden_dims,
-                hidden_dim=hidden_dim,
-                num_layers=num_layers,
-                network_type=network_type,
-                n_networks=int(uncertainty_param),
-                n_objectives=n_objectives
-            )
-        else:
+        # Check if multi-model approach is requested
+        use_multi_model = self.surrogate_model_kwargs.get('multi_model', False)
+        
+        # Map model type to class
+        model_classes = {
+            'mve': MVE,
+            'deep_evidential': DeepEvidentialRegression,
+            'mc_dropout': MonteCarloDropout,
+            'nn_ensemble': NeuralNetworkEnsemble
+        }
+        
+        if model_type not in model_classes:
             raise ValueError(f"Unknown model type: {model_type}")
+        
+        model_class = model_classes[model_type]
+        
+        # Prepare model kwargs based on model type
+        model_kwargs = {
+            'input_dim': input_dim,
+            'hidden_dims': hidden_dims,
+            'hidden_dim': hidden_dim,
+            'num_layers': num_layers,
+            'network_type': network_type,
+            'n_objectives': n_objectives
+        }
+        
+        # Add model-specific parameters
+        if model_type == 'mve':
+            model_kwargs['mve_regularization'] = uncertainty_param
+        elif model_type == 'deep_evidential':
+            model_kwargs['evidential_regularization'] = uncertainty_param
+        elif model_type == 'mc_dropout':
+            model_kwargs['dropout_rate'] = uncertainty_param
+        elif model_type == 'nn_ensemble':
+            model_kwargs['n_networks'] = int(uncertainty_param)
+        
+        # Initialize model - either wrapped or direct
+        if use_multi_model and n_objectives > 1:
+            # Use MultiModelWrapper for multi-objective optimization
+            self.model = MultiModelWrapper(
+                model_class=model_class,
+                **model_kwargs
+            )
+            wrapper_info = " (multi-model wrapper)"
+        else:
+            # Use single model directly
+            self.model = model_class(**model_kwargs)
+            wrapper_info = ""
         
         self.model.to(self.device)
         obj_info = f" ({n_objectives} objectives)" if n_objectives > 1 else ""
-        logging.info(f"Initialized {model_type} model with {network_type} network architecture{obj_info}")
+        logging.info(f"Initialized {model_type} model with {network_type} network architecture{obj_info}{wrapper_info}")
     
     def train(self, embeddings: Dict[str, Any], objectives: Dict[str, Union[float, Dict[str, float]]]) -> None:
         """Train the model on all provided data."""
@@ -309,8 +305,7 @@ class SurrogateModelManager:
         
         # Enhanced logging for named objectives
         log_msg = f"Loss {loss:.4f}, R2 {train_metrics['r2']:.4f}"
-        
-        # Add named objective details if available
+
         named_objectives = [k for k in train_metrics.keys() if k.startswith('r2_') and k != 'r2']
         if named_objectives:
             obj_names = [k[3:] for k in named_objectives]  # Remove 'r2_' prefix
@@ -327,7 +322,7 @@ class SurrogateModelManager:
         predictions: Dict[str, Any], 
         actual: Dict[str, Union[float, Dict[str, float]]]
     ) -> Dict[str, Any]:
-        """Unified method to compute all metrics (R2, MAE, MSE, correlation, n_samples)."""
+        """Unified method to compute all metrics using ObjectiveMixin logic."""
         if not predictions or not actual:
             return {}
         
@@ -335,24 +330,23 @@ class SurrogateModelManager:
         if not common_seqs:
             return {}
         
-        # Check if we have named multi-objectives
-        first_actual = actual[next(iter(common_seqs))]
-        is_named_multi_objective = isinstance(first_actual, dict)
+        # Setup objectives to get structure info
+        self._setup_objectives(actual)
         
-        if is_named_multi_objective:
-            # Named multi-objective case
-            objective_names = list(first_actual.keys())
+        metrics = {}
+        
+        if self._objective_names:
+            # Multi-objective case
             all_mses = []
             all_maes = []
             all_r2s = []
-            metrics = {}
             
-            for obj_name in objective_names:
+            for obj_name in self._objective_names:
                 pred_values = []
                 actual_values = []
                 
                 for seq in common_seqs:
-                    # Extract actual value (mean from tuple)
+                    # Extract actual value (mean from tuple if needed)
                     actual_obj = actual[seq][obj_name]
                     if isinstance(actual_obj, tuple):
                         actual_values.append(actual_obj[0])  # mean
@@ -387,18 +381,12 @@ class SurrogateModelManager:
                 all_r2s.append(r2)
             
             # Aggregate metrics
-            avg_mse = np.mean(all_mses)
-            avg_mae = np.mean(all_maes)
-            avg_r2 = np.mean(all_r2s)
-            
             metrics.update({
-                'mse': float(avg_mse),
-                'mae': float(avg_mae),
-                'r2': float(avg_r2)
+                'mse': float(np.mean(all_mses)),
+                'mae': float(np.mean(all_maes)),
+                'r2': float(np.mean(all_r2s))
             })
             
-            return metrics
-        
         else:
             # Single objective case
             pred_values = []
@@ -426,11 +414,13 @@ class SurrogateModelManager:
             mae = np.mean(np.abs(pred_array - actual_array))
             r2 = r2_score(actual_array, pred_array)
             
-            return {
+            metrics = {
                 'mse': float(mse),
                 'mae': float(mae),
                 'r2': float(r2)
             }
+        
+        return metrics
     
     def _compute_split_indices(
         self, total_samples: int, n_validate: Optional[Union[int, float]], min_training_samples: int = 10, 

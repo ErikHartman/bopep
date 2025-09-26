@@ -46,6 +46,7 @@ class BoPep:
             surrogate_model_kwargs: Configuration for the surrogate model including:
                 - network_type: 'mlp', 'bilstm', or 'bigru'
                 - model_type: 'nn_ensemble', 'mc_dropout', 'deep_evidential', or 'mve'
+                - multi_model: If True, use separate models per objective (default: False)
             objective_function: Custom objective function (defaults to maximize iptm/pae and minimize dG and rosetta_score, see paper)
             objective_function_kwargs: Parameters for the objective function
             docker_kwargs: Configuration for the Docker component
