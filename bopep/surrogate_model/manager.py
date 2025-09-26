@@ -305,8 +305,7 @@ class SurrogateModelManager(ObjectiveMixin):
         
         # Enhanced logging for named objectives
         log_msg = f"Loss {loss:.4f}, R2 {train_metrics['r2']:.4f}"
-        
-        # Add named objective details if available
+
         named_objectives = [k for k in train_metrics.keys() if k.startswith('r2_') and k != 'r2']
         if named_objectives:
             obj_names = [k[3:] for k in named_objectives]  # Remove 'r2_' prefix

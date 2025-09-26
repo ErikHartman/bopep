@@ -456,12 +456,11 @@ def tune_hyperparams(
     else:
         input_dim = sample_embedding.shape[0]
     
-    # Auto-detect number of objectives
     sample_objective = next(iter(objective_dict.values()))
     if isinstance(sample_objective, dict):
-        n_objectives = len(sample_objective)  # Named multi-objective
+        n_objectives = len(sample_objective) 
     else:
-        n_objectives = 1  # Single objective
+        n_objectives = 1  
     
     tuner = HyperparameterTuner(
         model_type=model_type,

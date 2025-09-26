@@ -16,7 +16,7 @@ class ObjectiveMixin:
         sample_objective = next(iter(objective_dict.values()))
         
         if isinstance(sample_objective, dict):
-            # Multi-objective (always named now)
+            # Multi-objective
             self._objective_names = sorted(sample_objective.keys())
             self._n_objectives = len(self._objective_names)
         else:
@@ -184,6 +184,8 @@ class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
         # Initialize objective-related attributes
         self._objective_names = None
         self._n_objectives = 1
+        # Initialize loss tracking
+        self.loss_history = {}
 
     def fit_dict(
         self,
@@ -205,8 +207,7 @@ class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
         Args:
             embedding_dict: {peptide: embedding_array}
             objective_dict: {peptide: score} for single-objective, 
-                          {peptide: [score1, score2, ...]} for multi-objective, or
-                          {peptide: {"obj1": (mean, std), "obj2": (mean, std)}} for named multi-objective
+                            {peptide: {"obj1": (mean, std), "obj2": (mean, std)}} for multi-objective
             val_embedding_dict: Optional validation embeddings
             val_objective_dict: Optional validation scores (same format as objective_dict)
             epochs: Number of training epochs
@@ -290,34 +291,94 @@ class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
         best_state = None
         counter = 0
 
+        # Initialize loss tracking
+        self.loss_history = {
+            "epoch": [],
+            "train_loss": []
+        }
+        if val_loader:
+            self.loss_history["val_loss"] = []
+        
+        # For multi-objective models, track per-objective losses
+        if self._objective_names:
+            self.loss_history["total_loss"] = []
+            if val_loader:
+                self.loss_history["val_total_loss"] = []
+            for obj_name in self._objective_names:
+                self.loss_history[obj_name] = []
+                if val_loader:
+                    self.loss_history[f"val_{obj_name}"] = []
+
         for epoch in range(1, epochs + 1):
             # --- Training ---
             self.train()
             train_loss = 0.0
+            objective_losses = {obj_name: 0.0 for obj_name in (self._objective_names or [])}
+            
             for x, y, lengths in train_loader:
                 x, y = x.to(device), y.to(device)
                 optimizer.zero_grad()
                 loss = self._calculate_loss(x, y, lengths, criterion)
+                
+                # For multi-objective models, also track per-objective losses
+                if self._objective_names and hasattr(self, '_get_per_objective_losses'):
+                    per_obj_losses = self._get_per_objective_losses(x, y, lengths, criterion)
+                    for obj_name, obj_loss in per_obj_losses.items():
+                        objective_losses[obj_name] += obj_loss
+                
                 loss.backward()
                 if clip_grad_norm is not None:
                     torch.nn.utils.clip_grad_norm_(self.parameters(), clip_grad_norm)
                 optimizer.step()
                 train_loss += loss.item()
+            
             train_loss /= len(train_loader)
+            for obj_name in objective_losses:
+                objective_losses[obj_name] /= len(train_loader)
 
             # --- Validation (optional) ---
+            val_loss = None
+            val_objective_losses = {}
             if val_loader:
                 self.eval()
                 val_loss = 0.0
+                val_objective_losses = {obj_name: 0.0 for obj_name in (self._objective_names or [])}
+                
                 with torch.no_grad():
                     for x, y, lengths in val_loader:
                         x, y = x.to(device), y.to(device)
                         loss = self._calculate_loss(x, y, lengths, criterion)
                         val_loss += loss.item()
+                        
+                        # Track per-objective validation losses
+                        if self._objective_names and hasattr(self, '_get_per_objective_losses'):
+                            per_obj_losses = self._get_per_objective_losses(x, y, lengths, criterion)
+                            for obj_name, obj_loss in per_obj_losses.items():
+                                val_objective_losses[obj_name] += obj_loss
+                
                 val_loss /= len(val_loader)
+                for obj_name in val_objective_losses:
+                    val_objective_losses[obj_name] /= len(val_loader)
                 metric = val_loss
             else:
                 metric = train_loss
+
+            # Store loss history
+            self.loss_history["epoch"].append(epoch)
+            self.loss_history["train_loss"].append(train_loss)
+            if val_loader:
+                self.loss_history["val_loss"].append(val_loss)
+            
+            # Store multi-objective losses
+            if self._objective_names:
+                self.loss_history["total_loss"].append(train_loss)
+                if val_loader:
+                    self.loss_history["val_total_loss"].append(val_loss)
+                for obj_name in self._objective_names:
+                    if obj_name in objective_losses:
+                        self.loss_history[obj_name].append(objective_losses[obj_name])
+                    if val_loader and obj_name in val_objective_losses:
+                        self.loss_history[f"val_{obj_name}"].append(val_objective_losses[obj_name])
 
 
             scheduler.step(metric)
@@ -369,8 +430,7 @@ class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
             
         Returns:
             For single objective: {pep: (mean, std), ...}
-            For named multi-objective: {pep: {obj_name: (mean, std), ...}, ...}
-            For legacy multi-objective: {pep: ([mean1, mean2, ...], [std1, std2, ...]), ...}
+            For multi-objective: {pep: {obj_name: (mean, std), ...}, ...}
         """
 
         if device is None:

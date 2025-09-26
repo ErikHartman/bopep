@@ -114,7 +114,24 @@ class MultiModelWrapper(BasePredictionModel):
         # Store objective names for later use in prediction
         self.objective_names = objective_names
         
+        # Initialize loss tracking for MultiModelWrapper
+        self.loss_history = {
+            "epoch": [],
+            "train_loss": [],
+            "total_loss": []
+        }
+        if val_embedding_dict is not None and val_objective_dict is not None:
+            self.loss_history["val_loss"] = []
+            self.loss_history["val_total_loss"] = []
+        
+        # Add per-objective loss tracking
+        for obj_name in objective_names:
+            self.loss_history[obj_name] = []
+            if val_embedding_dict is not None and val_objective_dict is not None:
+                self.loss_history[f"val_{obj_name}"] = []
+        
         losses = []
+        individual_model_histories = []
         
         # Train each model on its corresponding objective
         for i, (obj_name, model) in enumerate(zip(objective_names, self.models)):
@@ -155,7 +172,44 @@ class MultiModelWrapper(BasePredictionModel):
             )
             
             losses.append(loss)
+            individual_model_histories.append(model.loss_history)
             logging.info(f"Training complete for objective {i+1}/{self.n_objectives} ('{obj_name}') with loss: {loss:.4f}")
+        
+        # Aggregate loss histories from individual models
+        if individual_model_histories:
+            # Get the maximum number of epochs trained (in case of early stopping differences)
+            max_epochs = max(len(history.get("epoch", [])) for history in individual_model_histories)
+            
+            # Build aggregated loss history
+            for epoch in range(1, max_epochs + 1):
+                self.loss_history["epoch"].append(epoch)
+                
+                # Collect losses for this epoch from all models
+                epoch_losses = []
+                epoch_val_losses = []
+                
+                for i, (obj_name, history) in enumerate(zip(objective_names, individual_model_histories)):
+                    if epoch <= len(history.get("train_loss", [])):
+                        obj_loss = history["train_loss"][epoch - 1]
+                        epoch_losses.append(obj_loss)
+                        self.loss_history[obj_name].append(obj_loss)
+                        
+                        # Handle validation losses
+                        if "val_loss" in history and epoch <= len(history["val_loss"]):
+                            obj_val_loss = history["val_loss"][epoch - 1]
+                            epoch_val_losses.append(obj_val_loss)
+                            self.loss_history[f"val_{obj_name}"].append(obj_val_loss)
+                
+                # Store average losses
+                if epoch_losses:
+                    avg_loss = sum(epoch_losses) / len(epoch_losses)
+                    self.loss_history["train_loss"].append(avg_loss)
+                    self.loss_history["total_loss"].append(avg_loss)
+                
+                if epoch_val_losses:
+                    avg_val_loss = sum(epoch_val_losses) / len(epoch_val_losses)
+                    self.loss_history["val_loss"].append(avg_val_loss)
+                    self.loss_history["val_total_loss"].append(avg_val_loss)
         
         # Return average loss
         avg_loss = sum(losses) / len(losses)
