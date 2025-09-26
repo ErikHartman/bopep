@@ -443,9 +443,7 @@ class BoGA:
         # Convert initial scores to objectives
         objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
-        # Extract objective directions from the first phase (assuming they're consistent across phases)
         first_phase_kwargs = schedule[0].get("acquisition_kwargs", {}) if schedule else {}
-        objective_directions = first_phase_kwargs.get("objective_directions", {})
 
         if not self.continue_from_logs:
             print("Initial objectives:")
@@ -458,7 +456,7 @@ class BoGA:
 
             # Show initial population leaderboard
             print("Initial population results:")
-            self._print_leaderboard(objectives, 0, objective_directions=objective_directions)
+            self._print_leaderboard(objectives, 0, objective_directions=first_phase_kwargs.get("objective_directions", {}))
 
             # Initial hyperparameter tuning for fresh runs
             init_reduced = self._embed_peptides(list(scores.keys()))
@@ -468,7 +466,7 @@ class BoGA:
             print("Loaded objectives:")
             print(f"Total sequences: {len(objectives)}")
             print("Best existing performers:")
-            self._print_leaderboard(objectives, last_iteration, objective_directions=objective_directions)
+            self._print_leaderboard(objectives, last_iteration, objective_directions=first_phase_kwargs.get("objective_directions", {}))
             
             # For continued runs, optimize hyperparameters on existing data
             existing_reduced = self._embed_peptides(list(scores.keys()))

@@ -10,7 +10,7 @@ from bopep.surrogate_model import (
     DeepEvidentialRegression,
     MVE
 )
-from bopep.surrogate_model.mutli_model import MultiModelWrapper
+from bopep.surrogate_model.multi_model import MultiModelWrapper
 from bopep.surrogate_model.helpers import ObjectiveMixin
 
 class SurrogateModelManager(ObjectiveMixin):

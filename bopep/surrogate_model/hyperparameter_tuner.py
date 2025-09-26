@@ -22,7 +22,7 @@ class HyperparameterTuner:
       1) Network architecture hyperparams (MLP vs BiLSTM vs BiGRU)
       2) Uncertainty hyperparam (MVE/DER reg, dropout rate, or ensemble size)
     Uses NLL as the primary metric, supports both single and multi-objective optimization.
-    For multi-objective, NLLs are summed across objectives.
+    For multi-objective, NLLs are averaged across objectives.
     """
 
     def __init__(
@@ -138,7 +138,7 @@ class HyperparameterTuner:
         self, model: "BasePredictionModel", val_loader: DataLoader
     ) -> float:
         """
-        Returns NLL. For multi-objective, returns sum of NLLs across objectives.
+        Returns NLL. For multi-objective, returns mean of NLLs across objectives.
         """
         model.eval()
         model.to(self.device)
@@ -202,7 +202,7 @@ class HyperparameterTuner:
                           stds: torch.Tensor,
                           targets: torch.Tensor) -> float:
         """
-        Returns the sum of mean negative log-likelihoods across objectives.
+        Returns the mean of mean negative log-likelihoods across objectives.
         For multi-objective case where:
         - means: [batch_size, n_objectives] or [batch_size, n_objectives, 1]
         - stds: [batch_size, n_objectives] or [batch_size, n_objectives, 1]  
@@ -223,8 +223,8 @@ class HyperparameterTuner:
                     + math.log(2 * math.pi)
                 )
         
-        # Sum NLL across objectives, then take mean across batch
-        result = nll.sum(dim=-1).mean().item()
+        # Mean NLL across objectives, then take mean across batch
+        result = nll.mean(dim=-1).mean().item()
         # Check for numerical issues and return a finite fallback value
         if not math.isfinite(result):
             return 1e6  # Large but finite penalty

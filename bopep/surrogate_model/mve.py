@@ -126,9 +126,9 @@ class MVE(BasePredictionModel):
             + math.log(2 * math.pi)
         )
 
-        # For multi-objective, sum losses across objectives, then average across batch
+        # For multi-objective, average losses across objectives, then average across batch
         if self.n_objectives > 1:
-            nll = nll.sum(dim=-1)  # Sum across objectives
+            nll = nll.mean(dim=-1)  # Mean across objectives
         
         return nll.mean()  # Average across batch
 
@@ -140,9 +140,9 @@ class MVE(BasePredictionModel):
         nll_loss = self.negative_log_likelihood(mu, log_var, batch_y)
 
         # Regularization term: encourage reasonable variance estimates
-        # For multi-objective, sum regularization across objectives
+        # For multi-objective, average regularization across objectives
         if self.n_objectives > 1:
-            reg_term = torch.mean(-log_var.squeeze(-1).sum(dim=-1))  # Sum across objectives, mean across batch
+            reg_term = torch.mean(-log_var.squeeze(-1).mean(dim=-1))  # Mean across objectives, mean across batch
         else:
             reg_term = torch.mean(-log_var)
             

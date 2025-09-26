@@ -26,7 +26,7 @@ from bopep.surrogate_model import (
     MVE
 )
 from bopep.surrogate_model.manager import SurrogateModelManager
-from bopep.surrogate_model.mutli_model import MultiModelWrapper
+from bopep.surrogate_model.multi_model import MultiModelWrapper
 from bopep.surrogate_model.helpers import pad_sequence
 from bopep.surrogate_model.base_models import RNNetwork, MLPNetwork
 

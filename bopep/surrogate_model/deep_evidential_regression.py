@@ -278,9 +278,9 @@ class DeepEvidentialRegression(BasePredictionModel):
 
         loss = nll + self.evidential_regularization * reg
 
-        # For multi-objective, sum losses across objectives, then average across batch
+        # For multi-objective, average losses across objectives, then average across batch
         if self.n_objectives > 1:
-            loss = loss.sum(dim=-1)  # Sum across objectives
+            loss = loss.mean(dim=-1)  # Mean across objectives
         
         return loss.mean()  # Average across batch
 
