@@ -29,10 +29,10 @@ class MultiModelWrapper(BasePredictionModel):
         Initialize the multi-objective wrapper.
         
         Args:
-            model_class: The model class to instantiate for each objective
+            model_class: The model class to instantiate for each objective, e.g., NeuralNetworkEnsemble or MVE
             input_dim: Dimensionality of input embeddings
             n_objectives: Number of objectives
-            network_type: Network architecture type
+            network_type: Network architecture type ('mlp', 'bilstm', 'bigru')
             hidden_dims: List of hidden dimensions for each layer
             hidden_dim: Single hidden dimension (if hidden_dims not provided)
             num_layers: Number of hidden layers
@@ -100,19 +100,19 @@ class MultiModelWrapper(BasePredictionModel):
         Returns:
             Average training loss across all models
         """
-        # Handle both multi-objective and single-objective formats
-        if isinstance(next(iter(objective_dict.values())), dict):
-            # Multi-objective format: {peptide: {obj_name: value}}
-            objective_names = sorted(set().union(*[obj_dict.keys() for obj_dict in objective_dict.values()]))
+        # MultiModelWrapper always expects multi-objective format: {peptide: {obj_name: value}}
+        if not isinstance(next(iter(objective_dict.values())), dict):
+            raise ValueError("MultiModelWrapper expects multi-objective format: {peptide: {obj_name: value}}")
             
-            if len(objective_names) != self.n_objectives:
-                raise ValueError(f"Expected {self.n_objectives} objectives, got {len(objective_names)}")
-                
-            # Store objective names for later use in prediction
-            self.objective_names = objective_names
-        else:
-            # Single objective format: {peptide: value} - shouldn't happen with this wrapper
-            raise ValueError("MultiObjectiveWrapper expects multi-objective format: {peptide: {obj_name: value}}")
+        # Use same objective ordering approach as ObjectiveMixin for consistency
+        sample_objective = next(iter(objective_dict.values()))
+        objective_names = sorted(sample_objective.keys())
+        
+        if len(objective_names) != self.n_objectives:
+            raise ValueError(f"Expected {self.n_objectives} objectives, got {len(objective_names)}")
+            
+        # Store objective names for later use in prediction
+        self.objective_names = objective_names
         
         losses = []
         
@@ -176,12 +176,8 @@ class MultiModelWrapper(BasePredictionModel):
         Returns:
             For multi-objective: {peptide: {obj_name: (mean, std)}}
         """
-        # Use stored objective names if available, otherwise use generic names
-        if self.objective_names:
-            objective_names = self.objective_names
-        else:
-            objective_names = [f"obj{i+1}" for i in range(self.n_objectives)]
-        
+        objective_names = self.objective_names
+ 
         results = {}
         
         # Get predictions from each model
