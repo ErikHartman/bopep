@@ -30,6 +30,9 @@ class Logger:
         self._predictions_header_written  = False
         self._acquisition_header_written  = False
         self._objectives_header_written   = False
+        
+        # Track all metric keys encountered for model losses
+        self._model_losses_all_keys = set()
 
         # Build full paths
         self._scores_file        = os.path.join(self.log_dir, self._scores_base)
@@ -158,17 +161,81 @@ class Logger:
                 for pep, val in objectives.items():
                     wr.writerow([timestamp, iteration, pep, val, acquisition_name])
 
-
     def log_model_metrics(self, loss: float, iteration: int, metrics: Optional[Dict[str, float]] = None):
         timestamp = datetime.now().isoformat()
         metrics = metrics or {}
-        keys = list(metrics.keys())
+        
+        # Track all keys we've encountered
+        current_keys = set(metrics.keys())
+        all_keys_before = self._model_losses_all_keys.copy()
+        self._model_losses_all_keys.update(current_keys)
+        
+        # Check if we need to update the header (new keys found)
+        need_header_update = not self._model_losses_header_written or (current_keys - all_keys_before)
+        
+        if need_header_update:
+            # Read existing data if header needs updating
+            existing_data = []
+            if self._model_losses_header_written:
+                # File exists, we need to preserve existing data and update header
+                try:
+                    with open(self._model_losses_file, "r", newline="") as f:
+                        reader = csv.reader(f)
+                        existing_data = list(reader)
+                except FileNotFoundError:
+                    existing_data = []
+            
+            # Prepare new header with all keys (logically ordered)
+            ordered_keys = sorted(self._model_losses_all_keys)
+            new_header = ["timestamp", "iteration", "loss"] + ordered_keys
+            
+            # Rewrite the file with updated header
+            with open(self._model_losses_file, "w", newline="") as f:
+                wr = csv.writer(f)
+                wr.writerow(new_header)
+                
+                # If we had existing data, rewrite it with expanded columns
+                if existing_data and len(existing_data) > 1:  # More than just header
+                    old_header = existing_data[0] if existing_data else []
+                    
+                    # Create mapping from old positions to new positions
+                    old_key_positions = {}
+                    if len(old_header) > 3:  # Has metric columns
+                        for i, key in enumerate(old_header[3:], start=3):  # Skip timestamp, iteration, loss
+                            old_key_positions[key] = i
+                    
+                    # Rewrite existing data rows with new column structure
+                    for row in existing_data[1:]:  # Skip old header
+                        if len(row) >= 3:  # Has at least timestamp, iteration, loss
+                            new_row = row[:3]  # timestamp, iteration, loss
+                            
+                            # Add metric values in new ordered sequence
+                            for key in ordered_keys:
+                                if key in old_key_positions and old_key_positions[key] < len(row):
+                                    new_row.append(row[old_key_positions[key]])
+                                else:
+                                    new_row.append("")  # Missing metric from old data (use empty string for CSV compatibility)
+                            
+                            wr.writerow(new_row)
+            
+            self._model_losses_header_written = True
+        
+        # Append current data row
+        ordered_keys = sorted(self._model_losses_all_keys)
+        current_row = [timestamp, iteration, loss]
+        
+        # Add metric values in logical order, empty string for missing metrics (CSV compatible)
+        for key in ordered_keys:
+            value = metrics.get(key, "")
+            # Convert None to empty string for CSV compatibility
+            if value is None:
+                value = ""
+            current_row.append(value)
+        
+        # Append to file
         with open(self._model_losses_file, "a", newline="") as f:
             wr = csv.writer(f)
-            if not self._model_losses_header_written:
-                wr.writerow(["timestamp","iteration","loss"] + keys)
-                self._model_losses_header_written = True
-            wr.writerow([timestamp, iteration, loss] + [metrics[k] for k in keys])
+            wr.writerow(current_row)
 
 
     def log_predictions(self, predictions: Dict[str, tuple], iteration: int):
