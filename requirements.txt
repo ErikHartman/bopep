@@ -9,6 +9,7 @@ joblib
 torch
 biopython
 fair-esm
+pydssp
 pytest>=6.0
 pytest-mock
 pyrosetta-installer
