@@ -16,6 +16,7 @@ from bopep.scoring.peptide_properties import PeptideProperties
 
 from bopep.scoring.confidence_scores import get_peptide_plddt, get_weighted_peptide_plddt, get_peptide_pae, get_peptide_pde
 from bopep.scoring.ipsae import get_ipsae_scores_from_structure_and_pae
+from bopep.scoring.dssp import DSSPAnalyzer
 from bopep.structure.parser import extract_sequence_from_structure
 import os
 
@@ -63,6 +64,9 @@ class Scorer:
             "negatively_charged_aa_percent",
             "delta_net_charge_frac",
             "uHrel",
+            "dssp_helix_fraction",
+            "dssp_strand_fraction",
+            "dssp_loop_fraction",
         ]
         
         self.method_specific_scores = {
@@ -983,6 +987,24 @@ class Scorer:
             scores["delta_net_charge_frac"] = peptide_properties.get_delta_net_charge_frac()
         if "uHrel" in scores_to_include:
             scores["uHrel"] = peptide_properties.get_uHrel()
+        if "dssp_helix_fraction" in scores_to_include:
+            if target_structure_file:
+                dssp_analyzer = DSSPAnalyzer(target_structure_file)
+                scores["dssp_helix_fraction"] = dssp_analyzer.get_dssp_helix_fraction()
+            else:
+                raise ValueError("dssp_helix_fraction requires a structure file to be available")
+        if "dssp_strand_fraction" in scores_to_include:
+            if target_structure_file:
+                dssp_analyzer = DSSPAnalyzer(target_structure_file)
+                scores["dssp_strand_fraction"] = dssp_analyzer.get_dssp_strand_fraction()
+            else:
+                raise ValueError("dssp_strand_fraction requires a structure file to be available")
+        if "dssp_loop_fraction" in scores_to_include:
+            if target_structure_file:
+                dssp_analyzer = DSSPAnalyzer(target_structure_file)
+                scores["dssp_loop_fraction"] = dssp_analyzer.get_dssp_loop_fraction()
+            else:
+                raise ValueError("dssp_loop_fraction requires a structure file to be available")
         
         return {peptide_sequence: scores}
 
