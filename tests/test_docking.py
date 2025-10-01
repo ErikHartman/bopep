@@ -351,7 +351,7 @@ class TestBoltzDocker:
                 
                 # Check template configuration
                 template = config["templates"][0]
-                assert template["chain_id"] == "D"  # Should auto-detect chain D
+                assert template["chain_id"] == "A"  # Should use "A" to match protein sequence ID
                 assert template["cif"].endswith("5CR6.cif")
             else:
                 pytest.skip("5CR6.cif test file not found")

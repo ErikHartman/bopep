@@ -125,7 +125,7 @@ class BoltzDocker(BaseDockingModel):
         Detect the protein chain ID and extract its sequence from the structure.
         
         Returns:
-            Tuple of (chain_id, sequence)
+            Tuple of (original_chain_id, sequence)
         """
         chain_sequences = get_chain_sequences(target_structure)
         
@@ -176,7 +176,7 @@ class BoltzDocker(BaseDockingModel):
         config["templates"] = [
             {
                 "cif": template_path,
-                "chain_id": protein_chain_id  # Use the detected protein chain ID
+                "chain_id": "A"  # Always use "A" - it refers to the first protein sequence above
             }
         ]
         
