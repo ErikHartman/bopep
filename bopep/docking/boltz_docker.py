@@ -4,8 +4,9 @@ import yaml
 import subprocess
 import glob
 import shutil
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from bopep.docking.base_docking_model import BaseDockingModel
+from bopep.structure.parser import get_chain_sequences
 import logging
 import numpy as np
 
@@ -119,11 +120,39 @@ class BoltzDocker(BaseDockingModel):
         
         return docked_results
     
+    def _detect_protein_chain_and_sequence(self, target_structure: str) -> Tuple[str, str]:
+        """
+        Detect the protein chain ID and extract its sequence from the structure.
+        
+        Returns:
+            Tuple of (chain_id, sequence)
+        """
+        chain_sequences = get_chain_sequences(target_structure)
+        
+        if not chain_sequences:
+            raise ValueError(f"No protein chains found in structure: {target_structure}")
+        
+        # Find the chain with the longest sequence (most likely the main protein)
+        protein_chain_id = max(chain_sequences.keys(), key=lambda k: len(chain_sequences[k]))
+        protein_sequence = chain_sequences[protein_chain_id]
+        
+        logging.info(f"Detected protein chain '{protein_chain_id}' with {len(protein_sequence)} residues")
+        return protein_chain_id, protein_sequence
+    
     def _create_yaml_config(self, peptide_sequence: str, target_sequence: str,
                            target_name: str, output_dir: str, target_structure: str) -> str:
         """
         Create a YAML configuration file for Boltz.
         """
+        # Auto-detect the protein chain and sequence from the structure
+        protein_chain_id, detected_sequence = self._detect_protein_chain_and_sequence(target_structure)
+        
+        # Use the detected sequence if target_sequence is empty or if they don't match
+        if not target_sequence or target_sequence != detected_sequence:
+            if target_sequence and target_sequence != detected_sequence:
+                logging.warning(f"Provided target sequence doesn't match detected sequence. Using detected sequence from chain {protein_chain_id}")
+            target_sequence = detected_sequence
+        
         config = {
             "sequences": [
                 {
@@ -147,7 +176,7 @@ class BoltzDocker(BaseDockingModel):
         config["templates"] = [
             {
                 "cif": template_path,
-                "chain_id": "A"
+                "chain_id": protein_chain_id  # Use the detected protein chain ID
             }
         ]
         
