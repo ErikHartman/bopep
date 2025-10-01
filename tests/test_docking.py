@@ -1,11 +1,13 @@
+from unittest.mock import patch
 import pytest
 import os
 import tempfile
 import shutil
 import json
+import yaml
 from typing import List, Tuple
-from unittest.mock import patch, MagicMock
 from bopep.docking.docker import Docker
+from bopep.docking.boltz_docker import BoltzDocker
 from bopep.docking.base_docking_model import BaseDockingModel
 from bopep.structure.parser import extract_sequence_from_structure
 
@@ -239,3 +241,191 @@ class TestParallelProcessing:
             
             processed_dirs = docker.dock([], mock_target, "MOCK", "test")
             assert processed_dirs == []
+
+
+class TestBoltzDocker:
+    """
+    Test the BoltzDocker class for Boltz-based docking.
+    """
+
+    def test_init_default(self):
+        """Test BoltzDocker initialization with default parameters"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(output_dir=temp_dir)
+            
+            assert boltz.method_name == "boltz"
+            assert boltz.recycling_steps == 3
+            assert boltz.diffusion_samples == 1
+            assert boltz.output_format == "pdb"
+            assert boltz.sampling_steps == 200
+            assert boltz.step_scale == 1.638
+
+    def test_init_custom(self):
+        """Test BoltzDocker initialization with custom parameters"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(
+                output_dir=temp_dir,
+                recycling_steps=5,
+                diffusion_samples=3,
+                output_format="mmcif",
+                sampling_steps=100,
+                step_scale=2.0
+            )
+            
+            assert boltz.recycling_steps == 5
+            assert boltz.diffusion_samples == 3
+            assert boltz.output_format == "mmcif"
+            assert boltz.sampling_steps == 100
+            assert boltz.step_scale == 2.0
+
+    def test_detect_protein_chain_and_sequence(self):
+        """Test protein chain detection and sequence extraction"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(output_dir=temp_dir)
+            
+            # Test with the actual 5CR6.cif file
+            cif_path = os.path.join("data", "5CR6.cif")
+            if os.path.exists(cif_path):
+                chain_id, sequence = boltz._detect_protein_chain_and_sequence(cif_path)
+                
+                # Verify chain D is detected (the actual protein chain in 5CR6.cif)
+                assert chain_id == "D"
+                
+                # Verify sequence is extracted correctly
+                assert len(sequence) > 0
+                assert sequence.startswith("MANKAVNDFILAMNYDKKKLLTHQGESIENRFIK")
+                assert len(sequence) == 467  # Known length of 5CR6 protein
+            else:
+                pytest.skip("5CR6.cif test file not found")
+
+    def test_detect_protein_chain_no_chains(self):
+        """Test protein chain detection with no protein chains"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(output_dir=temp_dir)
+            
+            # Mock the get_chain_sequences function to return empty dict
+            with patch('bopep.docking.boltz_docker.get_chain_sequences', return_value={}):
+                with pytest.raises(ValueError, match="No protein chains found"):
+                    boltz._detect_protein_chain_and_sequence("mock_file.cif")
+
+    def test_create_yaml_config_with_auto_detection(self):
+        """Test YAML configuration creation with automatic chain detection"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(output_dir=temp_dir)
+            
+            # Test with the actual 5CR6.cif file
+            cif_path = os.path.join("data", "5CR6.cif")
+            if os.path.exists(cif_path):
+                yaml_path = boltz._create_yaml_config(
+                    peptide_sequence="ARNPIYDGLCVFY",
+                    target_sequence="",  # Empty to test auto-detection
+                    target_name="5CR6",
+                    output_dir=temp_dir,
+                    target_structure=cif_path
+                )
+                
+                # Verify YAML file was created
+                assert os.path.exists(yaml_path)
+                
+                # Verify YAML content
+                with open(yaml_path, "r") as f:
+                    config = yaml.safe_load(f)
+                
+                # Check structure
+                assert "sequences" in config
+                assert "templates" in config
+                assert len(config["sequences"]) == 2
+                
+                # Check protein A (target)
+                protein_a = config["sequences"][0]["protein"]
+                assert protein_a["id"] == "A"
+                assert protein_a["msa"] == "empty"
+                assert len(protein_a["sequence"]) == 467  # 5CR6 protein length
+                assert protein_a["sequence"].startswith("MANKAVNDFILAMNYDKKKLLTHQGESIENRFIK")
+                
+                # Check protein B (peptide)
+                protein_b = config["sequences"][1]["protein"]
+                assert protein_b["id"] == "B"
+                assert protein_b["sequence"] == "ARNPIYDGLCVFY"
+                assert protein_b["msa"] == "empty"
+                
+                # Check template configuration
+                template = config["templates"][0]
+                assert template["chain_id"] == "D"  # Should auto-detect chain D
+                assert template["cif"].endswith("5CR6.cif")
+            else:
+                pytest.skip("5CR6.cif test file not found")
+
+    def test_create_yaml_config_with_provided_sequence(self):
+        """Test YAML configuration creation with provided target sequence"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(output_dir=temp_dir)
+            
+            cif_path = os.path.join("data", "5CR6.cif")
+            if os.path.exists(cif_path):
+                # Provide a custom sequence (different from the one in the file)
+                custom_sequence = "TESTSEQUENCE"
+                
+                yaml_path = boltz._create_yaml_config(
+                    peptide_sequence="ARNPIYDGLCVFY",
+                    target_sequence=custom_sequence,
+                    target_name="5CR6",
+                    output_dir=temp_dir,
+                    target_structure=cif_path
+                )
+                
+                # Verify YAML content uses detected sequence, not provided one
+                with open(yaml_path, "r") as f:
+                    config = yaml.safe_load(f)
+                
+                # Should use the detected sequence since it doesn't match
+                protein_a = config["sequences"][0]["protein"]
+                assert protein_a["sequence"] != custom_sequence
+                assert len(protein_a["sequence"]) == 467  # Should be the detected 5CR6 sequence
+            else:
+                pytest.skip("5CR6.cif test file not found")
+
+    def test_prepare_template_file_cif(self):
+        """Test template file preparation for CIF files"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(output_dir=temp_dir)
+            
+            cif_path = os.path.join("data", "5CR6.cif")
+            if os.path.exists(cif_path):
+                template_path = boltz._prepare_template_file(cif_path, temp_dir)
+                
+                # Verify file was copied
+                assert os.path.exists(template_path)
+                assert template_path.endswith("5CR6.cif")
+                assert os.path.dirname(template_path) == temp_dir
+                
+                # Verify it's a copy, not the original
+                assert template_path != cif_path
+            else:
+                pytest.skip("5CR6.cif test file not found")
+
+    def test_prepare_template_file_pdb_error(self):
+        """Test template file preparation raises error for PDB files"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(output_dir=temp_dir)
+            
+            # Create a mock PDB file
+            pdb_path = os.path.join(temp_dir, "test.pdb")
+            with open(pdb_path, "w") as f:
+                f.write("MOCK PDB CONTENT")
+            
+            with pytest.raises(ValueError, match="PDB files are not supported"):
+                boltz._prepare_template_file(pdb_path, temp_dir)
+
+    def test_prepare_template_file_unsupported_format(self):
+        """Test template file preparation raises error for unsupported formats"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boltz = BoltzDocker(output_dir=temp_dir)
+            
+            # Create a mock file with unsupported extension
+            unsupported_path = os.path.join(temp_dir, "test.xyz")
+            with open(unsupported_path, "w") as f:
+                f.write("MOCK CONTENT")
+            
+            with pytest.raises(ValueError, match="Unsupported file format"):
+                boltz._prepare_template_file(unsupported_path, temp_dir)
