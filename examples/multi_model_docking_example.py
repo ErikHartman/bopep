@@ -20,7 +20,7 @@ def main():
 
 
     docker_kwargs = {
-        "models": ["alphafold"],
+        "models": ["boltz"],
         "output_dir": output_dir,
         "num_models": 1,
         "num_recycles": 0,  
@@ -30,7 +30,9 @@ def main():
         "diffusion_samples": 2,  
         "sampling_steps": 200,  
         "output_format": "pdb",
-        "step_scale": 1.638
+        "step_scale": 1.638,
+        "force": True,
+        "threshold": 2
     }
 
     docker = Docker(
@@ -47,8 +49,8 @@ def main():
     scorer = Scorer()
 
     scores_to_compute = [
-        "alphafold_iptm",
-        #"boltz_iptm",
+        #"alphafold_iptm",
+        "boltz_iptm",
         
         "molecular_weight",
         "gravy",
@@ -61,24 +63,24 @@ def main():
         "hydrophobic_aa_percent",
         "polar_aa_percent",
 
-        #"boltz_distance_score",
-        "alphafold_distance_score",
-        "alphafold_rosetta_score",
-        #"boltz_rosetta_score",
-        "alphafold_interface_sasa",
-        #"boltz_interface_sasa",
-        "alphafold_interface_dG",
-        #"boltz_interface_dG",
-        "alphafold_packstat",
-        #"boltz_packstat",
+        "boltz_distance_score",
+        #"alphafold_distance_score",
+        #"alphafold_rosetta_score",
+        "boltz_rosetta_score",
+        #"alphafold_interface_sasa",
+        "boltz_interface_sasa",
+        #"alphafold_interface_dG",
+        "boltz_interface_dG",
+        #"alphafold_packstat",
+        "boltz_packstat",
 
-        "alphafold_interface_peptide_plddt",
-        #"boltz_interface_peptide_plddt",
-        "alphafold_peptide_plddt",
-        #"boltz_peptide_plddt",
+        #"alphafold_interface_peptide_plddt",
+        "boltz_interface_peptide_plddt",
+        #"alphafold_peptide_plddt",
+        "boltz_peptide_plddt",
 
-        #"boltz_in_binding_site",
-        "alphafold_in_binding_site",
+        "boltz_in_binding_site",
+        #"alphafold_in_binding_site",
        # "inter_model_rmsd"
     ]
     

@@ -33,6 +33,8 @@ class BoltzDocker(BaseDockingModel):
         - output_format: Output format - 'pdb' or 'mmcif' (default: 'pdb')
         - sampling_steps: Number of sampling steps (default: 200)
         - step_scale: Step scale for diffusion sampling (default: 1.638)
+        - force: Whether to force template usage (default: True)
+        - threshold: Threshold for template matching (default: 2)
         """
         self.method_name = "boltz"
         super().__init__(**kwargs)
@@ -43,6 +45,8 @@ class BoltzDocker(BaseDockingModel):
         self.sampling_steps = kwargs.get("sampling_steps", 200)
         self.step_scale = kwargs.get("step_scale", 1.638)
         self.cache = kwargs.get("cache") or kwargs.get("cache_dir")
+        self.force = kwargs.get("force", True)
+        self.threshold = kwargs.get("threshold", 2)
         
     def dock(self, peptide_sequences: List[str], target_structure: str, 
              target_sequence: str, target_name: str) -> List[str]:
@@ -176,7 +180,9 @@ class BoltzDocker(BaseDockingModel):
         config["templates"] = [
             {
                 "cif": template_path,
-                "chain_id": "A"  # Always use "A" - it refers to the first protein sequence above
+                "chain_id": "A",  # Always use "A" - it refers to the first protein sequence above
+                "force": self.force,
+                "threshold": self.threshold
             }
         ]
         
