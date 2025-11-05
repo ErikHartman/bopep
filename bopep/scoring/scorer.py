@@ -1117,32 +1117,34 @@ class Scorer:
         """
         # Extract template_structure if template_rmsd scoring is requested
         template_structure = None
-        if "template_rmsd" in scores_to_include and template_structures:
+        needs_template = any(s in scores_to_include for s in (
+            "template_rmsd", "alphafold_template_rmsd", "boltz_template_rmsd"
+        ))
+
+        if needs_template and template_structures:
             try:
+                peptide_sequence = None
                 if input_type == "processed_dir":
-                    # Extract peptide sequence from metrics.json
-                    metrics_file = os.path.join(input_value, "metrics.json")
-                    if os.path.exists(metrics_file):
-                        with open(metrics_file, 'r') as f:
-                            metrics = json.load(f)
-                        peptide_sequence = metrics.get("peptide_sequence")
-                    else:
-                        print(f"WARNING: No metrics.json found in {input_value}")
-                        peptide_sequence = None
+                    # be liberal about where the sequence comes from
+                    for mf in ("boltz_metrics.json", "alphafold_metrics.json", "metrics.json"):
+                        path = os.path.join(input_value, mf)
+                        if os.path.exists(path):
+                            with open(path, "r") as f:
+                                peptide_sequence = json.load(f).get("peptide_sequence")
+                            if peptide_sequence:
+                                break
                 elif input_type == "structure_file":
                     peptide_sequence = extract_sequence_from_structure(input_value, chain_id="B")
-                else:  
-                    raise ValueError(
-                        f"WARNING: Unsupported input_type: {input_type}. Must be 'structure_file' or 'processed_dir' when using template_rmsd scoring."
-                    )
-                
-                # Lookup template for this peptide
+                else:
+                    raise ValueError("Unsupported input_type for template_rmsd. Use 'structure_file' or 'processed_dir'.")
+
                 if peptide_sequence:
                     template_structure = template_structures.get(peptide_sequence)
                     if template_structure and not os.path.exists(template_structure):
                         print(f"WARNING: Template PDB file not found: {template_structure}")
                         template_structure = None
-                        
+                else:
+                    print("WARNING: Could not determine peptide_sequence for template lookup.")
             except Exception as e:
                 print(f"WARNING: Error extracting peptide sequence for template lookup: {e}")
 
