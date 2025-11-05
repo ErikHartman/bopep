@@ -15,8 +15,8 @@ def main():
     """Run the complete multi-model docking and scoring pipeline."""
     
     peptide_sequence = "NYLSELSEHV"
-    target_pdb_path = "/Users/erikhartman/dev/bopep/data/4glf.cif" 
-    output_dir = "/Users/erikhartman/dev/bopep/examples/docking/"
+    target_pdb_path = "./data/4glf.cif" 
+    output_dir = "./examples/docking/"
 
 
     docker_kwargs = {
@@ -32,7 +32,8 @@ def main():
         "output_format": "pdb",
         "step_scale": 1.638,
         "force": True,
-        "threshold": 2
+        "threshold": 2,
+        "gpu_ids": [0],
     }
 
     docker = Docker(

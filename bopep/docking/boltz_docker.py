@@ -35,6 +35,7 @@ class BoltzDocker(BaseDockingModel):
         - step_scale: Step scale for diffusion sampling (default: 1.638)
         - force: Whether to force template usage (default: True)
         - threshold: Threshold for template matching (default: 2)
+        - save_raw: Whether to keep raw docking output files (default: False)
         """
         self.method_name = "boltz"
         super().__init__(**kwargs)
@@ -88,7 +89,8 @@ class BoltzDocker(BaseDockingModel):
             'output_format': self.output_format,
             'sampling_steps': self.sampling_steps,
             'step_scale': self.step_scale,
-            'overwrite_results': self.overwrite_results
+            'overwrite_results': self.overwrite_results,
+            'save_raw': self.save_raw
         }
         return params
     
