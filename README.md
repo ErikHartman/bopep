@@ -30,6 +30,8 @@ The surrogate models can also be leveraged from design. The BoGA algorithm uses 
   <img src="assets/boga.png" width="1000", alt="BoPep">
 </p>
 
+*_preprint coming soon_
+
 ## Installation
 
 To run `bopep` locally, you will need to clone this repository, install **LocalColabFold** and **PyRosetta** as well as other dependencies using pip. Follow the steps below to set up your environment:

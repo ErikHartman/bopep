@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 import os
 import json
 import logging
+import shutil
 from multiprocessing import get_context
 
 logging.basicConfig(
@@ -16,6 +17,13 @@ class BaseDockingModel(ABC):
     
     This class defines the interface that all docking models must implement
     to ensure consistent output structure across different docking approaches.
+    
+    Parameters:
+        output_dir: Directory for storing docking results
+        gpu_ids: List of GPU IDs to use for docking (default: ["0"])
+        overwrite_results: Whether to overwrite existing results (default: False)
+        save_raw: Whether to keep raw docking output files (default: False)
+                 If False, raw files are deleted after preprocessing
     """
     
     def __init__(self, **kwargs):
@@ -25,6 +33,7 @@ class BaseDockingModel(ABC):
         self.output_dir = kwargs["output_dir"]
         self.gpu_ids = kwargs.get("gpu_ids", ["0"])
         self.overwrite_results = kwargs.get("overwrite_results", False)
+        self.save_raw = kwargs.get("save_raw", False)
         
         # Method name should be set by subclasses
         method_name = getattr(self, 'method_name', 'unknown')
@@ -98,6 +107,8 @@ class BaseDockingModel(ABC):
                     print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {peptide}")
                     processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
                     processed_dirs.append(processed_dir)
+                    # Clean up raw output if save_raw is False
+                    self._cleanup_raw_output(raw_dir)
         else:
             # Sequential processing case: raw_docked_dirs contains just raw directories
             for i, (raw_dir, peptide) in enumerate(zip(raw_docked_dirs, peptides_to_dock), 1):
@@ -105,6 +116,8 @@ class BaseDockingModel(ABC):
                     print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {peptide}")
                     processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
                     processed_dirs.append(processed_dir)
+                    # Clean up raw output if save_raw is False
+                    self._cleanup_raw_output(raw_dir)
         
         # Combine with previously docked results
         all_processed_dirs = processed_dirs + previously_docked_dirs
@@ -265,3 +278,17 @@ class BaseDockingModel(ABC):
                 return True, processed_dir
         
         return False, None
+    
+    def _cleanup_raw_output(self, raw_dir: str) -> None:
+        """
+        Delete raw output directory if save_raw is False.
+        
+        Args:
+            raw_dir: Path to the raw output directory to delete
+        """
+        if not self.save_raw and raw_dir and os.path.exists(raw_dir):
+            try:
+                shutil.rmtree(raw_dir)
+                logging.info(f"Deleted raw output directory: {raw_dir}")
+            except Exception as e:
+                logging.warning(f"Failed to delete raw output directory {raw_dir}: {e}")

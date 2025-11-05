@@ -31,6 +31,7 @@ class AlphaFoldDocker(BaseDockingModel):
         - recycle_early_stop_tolerance: Early stopping tolerance (default: 0.01)
         - amber: Whether to use AMBER relaxation (default: True)
         - num_relax: Number of relaxation steps (default: 1)
+        - save_raw: Whether to keep raw docking output files (default: False)
         """
         self.method_name = "alphafold"
         super().__init__(**kwargs)
@@ -247,7 +248,8 @@ class AlphaFoldDocker(BaseDockingModel):
             'num_recycles': self.num_recycles,
             'recycle_early_stop_tolerance': self.recycle_early_stop_tolerance,
             'amber': self.amber,
-            'num_relax': self.num_relax
+            'num_relax': self.num_relax,
+            'save_raw': self.save_raw
         }
     
     @staticmethod
