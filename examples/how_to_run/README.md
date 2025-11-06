@@ -6,7 +6,7 @@ This guide explains how to set up and run the BoPep framework for peptide optimi
 
 1. Install BoPep and its dependencies (see main project README)
 2. Prepare your target protein structure (PDB format)
-3. Define a list of peptide sequences to optimize
+3. Define a list of peptide sequences to optimize (your search space)
 4. Configure your optimization parameters
 
 ## Example Script
