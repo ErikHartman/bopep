@@ -69,7 +69,7 @@ class RosettaScorer:
         }
 
 if __name__ == "__main__":
-    pdb_file_path = "./data/1ssc.pdb"
+    pdb_file_path = "../../data/1ssc.pdb"
     analyzer = RosettaScorer(pdb_file_path)
     metrics = analyzer.get_all_metrics()
     print(f"Rosetta metrics for {pdb_file_path}: {metrics}")
