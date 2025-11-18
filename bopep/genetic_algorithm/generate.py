@@ -2,6 +2,7 @@ import random
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Union, Tuple
 import pandas as pd
+import numpy as np
         
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
@@ -109,9 +110,6 @@ class BoGA:
             min_sequence_length=self.min_sequence_length,
             max_sequence_length=self.max_sequence_length,
             mutation_rate=self.mutation_rate,
-            mode="uniform",  # Default mode, will be set per phase
-            tau=1.0,         # Default tau
-            lam=0.3,         # Default lam
         )
         
         # Initialize surrogate model manager
@@ -306,9 +304,26 @@ class BoGA:
             min_validation_samples=self.min_validation_samples
         )
 
-    def _select_top_objectives(self, objectives: Dict[str, Any], k: int, objective_directions: Dict[str, str] = None, top_fraction: float = 0.3) -> List[str]:
+    def _select_top_objectives(
+        self, 
+        objectives: Dict[str, Any], 
+        m_pool: int, 
+        objective_directions: Dict[str, str] = None, 
+        top_fraction: float = 0.3,
+        selection_method: str = "uniform",
+        beta: float = 1.0
+    ) -> List[str]:
         """
-        Select top k sequences based on objectives, with support for sampling from top contenders.
+        Select top m_pool sequences based on objectives, with support for sampling from top contenders.
+        
+        Args:
+            objectives: Dictionary mapping sequences to objectives (single value or dict of objectives)
+            m_pool: Number of sequences to select
+            objective_directions: Optional dict specifying 'max' or 'min' for each objective
+            top_fraction: If float < 1.0, fraction of sequences to consider as top candidates.
+                         If int >= 1, absolute number of top sequences per objective to consider.
+            selection_method: 'uniform' for uniform random sampling, 'exponential' for fitness-weighted sampling
+            beta: Selection intensity for exponential method (higher = stronger selection pressure)
         """
         if not objectives:
             return []
@@ -338,29 +353,139 @@ class BoGA:
             
             # Sample from the top portion of each objective ranking
             top_candidates = set()
-            n_top_per_objective = max(1, int(len(peptides) * top_fraction))
+            
+            # Handle both fraction and integer specifications
+            if isinstance(top_fraction, float) and top_fraction < 1.0:
+                # Fraction mode: take top fraction of sequences
+                n_top_per_objective = max(1, int(len(peptides) * top_fraction))
+            elif isinstance(top_fraction, int) or (isinstance(top_fraction, float) and top_fraction >= 1.0):
+                # Integer mode: take exact number of top sequences
+                n_top_per_objective = int(top_fraction)
+            else:
+                raise ValueError(f"top_fraction must be a positive number, got {top_fraction}")
             
             for obj_name, ranked_peptides in rankings.items():
                 # Take top performers for this objective
                 top_for_this_obj = ranked_peptides[:n_top_per_objective]
                 top_candidates.update(top_for_this_obj)
             
-            # Sample k sequences from the combined top candidates
+            # Sample m_pool sequences from the combined top candidates
             top_candidates = list(top_candidates)
-            if len(top_candidates) <= k:
+            if len(top_candidates) <= m_pool:
                 return top_candidates
+            
+            if selection_method == "uniform":
+                return random.sample(top_candidates, m_pool)
+            elif selection_method == "exponential":
+                # For multi-objective, use aggregated normalized objectives
+                return self._exponential_selection(top_candidates, objectives, m_pool, beta, objective_directions)
             else:
-                return random.sample(top_candidates, k)
+                raise ValueError(f"Unknown selection_method: {selection_method}")
         else:
-            # Single objective case: also add sampling diversity
+            # Single objective case
             sorted_sequences = sorted(objectives.items(), key=lambda x: x[1], reverse=True)
-            n_top = max(1, int(len(sorted_sequences) * top_fraction))
-            n_top = max(n_top, k)  # Ensure we have at least k candidates
-            top_candidates = [seq for seq, _ in sorted_sequences[:n_top]]
-            if len(top_candidates) <= k:
-                return top_candidates
+            
+            # Handle both fraction and integer specifications
+            if isinstance(top_fraction, float) and top_fraction < 1.0:
+                # Fraction mode
+                n_top = max(1, int(len(sorted_sequences) * top_fraction))
+            elif isinstance(top_fraction, int) or (isinstance(top_fraction, float) and top_fraction >= 1.0):
+                # Integer mode
+                n_top = int(top_fraction)
             else:
-                return random.sample(top_candidates, k)
+                raise ValueError(f"top_fraction must be a positive number, got {top_fraction}")
+            
+            n_top = max(n_top, m_pool)  # Ensure we have at least m_pool candidates
+            top_candidates = [seq for seq, _ in sorted_sequences[:n_top]]
+            
+            if len(top_candidates) <= m_pool:
+                return top_candidates
+            
+            if selection_method == "uniform":
+                return random.sample(top_candidates, m_pool)
+            elif selection_method == "exponential":
+                # Create objectives dict for top candidates only
+                top_objectives = {seq: obj for seq, obj in sorted_sequences[:n_top]}
+                return self._exponential_selection(top_candidates, top_objectives, m_pool, beta)
+            else:
+                raise ValueError(f"Unknown selection_method: {selection_method}")
+
+    def _exponential_selection(
+        self, 
+        candidates: List[str], 
+        objectives: Dict[str, Any], 
+        m_pool: int, 
+        beta: float,
+        objective_directions: Dict[str, str] = None
+    ) -> List[str]:
+        """
+        Select sequences using exponential weighting based on normalized objectives.
+        
+        Args:
+            candidates: List of candidate sequences to select from
+            objectives: Dictionary mapping sequences to objectives
+            m_pool: Number of sequences to select
+            beta: Selection intensity (higher = stronger preference for top performers)
+            objective_directions: Optional dict for multi-objective direction handling
+        """
+        sample_obj = objectives[candidates[0]]
+        
+        if isinstance(sample_obj, dict):
+            # Multi-objective: aggregate normalized objectives
+            obj_names = list(sample_obj.keys())
+            
+            # Normalize each objective to [0, 1]
+            normalized_objs = {}
+            for obj_name in obj_names:
+                values = [objectives[seq][obj_name] for seq in candidates]
+                min_val, max_val = min(values), max(values)
+                
+                # Handle direction
+                if objective_directions and obj_name in objective_directions:
+                    reverse = objective_directions[obj_name] == "max"
+                else:
+                    reverse = True
+                
+                for seq in candidates:
+                    if seq not in normalized_objs:
+                        normalized_objs[seq] = 0.0
+                    
+                    if max_val > min_val:
+                        norm_val = (objectives[seq][obj_name] - min_val) / (max_val - min_val)
+                        if not reverse:  # For minimization, invert
+                            norm_val = 1.0 - norm_val
+                    else:
+                        norm_val = 0.5  # All equal
+                    
+                    normalized_objs[seq] += norm_val / len(obj_names)  # Average across objectives
+            
+            fitness_values = normalized_objs
+        else:
+            # Single objective: normalize to [0, 1]
+            values = [objectives[seq] for seq in candidates]
+            min_val, max_val = min(values), max(values)
+            
+            fitness_values = {}
+            for seq in candidates:
+                if max_val > min_val:
+                    fitness_values[seq] = (objectives[seq] - min_val) / (max_val - min_val)
+                else:
+                    fitness_values[seq] = 0.5  # All equal
+        
+        # Apply exponential weighting
+        weights = np.array([np.exp(beta * fitness_values[seq]) for seq in candidates])
+        
+        # Handle potential overflow/underflow
+        if np.any(np.isinf(weights)) or np.any(np.isnan(weights)):
+            # Fallback to uniform if numerical issues
+            return random.sample(candidates, m_pool)
+        
+        # Normalize to probabilities
+        probs = weights / weights.sum()
+        
+        # Sample without replacement
+        selected_indices = np.random.choice(len(candidates), size=m_pool, replace=False, p=probs)
+        return [candidates[i] for i in selected_indices]
 
     def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
         if acquisition_kwargs is None:
@@ -372,20 +497,6 @@ class BoGA:
         )
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
 
-    def _configure_mutation_for_phase(self, phase: Dict[str, Any], phase_index: int, objectives: Dict[str, float]) -> None:
-        """
-        Validate and configure mutation parameters for a phase.
-        """
-        mutation_mode = phase["mutation_mode"]
-        mutation_tau = phase.get('mutation_tau', 1.0)  # Default tau
-        mutation_lam = phase.get('mutation_lam', 0.3)  # Default lam
-        
-        # Update mutator parameters
-        self.mutator.set_mode(mutation_mode)
-        self.mutator.tau = max(1e-6, float(mutation_tau))
-        self.mutator.lam = float(mutation_lam)
-        
-        print(f"Mutation: mode={mutation_mode}, tau={mutation_tau:.3f}, lam={mutation_lam:.3f}")
 
     def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set, int]:
         """
@@ -481,9 +592,6 @@ class BoGA:
             generations = phase['generations']
             m_select = phase['m_select']
             k_pool = phase['k_pool']
-            
-            # Configure mutation parameters for this phase
-            self._configure_mutation_for_phase(phase, phase_index, objectives)
             
             print(f"\n=== Phase {phase_index}: {acquisition_function} for {generations} generations ===")
             print(f"Selection: {m_select}, Pool: {k_pool}")

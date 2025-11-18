@@ -49,34 +49,6 @@ def _validate_surrogate_model_kwargs(surrogate_model_kwargs: dict):
             f"Must be one of: {', '.join(valid_model_types)}"
         )
 
-def _validate_dependencies():
-    """
-    Check if colabfold -help is callable
-    Check if output dir exists
-    """
-    try:
-        subprocess.Popen(
-            ["colabfold_batch", "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
-    except FileNotFoundError:
-        raise ValueError(
-            "colabfold is not callable through the command: colabfold_batch --help"
-        )
-    except Exception as e:
-        raise ValueError(
-            f"Error occurred while checking colabfold: {e}"
-        )
-
-    try:
-        import pyrosetta
-        pyrosetta.init("-mute all")
-    except ImportError:
-        raise ValueError("PyRosetta is not installed. Please install PyRosetta to use scoring features.")
-    except Exception:
-        raise ValueError("Cannot initialize pyrosetta")
 
 def _validate_args(
     schedule: List[Dict[str, Any]], n_validate: Optional[Union[int, float]]
