@@ -1,8 +1,9 @@
 # Modules
 
-1. Embedding module. Peptide -> vec
-2. Scoring module. PDB -> score
-3. Docking module. Peptide -> PDB
-4. BO module.
-5. Logging module.
-6. Surrogate model module.
+1. **Embedding**. Peptide -> vec
+2. **Scoring**. Complex -> score
+3. **Docking**. Peptide + target -> Complex
+4. **Search**. Bayesian Optimization
+5. **Surrogate model**. 
+6. **Evoluationary algorithm**-
+7. **Design with diffusion**-

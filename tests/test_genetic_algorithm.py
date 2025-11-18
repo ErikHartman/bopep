@@ -21,9 +21,6 @@ class TestPeptideMutator:
         assert mutator.min_sequence_length == 6
         assert mutator.max_sequence_length == 40
         assert mutator.mutation_rate == 0.01
-        assert mutator.mode == "uniform"
-        assert mutator.tau == 1.0
-        assert mutator.lam == 0.3
         assert mutator.p_ins == 0.10
         assert mutator.p_del == 0.10
 
@@ -33,62 +30,14 @@ class TestPeptideMutator:
             min_sequence_length=8,
             max_sequence_length=20,
             mutation_rate=0.05,
-            mode="blosum",
-            tau=0.5,
-            lam=0.2,
             p_ins=0.15,
             p_del=0.05
         )
         assert mutator.min_sequence_length == 8
         assert mutator.max_sequence_length == 20
         assert mutator.mutation_rate == 0.05
-        assert mutator.mode == "blosum"
-        assert mutator.tau == 0.5
-        assert mutator.lam == 0.2
         assert mutator.p_ins == 0.15
         assert mutator.p_del == 0.05
-
-    def test_set_mode(self):
-        """Test setting mutation mode"""
-        mutator = PeptideMutator()
-        
-        mutator.set_mode("blosum")
-        assert mutator.mode == "blosum"
-        
-        mutator.set_mode("blosum_elite")
-        assert mutator.mode == "blosum_elite"
-        
-        mutator.set_mode("uniform")
-        assert mutator.mode == "uniform"
-        
-        # Test invalid mode
-        with pytest.raises(AssertionError):
-            mutator.set_mode("invalid_mode")
-
-    def test_set_elite_prior_from_sequences(self):
-        """Test setting elite prior from sequences"""
-        mutator = PeptideMutator()
-        sequences = ["AAAA", "CCCC", "GGGG"]
-        
-        mutator.set_elite_prior_from_sequences(sequences)
-        
-        # Check that prior is properly normalized
-        assert abs(mutator._elite_prior.sum() - 1.0) < 1e-6
-        
-        # Check that alanine (A) has higher probability due to "AAAA"
-        a_idx = mutator._elite_prior[0]  # A is first in _AMINO_ACIDS
-        assert a_idx > 0
-
-    def test_set_elite_prior_empty_sequences(self):
-        """Test setting elite prior with empty sequences"""
-        mutator = PeptideMutator()
-        sequences = []
-        
-        mutator.set_elite_prior_from_sequences(sequences)
-        
-        # Should fall back to uniform distribution
-        expected = 1.0 / 20.0
-        assert all(abs(p - expected) < 1e-6 for p in mutator._elite_prior)
 
     def test_generate_random_sequence(self):
         """Test random sequence generation"""
@@ -100,13 +49,61 @@ class TestPeptideMutator:
         assert 5 <= len(sequence) <= 10
         assert all(aa in 'ACDEFGHIKLMNPQRSTVWY' for aa in sequence)
 
+    def test_crossover_single_point(self):
+        """Test single-point crossover"""
+        mutator = PeptideMutator(min_sequence_length=5, max_sequence_length=15)
+        
+        parent1 = "AAAAA"
+        parent2 = "CCCCC"
+        
+        child = mutator.crossover(parent1, parent2, method="single")
+        
+        assert isinstance(child, str)
+        assert 5 <= len(child) <= 15
+        assert all(aa in 'ACDEFGHIKLMNPQRSTVWY' for aa in child)
+        # Child should have segments from both parents
+        assert any(aa in child for aa in parent1) or any(aa in child for aa in parent2)
+
+    def test_crossover_two_point(self):
+        """Test two-point crossover"""
+        mutator = PeptideMutator(min_sequence_length=5, max_sequence_length=15)
+        
+        parent1 = "ACDEFGHIK"
+        parent2 = "LMNPQRSTV"
+        
+        child = mutator.crossover(parent1, parent2, method="two")
+        
+        assert isinstance(child, str)
+        assert 5 <= len(child) <= 15
+        assert all(aa in 'ACDEFGHIKLMNPQRSTVWY' for aa in child)
+
+    def test_crossover_length_constraints(self):
+        """Test that crossover respects length constraints"""
+        mutator = PeptideMutator(min_sequence_length=8, max_sequence_length=10)
+        
+        parent1 = "ACDEFGHIK"
+        parent2 = "LMNPQRSTV"
+        
+        for _ in range(10):
+            child = mutator.crossover(parent1, parent2, method="single")
+            assert 8 <= len(child) <= 10
+            
+            child = mutator.crossover(parent1, parent2, method="two")
+            assert 8 <= len(child) <= 10
+
+    def test_crossover_invalid_method(self):
+        """Test that invalid crossover method raises error"""
+        mutator = PeptideMutator()
+        
+        with pytest.raises(ValueError, match="Unknown crossover method"):
+            mutator.crossover("AAAAA", "CCCCC", method="invalid")
+
     def test_mutate_sequence_uniform_mode(self):
-        """Test sequence mutation in uniform mode"""
+        """Test sequence mutation with uniform substitutions"""
         mutator = PeptideMutator(
             min_sequence_length=5,
             max_sequence_length=15,
-            mutation_rate=0.5,  # High rate to ensure mutation
-            mode="uniform"
+            mutation_rate=0.5  # High rate to ensure mutation
         )
         
         parent = "AAAAA"
@@ -119,51 +116,6 @@ class TestPeptideMutator:
         assert child not in evaluated
         assert 5 <= len(child) <= 15
         assert all(aa in 'ACDEFGHIKLMNPQRSTVWY' for aa in child)
-
-    def test_mutate_sequence_blosum_mode(self):
-        """Test sequence mutation in BLOSUM mode"""
-        mutator = PeptideMutator(
-            min_sequence_length=5,
-            max_sequence_length=15,
-            mutation_rate=0.5,
-            mode="blosum",
-            tau=1.0
-        )
-        
-        parent = "AAAAA"
-        evaluated = set()
-        
-        child = mutator.mutate_sequence(parent, evaluated)
-        
-        assert isinstance(child, str)
-        assert child != parent
-        assert child not in evaluated
-        assert 5 <= len(child) <= 15
-
-    def test_mutate_sequence_blosum_elite_mode(self):
-        """Test sequence mutation in BLOSUM elite mode"""
-        mutator = PeptideMutator(
-            min_sequence_length=5,
-            max_sequence_length=15,
-            mutation_rate=0.5,
-            mode="blosum_elite",
-            tau=1.0,
-            lam=0.3
-        )
-        
-        # Set elite prior
-        elite_sequences = ["CCCC", "DDDD"]
-        mutator.set_elite_prior_from_sequences(elite_sequences)
-        
-        parent = "AAAAA"
-        evaluated = set()
-        
-        child = mutator.mutate_sequence(parent, evaluated)
-        
-        assert isinstance(child, str)
-        assert child != parent
-        assert child not in evaluated
-        assert 5 <= len(child) <= 15
 
     def test_mutate_sequence_length_constraints(self):
         """Test that mutations respect length constraints"""
@@ -232,133 +184,6 @@ class TestPeptideMutator:
         
         assert all(seq not in evaluated for seq in pool)
 
-    def test_build_blosum_matrix(self):
-        """Test BLOSUM matrix construction"""
-        mutator = PeptideMutator()
-        
-        # The matrix should be built during initialization
-        assert mutator._blosum is not None
-        assert mutator._blosum.shape == (20, 20)
-        assert isinstance(mutator._blosum, np.ndarray)
-
-    def test_should_update_elite(self):
-        """Test elite update decision logic"""
-        mutator = PeptideMutator()
-        
-        # Test string modes
-        mutator.set_mode("uniform")
-        assert not mutator._should_update_elite()
-        
-        mutator.set_mode("blosum")
-        assert not mutator._should_update_elite()
-        
-        mutator.set_mode("blosum_elite")
-        assert mutator._should_update_elite()
-        
-        # Test dict modes
-        mutator.set_mode({"uniform": 0.5, "blosum": 0.5})
-        assert not mutator._should_update_elite()
-        
-        mutator.set_mode({"uniform": 0.3, "elite": 0.7})
-        assert mutator._should_update_elite()
-
-    def test_select_top_sequences(self):
-        """Test selection of top sequences from objectives"""
-        mutator = PeptideMutator()
-        
-        objectives = {
-            "AAAAA": 0.3,
-            "CCCCC": 0.9,
-            "GGGGG": 0.1,
-            "TTTTT": 0.7
-        }
-        
-        top_2 = mutator._select_top_sequences(objectives, 2)
-        assert len(top_2) == 2
-        assert "CCCCC" in top_2  # Highest score
-        assert "TTTTT" in top_2  # Second highest
-        
-        top_5 = mutator._select_top_sequences(objectives, 5)
-        assert len(top_5) == 4  # Should return all 4 sequences
-
-    def test_update_elite_prior(self):
-        """Test elite prior update from objectives"""
-        mutator = PeptideMutator(mode="blosum_elite")
-        
-        objectives = {
-            "AAAAA": 0.9,  # High A content
-            "CCCCC": 0.7,  # High C content
-            "GGGGG": 0.1   # Low score
-        }
-        
-        old_prior = mutator._elite_prior.copy()
-        mutator.update_elite_prior(objectives)
-        
-        # Elite prior should have changed
-        assert not np.array_equal(old_prior, mutator._elite_prior)
-        
-        # Test with non-elite mode (should not update)
-        mutator.set_mode("uniform")
-        very_old_prior = mutator._elite_prior.copy()
-        mutator.update_elite_prior(objectives)
-        
-        # Should not have changed since mode is not elite
-        assert np.array_equal(very_old_prior, mutator._elite_prior)
-
-    def test_mutate_sequence_with_objectives(self):
-        """Test sequence mutation with automatic elite prior updates"""
-        mutator = PeptideMutator(
-            min_sequence_length=5,
-            max_sequence_length=8,
-            mutation_rate=0.3,
-            mode="blosum_elite"
-        )
-        
-        objectives = {
-            "AAAAA": 0.9,
-            "CCCCC": 0.7,
-            "GGGGG": 0.1
-        }
-        
-        parent = "AAAAA"
-        evaluated = {"AAAAA", "CCCCC", "GGGGG"}
-        
-        old_prior = mutator._elite_prior.copy()
-        
-        # Mutation with objectives should update elite prior
-        child = mutator.mutate_sequence(parent, evaluated, objectives)
-        
-        assert isinstance(child, str)
-        assert child != parent
-        assert child not in evaluated
-        assert not np.array_equal(old_prior, mutator._elite_prior)
-
-    def test_mutate_pool_with_objectives(self):
-        """Test pool mutation with automatic elite prior updates"""
-        mutator = PeptideMutator(
-            min_sequence_length=5,
-            max_sequence_length=8,
-            mutation_rate=0.2,
-            mode="blosum_elite"
-        )
-        
-        objectives = {
-            "AAAAA": 0.9,
-            "CCCCC": 0.7
-        }
-        
-        parents = ["AAAAA", "CCCCC"]
-        evaluated = set(parents)
-        
-        old_prior = mutator._elite_prior.copy()
-        
-        # Pool mutation with objectives should update elite prior
-        pool = mutator.mutate_pool(parents, 3, evaluated, objectives)
-        
-        assert len(pool) <= 3
-        assert all(seq not in evaluated for seq in pool)
-        assert not np.array_equal(old_prior, mutator._elite_prior)
-
 
 class TestBoGA:
     """Test the BoGA (Bayesian Optimization with Genetic Algorithm) class"""
@@ -426,7 +251,7 @@ class TestBoGA:
                 'generations': 5,
                 'm_select': 10,
                 'k_pool': 20,
-                'mutation_mode': 'uniform'
+                
             }
         ]
         
@@ -446,7 +271,7 @@ class TestBoGA:
 
     def test_init_custom_params(self, mock_dependencies, basic_surrogate_kwargs):
         """Test BoGA initialization with custom parameters"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
@@ -469,7 +294,7 @@ class TestBoGA:
 
     def test_init_no_pca_components_error(self, mock_dependencies, basic_surrogate_kwargs):
         """Test that initialization fails without PCA components"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         with pytest.raises(ValueError, match="pca_n_components must be specified"):
             BoGA(
@@ -481,7 +306,7 @@ class TestBoGA:
 
     def test_init_none_initial_sequences_error(self, mock_dependencies, basic_surrogate_kwargs):
         """Test that initialization fails with None initial sequences during preparation"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
@@ -496,7 +321,7 @@ class TestBoGA:
 
     def test_random_sequence(self, mock_dependencies, basic_surrogate_kwargs):
         """Test random sequence generation"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
@@ -512,7 +337,7 @@ class TestBoGA:
 
     def test_generate_initial_sequences(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial sequence generation"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
@@ -528,7 +353,7 @@ class TestBoGA:
 
     def test_prepare_initial_population_single_sequence(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial population preparation from single sequence"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
@@ -545,7 +370,7 @@ class TestBoGA:
 
     def test_prepare_initial_population_list_sequences(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial population preparation from list of sequences"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         initial_seqs = ["ACDEFG", "HIKLMN", "NPQRSV"]  # Changed J to I and O to V to avoid invalid amino acids
         boga = BoGA(
@@ -563,7 +388,7 @@ class TestBoGA:
 
     def test_prepare_initial_population_many_sequences(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial population when we have more sequences than needed"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         initial_seqs = [f"ACDEFG{i:02d}A" for i in range(20)]  # 20 sequences
         boga = BoGA(
@@ -579,7 +404,7 @@ class TestBoGA:
 
     def test_embed_peptides(self, mock_dependencies, basic_surrogate_kwargs):
         """Test that embedding peptides works properly (no longer uses caching)"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
@@ -616,58 +441,8 @@ class TestBoGA:
         mock_dependencies['embedder'].scale_embeddings.assert_called_once()
         mock_dependencies['embedder'].reduce_embeddings_pca.assert_called_once()
 
-    def test_configure_mutation_for_phase(self, mock_dependencies, basic_surrogate_kwargs):
-        """Test mutation configuration for different phases"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
-        
-        boga = BoGA(
-            target_structure_path="/fake/path.pdb",
-            initial_sequences="ACDEFG",
-            pca_n_components=10,
-            surrogate_model_kwargs=basic_surrogate_kwargs
-        )
-        
-        # Test uniform mode
-        phase = {
-            'mutation_mode': 'uniform',
-            'mutation_tau': 0.5,
-            'mutation_lam': 0.2
-        }
-        objectives = {"ACDEFG": 0.8, "HIJKLM": 0.6}
-        
-        boga._configure_mutation_for_phase(phase, 1, objectives)
-        
-        assert boga.mutator.mode == 'uniform'
-        assert boga.mutator.tau == 0.5
-        assert boga.mutator.lam == 0.2
-
-    def test_configure_mutation_blosum_elite(self, mock_dependencies, basic_surrogate_kwargs):
-        """Test mutation configuration for BLOSUM elite mode"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'blosum_elite'}]
-        
-        boga = BoGA(
-            target_structure_path="/fake/path.pdb",
-            initial_sequences="ACDEFG",
-            pca_n_components=10,
-            surrogate_model_kwargs=basic_surrogate_kwargs
-        )
-        
-        phase = {
-            'mutation_mode': 'blosum_elite',
-            'mutation_tau': 1.0,
-            'mutation_lam': 0.3
-        }
-        objectives = {"ACDEFG": 0.8, "HIJKLM": 0.6, "NOPQRS": 0.9}
-        
-        boga._configure_mutation_for_phase(phase, 1, objectives)
-        
-        assert boga.mutator.mode == 'blosum_elite'
-        # Elite prior should be updated from top sequences
-
     def test_select_top_objectives(self, mock_dependencies, basic_surrogate_kwargs):
         """Test selection of top objectives"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
-        
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
@@ -682,15 +457,65 @@ class TestBoGA:
             "SEQ4": 0.7
         }
         
-        top_seqs = boga._select_top_objectives(objectives, k=2)
+        top_seqs = boga._select_top_objectives(objectives, m_pool=2)
         
         assert len(top_seqs) == 2
-        assert "SEQ2" in top_seqs  # Highest score
-        assert "SEQ4" in top_seqs  # Second highest
+        # With uniform selection, we can't guarantee which exact sequences are selected
+        # but they should be from the top performers
+        assert all(seq in objectives for seq in top_seqs)
+
+    def test_select_top_objectives_exponential(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test exponential selection with beta parameter"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        objectives = {
+            "SEQ1": 0.2,
+            "SEQ2": 0.9,
+            "SEQ3": 0.3,
+            "SEQ4": 0.7,
+            "SEQ5": 0.8
+        }
+        
+        # Test with exponential selection
+        top_seqs = boga._select_top_objectives(
+            objectives, 
+            m_pool=3, 
+            selection_method="exponential",
+            beta=2.0
+        )
+        
+        assert len(top_seqs) == 3
+        assert all(seq in objectives for seq in top_seqs)
+        # Higher beta should favor top performers more strongly
+
+    def test_select_top_objectives_integer_top_fraction(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test selection with integer top_fraction"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        objectives = {f"SEQ{i}": float(i) / 10.0 for i in range(1, 11)}
+        
+        # Test with integer top_fraction (absolute number)
+        top_seqs = boga._select_top_objectives(
+            objectives, 
+            m_pool=3,
+            top_fraction=5  # Take top 5 sequences
+        )
+        
+        assert len(top_seqs) == 3
 
     def test_select_top_predictions(self, mock_dependencies, basic_surrogate_kwargs):
         """Test selection of top predictions using acquisition function"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
@@ -720,7 +545,7 @@ class TestBoGA:
 
     def test_load_from_logs(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test loading previous results from log files"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         # Create mock log file
         log_dir = Path(temp_dir)
@@ -750,7 +575,7 @@ HIKLMN,-8.2,0.6,1,phase1,2024-01-01
 
     def test_load_from_logs_missing_file(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test loading from logs when file doesn't exist"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",
@@ -764,7 +589,7 @@ HIKLMN,-8.2,0.6,1,phase1,2024-01-01
 
     def test_iteration_continuation(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test that iterations continue from last iteration when resuming from logs"""
-        schedule = [{'acquisition': 'ei', 'generations': 2, 'm_select': 2, 'k_pool': 3, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 2, 'm_select': 2, 'k_pool': 3}]
         
         # Create mock log file with iteration 5 as the last iteration
         log_dir = Path(temp_dir)
@@ -820,7 +645,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
 
     def test_logger_initialization_with_continue_from_logs(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test that logger doesn't overwrite logs when continuing from logs"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         # Test case 1: continue_from_logs only (should not overwrite)
         with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
@@ -868,7 +693,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
                 'generations': 1,
                 'm_select': 2,
                 'k_pool': 3,
-                'mutation_mode': 'uniform'
+                
             }
         ]
         
@@ -930,7 +755,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
 
     def test_invalid_initial_sequences_type(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initialization with invalid initial sequences type"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10, 'mutation_mode': 'uniform'}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
         
         boga = BoGA(
             target_structure_path="/fake/path.pdb",

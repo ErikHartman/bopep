@@ -2,14 +2,15 @@
   <img src="assets/bopep_header_image.png" width="350", alt="BoPep">
 </p>
 
-## *Bayesian Optimization for peptide binder mining and design*
+## *BoPep: Navigating the peptide binder landscape*
 
-This repository contains the code for `BoPep`, a framework for identifying and generating peptide binders against a target protein using Bayesian Optimization. We have currently implemented three different methods in the BoPep framework:
+This repository contains the code for `BoPep`, a framework for identifying and generating peptide binders against a target protein using Bayesian Optimization (BO). We have currently implemented three different methods in the BoPep framework:
 
 - **BoPep search**: This is the core method for BoPep, which uses Bayesian Optimization to navigate through large datasets in search for peptide binders.
-- **BoRF**: A design module for generating a large dataset using a diffusion pipeline.
-- **BoGA**: A module which allows you to generate binders using an evolutionary algorithm from a biological prior.
+- **BoRF**: A design module for generating a large dataset using a diffusion pipeline, which is then searched with BoPep.
+- **BoGA**: A module which allows you to generate binders using an surrogate model guided evolutionary algorithm (preprint coming soon).
 
+> NOTE: We are currently working on updating the documentation for BoPep with instructive examples and API references.
 
 ## Search datasets (BoPep)
 The core of the BoPep framework lies in searching large datasets for binders. It does so by training a surrogate model to predict whether a peptide will bind or not, based on embeddings and previous docking experiments. During the search, the peptide dataset is navigated with the help of surrogate models. 
@@ -56,7 +57,7 @@ source bopep_env/bin/activate
 
 ### Step 3: Install Dependencies
 
-1. **Install LocalColabFold**: LocalColabFold is a fantastic package that allows you to run ColabFold locally. Follow the installation procedure [here](https://github.com/YoshitakaMo/localcolabfold) to install it.
+1. (a) If you would like to dock with AlphaFold: **Install LocalColabFold**: LocalColabFold is a fantastic package that allows you to run ColabFold locally. Follow the installation procedure [here](https://github.com/YoshitakaMo/localcolabfold) to install it.
 
 Remember to export the `PATH` variable and make sure `colabfold_batch` is callable by running:
 
@@ -70,7 +71,10 @@ colabfold_batch --help
 
 This should work if you follow the instructions in the LocalColabFold git repo.
 
-2. **Install PyRosetta**: PyRosetta is freely available for academic users. Any commercial usage requires the purchasing of a license.
+1. (b) If you would like to dock with Boltz: **Install Boltz**: Boltz-2 is another nice way of docking through co-folding. Follow the installation procedure [here](https://github.com/jwohlwend/boltz) to install Boltz-2. Make sure you can run boltz after installing.
+
+
+2. **Install PyRosetta**: PyRosetta is freely available for academic users and is used to score complexes. Any commercial usage requires the purchasing of a license.
 
    - Go to the [PyRosetta download page](https://www.pyrosetta.org/downloads) and read up on the terms for the license.
    - Install PyRosetta in your environment using the [pyrosetta-installer](https://pypi.org/project/pyrosetta-installer/) with pip:
@@ -94,9 +98,26 @@ This should work if you follow the instructions in the LocalColabFold git repo.
    pip install -r requirements.txt
    ```
 
+## Modules
+
+### Surrogate modelling
+The task of the surrogate model is to learn a mapping between the embedding and the score. We use probibalistic deep learning models to do so. The architectures include: BiGRU, BiLSTM and MLP. 
+
+The probibalistic modalities include: an ensemble of networks, MC dropout, deep evidential regression and mean-variance estimation.
+
+### Docking
+Docking is performed to predict the complex structure given a target and a candidate peptide. We support docking via co-folding using AlphaFold and/or Boltz.
+
+### Scoring
+Scoring of complexes defines the fitness/reward which is maximized during search. It should correlate with binding probability/affinity. We have defined a score called `benchmark_objective_v1` using data from PDBBind. You can also provide your own objective function easily.
+
+### Embedding
+Embedding serves to create a navigatable space of peptide representations. We support embedding through AAindex and ESM-2. You can also create your own embeddings and pass to the BO search function.
+
 ## Running BoPep
 
 Details on running can be found in [examples](examples/how_to_run/README.md).
+
 
 ## Cite
 
@@ -105,10 +126,6 @@ If you use this paper, please cite:
 If you use BoGA, please cite:
 
 Additionally, please cite the relevant papers below for your use case: 
-
-## Credits
-
-Credits go out to those who have created great packages and tools such as ESM, LocalColabFold, PyRosetta, torch, optuna and other modules:
 
 ```bib
 @article{Mirdita2022,
@@ -178,5 +195,16 @@ Credits go out to those who have created great packages and tools such as ESM, L
   year = {2023},
   month = mar,
   pages = {1123–1130}
+}
+```
+```bib
+@article{Passaro2025,
+  title = {Boltz-2: Towards Accurate and Efficient Binding Affinity Prediction},
+  url = {http://dx.doi.org/10.1101/2025.06.14.659707},
+  DOI = {10.1101/2025.06.14.659707},
+  publisher = {Cold Spring Harbor Laboratory},
+  author = {Passaro,  Saro and Corso,  Gabriele and Wohlwend,  Jeremy and Reveiz,  Mateo and Thaler,  Stephan and Somnath,  Vignesh Ram and Getz,  Noah and Portnoi,  Tally and Roy,  Julien and Stark,  Hannes and Kwabi-Addo,  David and Beaini,  Dominique and Jaakkola,  Tommi and Barzilay,  Regina},
+  year = {2025},
+  month = jun 
 }
 ```

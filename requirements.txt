@@ -13,5 +13,4 @@ pydssp
 pytest>=6.0
 pytest-mock
 pyrosetta-installer
-boltz[cuda]
 
