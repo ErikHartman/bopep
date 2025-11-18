@@ -318,7 +318,7 @@ class BoGA:
             scores = self.scorer.score_batch(
                 scores_to_include=self.scoring_kwargs.get('scores_to_include', []),
                 inputs=sequences,
-                input_type='peptide_sequence',
+                input_type='sequence',
                 n_jobs=self.scoring_kwargs.get('n_jobs', 12),
             )
         else:  # mode == 'binding'
@@ -599,12 +599,8 @@ class BoGA:
             init_reduced = self._embed_peptides(init_seqs)
 
             # Dock and score initial population
-            print("Docking and scoring initial population...")
+            print("Evaluating initial population...")
             scores = self._dock_and_score(init_seqs)
-            
-            print("Initial scores:")
-            print(scores)
-            
             last_iteration = 0  # Fresh start
 
         # Convert initial scores to objectives
