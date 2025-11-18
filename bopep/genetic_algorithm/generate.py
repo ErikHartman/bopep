@@ -5,8 +5,10 @@ import pandas as pd
 import numpy as np
         
 from bopep.docking.docker import Docker
+from bopep.folding.alphafold_monomer import AlphaFoldMonomer
 from bopep.embedding.embedder import Embedder
-from bopep.scoring.scorer import Scorer
+from bopep.scoring.complex_scorer import ComplexScorer
+from bopep.scoring.monomer_scorer import MonomerScorer
 from bopep.surrogate_model import SurrogateModelManager
 from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.search.utils import _validate_surrogate_model_kwargs
@@ -17,15 +19,21 @@ import torch
 
 class BoGA:
     """
-    Genetic algorithm for peptide binder discovery using surrogate modeling.
+    Genetic algorithm for protein discovery using surrogate modeling.
+    
+    Supports three modes:
+    - 'binding': Optimize peptides for binding to a target protein (requires target_structure_path)
+    - 'unconditional': Generate proteins with desired intrinsic properties (folds sequences, no target)
+    - 'sequence': Fast sequence-only scoring without folding (no structure prediction)
     
     Use surrogate_model_kwargs to configure the surrogate model, including:
     - model_type, network_type, multi_model (separate models per objective), etc.
     """
     def __init__(
         self,
-        target_structure_path: str,
         initial_sequences: Union[str, List[str]],
+        mode: str = 'binding',
+        target_structure_path: Optional[str] = None,
 
         n_init : int = 130,
 
@@ -55,6 +63,15 @@ class BoGA:
         continue_from_logs: Optional[str] = None,
     ):
         self.initial_sequences = initial_sequences
+        
+        # Validate mode
+        self.mode = mode.lower()
+        if self.mode not in ['binding', 'unconditional', 'sequence']:
+            raise ValueError(f"mode must be 'binding', 'unconditional', or 'sequence', got '{mode}'")
+        
+        # Validate mode-specific requirements
+        if self.mode == 'binding' and target_structure_path is None:
+            raise ValueError("target_structure_path is required for mode='binding'")
         
         # Validate surrogate model config
         self.surrogate_model_kwargs = surrogate_model_kwargs
@@ -96,19 +113,31 @@ class BoGA:
                 "pca_n_components must be specified to ensure dimensional consistency. "
                 "Use a fixed value (e.g., pca_n_components=20) for stable neural network training."
             )
-
-        # Check if using mock mode
-        self.is_mock = docker_kwargs and docker_kwargs.get('models') == ['mock']
         
-        # Initialize components
-        if not self.is_mock:
-            # Only initialize real docker if not in mock mode
+        # Initialize components based on mode
+        if self.mode == 'binding':
+            # Binding mode: use Docker and ComplexScorer
             self.docker = Docker(docker_kwargs)
             self.docker.set_target_structure(self.target_structure_path)
-        else:
-            self.docker = None  # No docker needed in mock mode
-        
-        self.scorer = Scorer()
+            self.folder = None
+            self.scorer = ComplexScorer()
+        elif self.mode == 'unconditional':
+            # Unconditional mode: use AlphaFoldMonomer and MonomerScorer
+            self.docker = None
+            folding_kwargs = docker_kwargs or {}  # Reuse docker_kwargs structure for folding params
+            self.folder = AlphaFoldMonomer(
+                output_dir=folding_kwargs.get('output_dir', 'folding_output'),
+                num_models=folding_kwargs.get('num_models', 5),
+                num_recycles=folding_kwargs.get('num_recycles', 3),
+                save_raw=folding_kwargs.get('save_raw', False),
+                force=folding_kwargs.get('force', False),
+            )
+            self.scorer = MonomerScorer()
+        else:  # mode == 'sequence'
+            # Sequence mode: no folding/docking, just sequence-based scoring
+            self.docker = None
+            self.folder = None
+            self.scorer = MonomerScorer()
         self.scores_to_objective = ScoresToObjective()
         self.embedder = Embedder()
         self.acquisition_function_obj = AcquisitionFunction()
@@ -275,19 +304,25 @@ class BoGA:
         return training_embeddings, candidate_embeddings
 
     def _dock_and_score(self, sequences: List[str]) -> Dict[str, float]:
-        if self.is_mock:
-            # Mock mode: skip docking, score sequences directly
+        if self.mode == 'unconditional':
+            # Unconditional mode: fold monomers and score intrinsic properties
+            fold_dirs = self.folder.fold(sequences)
+            scores = self.scorer.score_batch(
+                scores_to_include=self.scoring_kwargs.get('scores_to_include', []),
+                inputs=fold_dirs,
+                input_type='processed_dir',
+                n_jobs=self.scoring_kwargs.get('n_jobs', 12),
+            )
+        elif self.mode == 'sequence':
+            # Sequence mode: fast sequence-only scoring without folding
             scores = self.scorer.score_batch(
                 scores_to_include=self.scoring_kwargs.get('scores_to_include', []),
                 inputs=sequences,
                 input_type='peptide_sequence',
-                binding_site_residue_indices=self.scoring_kwargs.get('binding_site_residue_indices'),
                 n_jobs=self.scoring_kwargs.get('n_jobs', 12),
-                binding_site_distance_threshold=self.scoring_kwargs.get('binding_site_distance_threshold', 5),
-                required_n_contact_residues=self.scoring_kwargs.get('required_n_contact_residues', 5),
             )
-        else:
-            # Real docking mode
+        else:  # mode == 'binding'
+            # Binding mode: dock and score complexes
             dock_dirs = self.docker.dock_peptides(sequences)
             scores = self.scorer.score_batch(
                 scores_to_include=self.scoring_kwargs.get('scores_to_include', []),

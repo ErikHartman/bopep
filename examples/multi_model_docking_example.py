@@ -4,7 +4,9 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from bopep.docking.docker import Docker
-from bopep.scoring.scorer import Scorer
+from bopep.docking.alphafold_docker import AlphaFoldDocker
+from bopep.docking.boltz_docker import BoltzDocker
+from bopep.scoring.complex_scorer import ComplexScorer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +49,9 @@ def main():
     print(results)
         
     
-    scorer = Scorer()
+    # 4. Score using the unified ComplexScorer
+    print("\n4. Scoring docking results...")
+    scorer = ComplexScorer()
 
     scores_to_compute = [
         #"alphafold_iptm",
@@ -86,7 +90,6 @@ def main():
     ]
     
     
-
 
     results = scorer.score(
         scores_to_include=scores_to_compute,

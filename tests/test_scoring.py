@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from bopep.scoring.scorer import Scorer
+from bopep.scoring.complex_scorer import ComplexScorer
 from bopep.scoring.peptide_properties import PeptideProperties
 from bopep.scoring.dssp import DSSPAnalyzer, get_dssp_scores_from_structure
 from bopep.scoring.scores_to_objective import ScoresToObjective

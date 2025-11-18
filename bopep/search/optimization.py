@@ -4,7 +4,7 @@ import pickle
 
 from typing import Callable, List, Optional, Dict, Any, Union
 from bopep.docking.docker import Docker
-from bopep.scoring.scorer import Scorer
+from bopep.scoring.complex_scorer import ComplexScorer
 from bopep.surrogate_model.manager import SurrogateModelManager
 from bopep.logging.logger import Logger
 from bopep.bayes.acquisition import AcquisitionFunction
@@ -67,7 +67,7 @@ class BoPep:
         self.custom_scorer = custom_scorer
 
         # Initialize components
-        self.scorer = Scorer()
+        self.scorer = ComplexScorer()
         self.docker = Docker(self.docker_kwargs)
         self.acquisition_function_obj = AcquisitionFunction()
         self.selector = PeptideSelector()
