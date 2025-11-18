@@ -33,51 +33,6 @@ class PeptideMutator:
         L = random.randint(self.min_sequence_length, self.max_sequence_length)
         return ''.join(random.choice(_AMINO_ACIDS) for _ in range(L))
 
-    def crossover(self, parent1: str, parent2: str, method: str = "single") -> str:
-        """
-        Perform crossover between two parent sequences.
-        
-        Args:
-            parent1: First parent sequence
-            parent2: Second parent sequence
-            method: 'single' for single-point crossover, 'two' for two-point crossover
-            
-        Returns:
-            Offspring sequence created by crossover
-        """
-        if method == "single":
-            # Single-point crossover
-            min_len = min(len(parent1), len(parent2))
-            if min_len <= 1:
-                return random.choice([parent1, parent2])
-            
-            crossover_point = random.randint(1, min_len - 1)
-            child = parent1[:crossover_point] + parent2[crossover_point:]
-            
-        elif method == "two":
-            # Two-point crossover
-            min_len = min(len(parent1), len(parent2))
-            if min_len <= 2:
-                return random.choice([parent1, parent2])
-            
-            point1 = random.randint(1, min_len - 2)
-            point2 = random.randint(point1 + 1, min_len - 1)
-            child = parent1[:point1] + parent2[point1:point2] + parent1[point2:]
-            
-        else:
-            raise ValueError(f"Unknown crossover method: {method}. Use 'single' or 'two'.")
-        
-        # Ensure child respects length constraints
-        if len(child) < self.min_sequence_length:
-            # Pad with random amino acids
-            while len(child) < self.min_sequence_length:
-                child += random.choice(_AMINO_ACIDS)
-        elif len(child) > self.max_sequence_length:
-            # Truncate
-            child = child[:self.max_sequence_length]
-        
-        return child
-
     def mutate_sequence(self, seq: str, evaluated_sequences: Set[str], objectives: Dict[str, float] = None) -> str:
         """
         Mutate a sequence using uniform random substitutions, insertions, and deletions.

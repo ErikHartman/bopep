@@ -49,55 +49,6 @@ class TestPeptideMutator:
         assert 5 <= len(sequence) <= 10
         assert all(aa in 'ACDEFGHIKLMNPQRSTVWY' for aa in sequence)
 
-    def test_crossover_single_point(self):
-        """Test single-point crossover"""
-        mutator = PeptideMutator(min_sequence_length=5, max_sequence_length=15)
-        
-        parent1 = "AAAAA"
-        parent2 = "CCCCC"
-        
-        child = mutator.crossover(parent1, parent2, method="single")
-        
-        assert isinstance(child, str)
-        assert 5 <= len(child) <= 15
-        assert all(aa in 'ACDEFGHIKLMNPQRSTVWY' for aa in child)
-        # Child should have segments from both parents
-        assert any(aa in child for aa in parent1) or any(aa in child for aa in parent2)
-
-    def test_crossover_two_point(self):
-        """Test two-point crossover"""
-        mutator = PeptideMutator(min_sequence_length=5, max_sequence_length=15)
-        
-        parent1 = "ACDEFGHIK"
-        parent2 = "LMNPQRSTV"
-        
-        child = mutator.crossover(parent1, parent2, method="two")
-        
-        assert isinstance(child, str)
-        assert 5 <= len(child) <= 15
-        assert all(aa in 'ACDEFGHIKLMNPQRSTVWY' for aa in child)
-
-    def test_crossover_length_constraints(self):
-        """Test that crossover respects length constraints"""
-        mutator = PeptideMutator(min_sequence_length=8, max_sequence_length=10)
-        
-        parent1 = "ACDEFGHIK"
-        parent2 = "LMNPQRSTV"
-        
-        for _ in range(10):
-            child = mutator.crossover(parent1, parent2, method="single")
-            assert 8 <= len(child) <= 10
-            
-            child = mutator.crossover(parent1, parent2, method="two")
-            assert 8 <= len(child) <= 10
-
-    def test_crossover_invalid_method(self):
-        """Test that invalid crossover method raises error"""
-        mutator = PeptideMutator()
-        
-        with pytest.raises(ValueError, match="Unknown crossover method"):
-            mutator.crossover("AAAAA", "CCCCC", method="invalid")
-
     def test_mutate_sequence_uniform_mode(self):
         """Test sequence mutation with uniform substitutions"""
         mutator = PeptideMutator(
