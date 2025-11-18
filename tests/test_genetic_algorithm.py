@@ -726,7 +726,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         
         # Mock external calls
         mock_dependencies['docker'].dock_peptides.return_value = ["dir1", "dir2"]
-        mock_dependencies['scorer'].score_batch.return_value = mock_scores
+        mock_dependencies['complex_scorer'].score_batch.return_value = mock_scores
         mock_dependencies['scores_to_obj'].create_objective.return_value = mock_objectives
         
         # Mock embedding methods to handle any sequence
