@@ -97,9 +97,17 @@ class BoGA:
                 "Use a fixed value (e.g., pca_n_components=20) for stable neural network training."
             )
 
+        # Check if using mock mode
+        self.is_mock = docker_kwargs and docker_kwargs.get('models') == ['mock']
+        
         # Initialize components
-        self.docker = Docker(docker_kwargs)
-        self.docker.set_target_structure(self.target_structure_path)
+        if not self.is_mock:
+            # Only initialize real docker if not in mock mode
+            self.docker = Docker(docker_kwargs)
+            self.docker.set_target_structure(self.target_structure_path)
+        else:
+            self.docker = None  # No docker needed in mock mode
+        
         self.scorer = Scorer()
         self.scores_to_objective = ScoresToObjective()
         self.embedder = Embedder()
@@ -267,16 +275,29 @@ class BoGA:
         return training_embeddings, candidate_embeddings
 
     def _dock_and_score(self, sequences: List[str]) -> Dict[str, float]:
-        dock_dirs = self.docker.dock_peptides(sequences)
-        scores =  self.scorer.score_batch(
-            scores_to_include=self.scoring_kwargs.get('scores_to_include', []),
-            inputs=dock_dirs,
-            input_type='processed_dir',
-            binding_site_residue_indices=self.scoring_kwargs.get('binding_site_residue_indices'),
-            n_jobs=self.scoring_kwargs.get('n_jobs', 12),
-            binding_site_distance_threshold=self.scoring_kwargs.get('binding_site_distance_threshold', 5),
-            required_n_contact_residues=self.scoring_kwargs.get('required_n_contact_residues', 5),
-        )
+        if self.is_mock:
+            # Mock mode: skip docking, score sequences directly
+            scores = self.scorer.score_batch(
+                scores_to_include=self.scoring_kwargs.get('scores_to_include', []),
+                inputs=sequences,
+                input_type='peptide_sequence',
+                binding_site_residue_indices=self.scoring_kwargs.get('binding_site_residue_indices'),
+                n_jobs=self.scoring_kwargs.get('n_jobs', 12),
+                binding_site_distance_threshold=self.scoring_kwargs.get('binding_site_distance_threshold', 5),
+                required_n_contact_residues=self.scoring_kwargs.get('required_n_contact_residues', 5),
+            )
+        else:
+            # Real docking mode
+            dock_dirs = self.docker.dock_peptides(sequences)
+            scores = self.scorer.score_batch(
+                scores_to_include=self.scoring_kwargs.get('scores_to_include', []),
+                inputs=dock_dirs,
+                input_type='processed_dir',
+                binding_site_residue_indices=self.scoring_kwargs.get('binding_site_residue_indices'),
+                n_jobs=self.scoring_kwargs.get('n_jobs', 12),
+                binding_site_distance_threshold=self.scoring_kwargs.get('binding_site_distance_threshold', 5),
+                required_n_contact_residues=self.scoring_kwargs.get('required_n_contact_residues', 5),
+            )
         self._evaluated_sequences.update(sequences)
         return scores
 
