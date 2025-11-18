@@ -12,6 +12,9 @@ from bopep.scoring.pep_prot_distance import distance_score_from_structure
 from bopep.scoring.is_peptide_in_binding_site import is_peptide_in_binding_site_pdb_file
 from bopep.structure.parser import extract_sequence_from_structure
 
+# Alias for backward compatibility in tests
+Scorer = ComplexScorer
+
 
 # Path to test data
 TEST_DATA_DIR = Path(__file__).parent.parent / "data"

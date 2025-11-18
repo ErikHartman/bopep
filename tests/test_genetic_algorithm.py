@@ -206,7 +206,9 @@ class TestBoGA:
     def mock_dependencies(self):
         """Mock all the heavy dependencies for BoGA"""
         with patch('bopep.genetic_algorithm.generate.Docker') as mock_docker, \
-             patch('bopep.genetic_algorithm.generate.Scorer') as mock_scorer, \
+             patch('bopep.genetic_algorithm.generate.ComplexScorer') as mock_complex_scorer, \
+             patch('bopep.genetic_algorithm.generate.MonomerScorer') as mock_monomer_scorer, \
+             patch('bopep.genetic_algorithm.generate.AlphaFoldMonomer') as mock_alphafold, \
              patch('bopep.genetic_algorithm.generate.ScoresToObjective') as mock_scores_to_obj, \
              patch('bopep.genetic_algorithm.generate.Embedder') as mock_embedder, \
              patch('bopep.genetic_algorithm.generate.AcquisitionFunction') as mock_acq_func, \
@@ -219,8 +221,14 @@ class TestBoGA:
             mock_docker_instance = Mock()
             mock_docker.return_value = mock_docker_instance
             
-            mock_scorer_instance = Mock()
-            mock_scorer.return_value = mock_scorer_instance
+            mock_complex_scorer_instance = Mock()
+            mock_complex_scorer.return_value = mock_complex_scorer_instance
+            
+            mock_monomer_scorer_instance = Mock()
+            mock_monomer_scorer.return_value = mock_monomer_scorer_instance
+            
+            mock_alphafold_instance = Mock()
+            mock_alphafold.return_value = mock_alphafold_instance
             
             mock_scores_to_obj_instance = Mock()
             mock_scores_to_obj.return_value = mock_scores_to_obj_instance
@@ -236,7 +244,9 @@ class TestBoGA:
             
             yield {
                 'docker': mock_docker_instance,
-                'scorer': mock_scorer_instance,
+                'complex_scorer': mock_complex_scorer_instance,
+                'monomer_scorer': mock_monomer_scorer_instance,
+                'alphafold': mock_alphafold_instance,
                 'scores_to_obj': mock_scores_to_obj_instance,
                 'embedder': mock_embedder_instance,
                 'acq_func': mock_acq_func_instance,

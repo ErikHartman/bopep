@@ -84,9 +84,8 @@ class MonomerScorer(BaseScorer):
             if os.path.exists(alphafold_metrics_path):
                 available.extend(self.confidence_scores)
         
-        # Structural scores (require structure file)
+        # DSSP scores (require structure file)
         if structure_file or processed_dir:
-            available.extend(self.structural_scores)
             available.extend(self.dssp_scores)
         
         # Template RMSD (requires template)
