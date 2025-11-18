@@ -607,7 +607,14 @@ class BoGA:
                 # For parent selection, always use objectives (exploitation)
                 acquisition_kwargs = phase.get("acquisition_kwargs", {})
                 objective_directions = acquisition_kwargs.get("objective_directions", {})
-                parents = self._select_top_objectives(objectives, m_select, objective_directions=objective_directions)
+                parents = self._select_top_objectives(
+                    objectives, 
+                    m_select, 
+                    objective_directions=objective_directions,
+                    top_fraction=acquisition_kwargs.get("top_fraction", 0.3),
+                    selection_method=acquisition_kwargs.get("selection_method", "uniform"),
+                    beta=acquisition_kwargs.get("beta", 1.0)
+                )
                 print(f"Selected top {len(parents)} parents for mutation")
                 
                 pool = self.mutator.mutate_pool(parents, k_pool, self._evaluated_sequences, objectives)
