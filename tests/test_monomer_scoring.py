@@ -51,7 +51,7 @@ class TestMonomerScorer:
         
         # Should include DSSP scores
         assert 'dssp_helix_fraction' in available
-        assert 'dssp_strand_fraction' in available
+        assert 'dssp_sheet_fraction' in available
         assert 'dssp_loop_fraction' in available
 
     def test_get_available_scores_no_context(self):
@@ -80,7 +80,7 @@ class TestMonomerScorer:
             
             # Should have DSSP scores
             assert 'dssp_helix_fraction' in available
-            assert 'dssp_strand_fraction' in available
+            assert 'dssp_sheet_fraction' in available
         finally:
             os.unlink(temp_pdb)
 
@@ -224,7 +224,7 @@ class TestMonomerScorer:
         
         sequence_scores = [
             'molecular_weight', 'aromaticity', 'instability_index',
-            'isoelectric_point', 'gravy', 'helix_fraction', 'turn_fraction',
+            'isoelectric_point', 'gravy', 'helix_fraction', 'loop_fraction',
             'sheet_fraction', 'hydrophobic_aa_percent', 'polar_aa_percent',
             'positively_charged_aa_percent', 'negatively_charged_aa_percent',
             'delta_net_charge_frac', 'uHrel'

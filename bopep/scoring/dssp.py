@@ -29,20 +29,20 @@ class DSSPAnalyzer:
             raise ValueError(f"Could not extract coordinates from structure file: {self.structure_file}")
         
         dssp_assignment = pydssp.assign(coord, out_type='index')
-        # 0: loop, 1: alpha-helix, 2: beta-strand
+        # 0: loop, 1: alpha-helix, 2: beta-sheet
         helix_count = torch.sum(dssp_assignment == 1).item()
         return float(helix_count / len(dssp_assignment)) if len(dssp_assignment) > 0 else 0.0
 
-    def get_dssp_strand_fraction(self):
-        """Get strand/beta-sheet fraction using DSSP."""
+    def get_dssp_sheet_fraction(self):
+        """Get sheet/beta-sheet fraction using DSSP."""
         coord = self._extract_coordinates()
         if coord is None:
             raise ValueError(f"Could not extract coordinates from structure file: {self.structure_file}")
         
         dssp_assignment = pydssp.assign(coord, out_type='index')
-        # 0: loop, 1: alpha-helix, 2: beta-strand
-        strand_count = torch.sum(dssp_assignment == 2).item()
-        return float(strand_count / len(dssp_assignment)) if len(dssp_assignment) > 0 else 0.0
+        # 0: loop, 1: alpha-helix, 2: beta-sheet
+        sheet_count = torch.sum(dssp_assignment == 2).item()
+        return float(sheet_count / len(dssp_assignment)) if len(dssp_assignment) > 0 else 0.0
         
     def get_dssp_loop_fraction(self):
         """Get loop fraction using DSSP."""
@@ -51,7 +51,7 @@ class DSSPAnalyzer:
             raise ValueError(f"Could not extract coordinates from structure file: {self.structure_file}")
         
         dssp_assignment = pydssp.assign(coord, out_type='index')
-        # 0: loop, 1: alpha-helix, 2: beta-strand
+        # 0: loop, 1: alpha-helix, 2: beta-sheet
         loop_count = torch.sum(dssp_assignment == 0).item()
         return float(loop_count / len(dssp_assignment)) if len(dssp_assignment) > 0 else 0.0
         
@@ -59,7 +59,7 @@ class DSSPAnalyzer:
         """Get all DSSP secondary structure fractions."""
         return {
             'dssp_helix_fraction': self.get_dssp_helix_fraction(),
-            'dssp_strand_fraction': self.get_dssp_strand_fraction(),
+            'dssp_sheet_fraction': self.get_dssp_sheet_fraction(),
             'dssp_loop_fraction': self.get_dssp_loop_fraction(),
         }
         

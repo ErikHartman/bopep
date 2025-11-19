@@ -72,7 +72,7 @@ class ComplexScorer(BaseScorer):
             "delta_net_charge_frac",
             "uHrel",
             "dssp_helix_fraction",
-            "dssp_strand_fraction",
+            "dssp_sheet_fraction",
             "dssp_loop_fraction",
         ]
         
@@ -1000,12 +1000,12 @@ class ComplexScorer(BaseScorer):
                 scores["dssp_helix_fraction"] = dssp_analyzer.get_dssp_helix_fraction()
             else:
                 raise ValueError("dssp_helix_fraction requires a structure file to be available")
-        if "dssp_strand_fraction" in scores_to_include:
+        if "dssp_sheet_fraction" in scores_to_include:
             if target_structure_file:
                 dssp_analyzer = DSSPAnalyzer(target_structure_file)
-                scores["dssp_strand_fraction"] = dssp_analyzer.get_dssp_strand_fraction()
+                scores["dssp_sheet_fraction"] = dssp_analyzer.get_dssp_sheet_fraction()
             else:
-                raise ValueError("dssp_strand_fraction requires a structure file to be available")
+                raise ValueError("dssp_sheet_fraction requires a structure file to be available")
         if "dssp_loop_fraction" in scores_to_include:
             if target_structure_file:
                 dssp_analyzer = DSSPAnalyzer(target_structure_file)

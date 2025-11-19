@@ -48,6 +48,8 @@ class SurrogateModelManager(ObjectiveMixin):
         if self.previous_study is not None:
             logging.info(f"Using previous study with {len(self.previous_study.trials)} trials")
         
+        max_seq_len = self.surrogate_model_kwargs.get('max_seq_len', 150)
+        
         self.best_hyperparams, self.previous_study = tune_hyperparams(
             model_type=model_type,
             embedding_dict=embeddings,
@@ -57,7 +59,8 @@ class SurrogateModelManager(ObjectiveMixin):
             n_splits=n_splits,
             random_state=random_state,
             previous_study=self.previous_study,
-            device=self.device
+            device=self.device,
+            max_seq_len=max_seq_len
         )
         
         if iteration is not None:
@@ -134,7 +137,8 @@ class SurrogateModelManager(ObjectiveMixin):
             'hidden_dim': hidden_dim,
             'num_layers': num_layers,
             'network_type': network_type,
-            'n_objectives': n_objectives
+            'n_objectives': n_objectives,
+            'max_seq_len': self.surrogate_model_kwargs.get('max_seq_len', 150)
         }
         
         # Add model-specific parameters

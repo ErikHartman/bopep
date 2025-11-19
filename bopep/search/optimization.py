@@ -213,6 +213,12 @@ class BoPep:
         logging.info(
             f"Embeddings dimension: {self.surrogate_model_kwargs['input_dim']}"
         )
+        
+        # Set max_seq_len based on maximum sequence length in the dataset if not already specified
+        if 'max_seq_len' not in self.surrogate_model_kwargs:
+            max_seq_len = max(len(seq) for seq in self.embeddings.keys())
+            self.surrogate_model_kwargs['max_seq_len'] = max_seq_len
+            logging.info(f"Set max_seq_len to {max_seq_len} based on dataset")
 
 
         self.best_hyperparams = None

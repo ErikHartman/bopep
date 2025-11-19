@@ -36,7 +36,7 @@ class PeptideProperties:
     def get_helix_fraction(self):
         return self.pa.secondary_structure_fraction()[0]
 
-    def get_turn_fraction(self):
+    def get_loop_fraction(self):
         return self.pa.secondary_structure_fraction()[1]
 
     def get_sheet_fraction(self):
@@ -81,7 +81,7 @@ class PeptideProperties:
             'isoelectric_point': self.get_isoelectric_point(),
             'gravy': self.get_gravy(),
             'helix_fraction': self.get_helix_fraction(),
-            'turn_fraction': self.get_turn_fraction(),
+            'loop_fraction': self.get_loop_fraction(),
             'sheet_fraction': self.get_sheet_fraction(),
             'hydrophobic_aa_percent': self.get_hydrophobic_aa_percent(),
             'polar_aa_percent': self.get_polar_aa_percent(),

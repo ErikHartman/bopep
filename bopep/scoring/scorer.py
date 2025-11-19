@@ -1215,7 +1215,3 @@ if __name__ == "__main__":
         structure_file=structure_file_path
     )
     print(f"\nMolecular weight score: {scores}")
-
-
-# Backward compatibility alias
-Scorer = ComplexScorer

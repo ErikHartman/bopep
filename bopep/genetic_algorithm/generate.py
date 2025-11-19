@@ -150,6 +150,10 @@ class BoGA:
         )
         
         # Initialize surrogate model manager
+        # Set max_seq_len based on max_sequence_length if not already specified
+        if 'max_seq_len' not in self.surrogate_model_kwargs:
+            self.surrogate_model_kwargs['max_seq_len'] = self.max_sequence_length
+        
         self.surrogate_manager = SurrogateModelManager(
             surrogate_model_kwargs=self.surrogate_model_kwargs,
             device=self.device

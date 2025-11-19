@@ -39,6 +39,7 @@ class HyperparameterTuner:
         hidden_dim_max: int = 256,
         uncertainty_param_min: Optional[Union[float, int]] = None,
         uncertainty_param_max: Optional[Union[float, int]] = None,
+        max_seq_len: int = 150,
     ):
         """
         Args:
@@ -71,6 +72,7 @@ class HyperparameterTuner:
 
         self.uncertainty_param_min = uncertainty_param_min
         self.uncertainty_param_max = uncertainty_param_max
+        self.max_seq_len = max_seq_len
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -100,6 +102,7 @@ class HyperparameterTuner:
                 network_type=self.network_type,
                 mve_regularization=param_value,
                 n_objectives=self.n_objectives,
+                max_seq_len=self.max_seq_len,
             )
         elif self.model_type == "deep_evidential":
             return DeepEvidentialRegression(
@@ -110,6 +113,7 @@ class HyperparameterTuner:
                 network_type=self.network_type,
                 evidential_regularization=param_value,
                 n_objectives=self.n_objectives,
+                max_seq_len=self.max_seq_len,
             )
         elif self.model_type == "mc_dropout":
             return MonteCarloDropout(
@@ -120,6 +124,7 @@ class HyperparameterTuner:
                 network_type=self.network_type,
                 dropout_rate=param_value,
                 n_objectives=self.n_objectives,
+                max_seq_len=self.max_seq_len,
             )
         elif self.model_type == "nn_ensemble":
             return NeuralNetworkEnsemble(
@@ -130,6 +135,7 @@ class HyperparameterTuner:
                 network_type=self.network_type,
                 n_networks=int(param_value),
                 n_objectives=self.n_objectives,
+                max_seq_len=self.max_seq_len,
             )
         else:
             raise ValueError(f"Unknown model type: {self.model_type}")
@@ -437,6 +443,7 @@ def tune_hyperparams(
     previous_study: Optional[optuna.study.Study] = None,
     uncertainty_param_min: Optional[Union[float, int]] = None,
     uncertainty_param_max: Optional[Union[float, int]] = None,
+    max_seq_len: int = 150,
 ) -> Tuple[Dict[str, Union[float, List[int], None]], optuna.study.Study]:
     """
     High-level API for tuning architecture + uncertainty hyperparams with 
@@ -475,6 +482,7 @@ def tune_hyperparams(
         hidden_dim_max=hidden_dim_max,
         uncertainty_param_min = uncertainty_param_min,
         uncertainty_param_max = uncertainty_param_max,
+        max_seq_len=max_seq_len,
     )
 
     best_params, study = tuner.tune(embedding_dict, objective_dict, previous_study)

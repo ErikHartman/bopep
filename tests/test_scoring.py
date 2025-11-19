@@ -421,7 +421,7 @@ class TestPeptideProperties:
         props = PeptideProperties(peptide_sequence="ACDEFGHIKLMNPQRSTVWY")
         
         helix_frac = props.get_helix_fraction()
-        turn_frac = props.get_turn_fraction()
+        turn_frac = props.get_loop_fraction()
         sheet_frac = props.get_sheet_fraction()
         
         assert isinstance(helix_frac, float)
@@ -481,7 +481,7 @@ class TestPeptideProperties:
         assert isinstance(all_props, dict)
         expected_keys = [
             'length', 'molecular_weight', 'aromaticity', 'instability_index',
-            'isoelectric_point', 'gravy', 'helix_fraction', 'turn_fraction',
+            'isoelectric_point', 'gravy', 'helix_fraction', 'loop_fraction',
             'sheet_fraction', 'hydrophobic_aa_percent', 'polar_aa_percent',
             'positively_charged_aa_percent', 'negatively_charged_aa_percent',
             'delta_net_charge_frac', 'uHrel'
@@ -526,14 +526,14 @@ class TestDSSPAnalysis:
         assert isinstance(helix_fraction, float)
         assert 0.0 <= helix_fraction <= 1.0
 
-    def test_dssp_strand_fraction(self, sample_pdb_file):
+    def test_dssp_sheet_fraction(self, sample_pdb_file):
         """Test DSSP strand fraction calculation"""
         analyzer = DSSPAnalyzer(sample_pdb_file, chain_id="B")
         
-        strand_fraction = analyzer.get_dssp_strand_fraction()
+        sheet_fraction = analyzer.get_dssp_sheet_fraction()
         
-        assert isinstance(strand_fraction, float)
-        assert 0.0 <= strand_fraction <= 1.0
+        assert isinstance(sheet_fraction, float)
+        assert 0.0 <= sheet_fraction <= 1.0
 
     def test_dssp_loop_fraction(self, sample_pdb_file):
         """Test DSSP loop fraction calculation"""
@@ -549,10 +549,10 @@ class TestDSSPAnalysis:
         analyzer = DSSPAnalyzer(sample_pdb_file, chain_id="B")
         
         helix_frac = analyzer.get_dssp_helix_fraction()
-        strand_frac = analyzer.get_dssp_strand_fraction()
+        sheet_frac = analyzer.get_dssp_sheet_fraction()
         loop_frac = analyzer.get_dssp_loop_fraction()
         
-        total = helix_frac + strand_frac + loop_frac
+        total = helix_frac + sheet_frac + loop_frac
         
         # Should sum to 1.0 within floating point precision
         assert abs(total - 1.0) < 1e-10, f"DSSP fractions sum to {total}, expected ~1.0"
@@ -564,7 +564,7 @@ class TestDSSPAnalysis:
         fractions = analyzer.get_all_dssp_fractions()
         
         assert isinstance(fractions, dict)
-        expected_keys = ['dssp_helix_fraction', 'dssp_strand_fraction', 'dssp_loop_fraction']
+        expected_keys = ['dssp_helix_fraction', 'dssp_sheet_fraction', 'dssp_loop_fraction']
         
         for key in expected_keys:
             assert key in fractions
@@ -580,7 +580,7 @@ class TestDSSPAnalysis:
         fractions = get_dssp_scores_from_structure(sample_pdb_file, chain_id="B")
         
         assert isinstance(fractions, dict)
-        expected_keys = ['dssp_helix_fraction', 'dssp_strand_fraction', 'dssp_loop_fraction']
+        expected_keys = ['dssp_helix_fraction', 'dssp_sheet_fraction', 'dssp_loop_fraction']
         
         for key in expected_keys:
             assert key in fractions
@@ -629,20 +629,20 @@ class TestDSSPAnalysis:
         
         # Both should return valid values
         assert isinstance(dssp_fractions['dssp_helix_fraction'], float)
-        assert isinstance(dssp_fractions['dssp_strand_fraction'], float)
+        assert isinstance(dssp_fractions['dssp_sheet_fraction'], float)
         assert isinstance(biopython_helix, float)
         assert isinstance(biopython_sheet, float)
         
         # They may differ (different methods), but should be in reasonable ranges
         assert 0.0 <= dssp_fractions['dssp_helix_fraction'] <= 1.0
-        assert 0.0 <= dssp_fractions['dssp_strand_fraction'] <= 1.0
+        assert 0.0 <= dssp_fractions['dssp_sheet_fraction'] <= 1.0
         assert 0.0 <= biopython_helix <= 1.0
         assert 0.0 <= biopython_sheet <= 1.0
         
         print(f"DSSP vs BioPython secondary structure comparison:")
         print(f"  DSSP helix: {dssp_fractions['dssp_helix_fraction']:.3f}")
         print(f"  BioPython helix: {biopython_helix:.3f}")
-        print(f"  DSSP strand: {dssp_fractions['dssp_strand_fraction']:.3f}")
+        print(f"  DSSP strand: {dssp_fractions['dssp_sheet_fraction']:.3f}")
         print(f"  BioPython sheet: {biopython_sheet:.3f}")
         print(f"  DSSP loop: {dssp_fractions['dssp_loop_fraction']:.3f}")
 
@@ -653,7 +653,7 @@ class TestDSSPAnalysis:
         # Test that DSSP scores are in available scores
         available_scores = scorer.get_available_scores(structure_file=sample_pdb_file)
         
-        dssp_score_names = ["dssp_helix_fraction", "dssp_strand_fraction", "dssp_loop_fraction"]
+        dssp_score_names = ["dssp_helix_fraction", "dssp_sheet_fraction", "dssp_loop_fraction"]
         for score_name in dssp_score_names:
             assert score_name in available_scores, f"DSSP score '{score_name}' not available"
         
@@ -687,7 +687,7 @@ class TestDSSPAnalysis:
         
         with pytest.raises(ValueError, match="requires a structure file"):
             scorer.score(
-                scores_to_include=["dssp_strand_fraction"],
+                scores_to_include=["dssp_sheet_fraction"],
                 peptide_sequence="ACDEFG"
             )
         

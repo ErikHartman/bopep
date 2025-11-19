@@ -108,7 +108,7 @@ class PositionalEncoding(torch.nn.Module):
     """
     Adds positional information to the sequence embeddings.
     """
-    def __init__(self, d_model: int, max_len: int = 100):
+    def __init__(self, d_model: int, max_len: int = 150):
         super().__init__()
         
         # Create positional encoding matrix
@@ -154,14 +154,15 @@ class RNNetwork(nn.Module):
         output_dim: int = 1,
         architecture: str = "gru",   # "gru" or "lstm"
         n_objectives: int = 1,
+        max_seq_len: int = 150,  # Maximum sequence length for positional encoding
     ):
         super().__init__()
         self.architecture = architecture
         self.n_objectives = n_objectives
         self.output_dim = output_dim
         
-        # positional encoding (same as before)
-        self.positional_encoding = PositionalEncoding(input_dim)
+        # positional encoding with configurable max length
+        self.positional_encoding = PositionalEncoding(input_dim, max_len=max_seq_len)
         
         # choose RNN class
         rnn_cls = nn.GRU if architecture=="gru" else nn.LSTM
