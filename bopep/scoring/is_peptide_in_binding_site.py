@@ -170,14 +170,14 @@ def get_receptor_contacts(structure_file: str,
     return get_binding_site(structure_file, receptor_chain, peptide_chain, threshold)[1]
 
 def is_peptide_in_binding_site_pdb_file(
-    structure_file: str, binding_site_residue_indices: list = None, threshold: float = 5.0, required_n_contact_residues: int = 2
+    structure_file: str, binding_site_residue_indices: list = None, threshold: float = 5.0, required_n_contact_residues: int = 2, receptor_chain: str = "A", peptide_chain: str = "B"
 ) -> Tuple[int, bool]:
     """
     Determines if the peptide in the given structure file is within the threshold distance
     to the receptor's binding site.
     """
     _, receptor_binding_site_indices, _, _ = get_binding_site(
-        structure_file, threshold=threshold
+        structure_file, receptor_chain, peptide_chain, threshold
     )
 
     nr_contact_residues = 0
@@ -243,6 +243,8 @@ def smooth_peptide_binding_site_score(
     binding_site_residue_indices: list[int],
     threshold: float = 10.0,
     alpha: float = 0.5,
+    receptor_chain: str = "A",
+    peptide_chain: str = "B",
 ) -> float:
     """
     binding_site_residue_indices: zero-based positions in the receptor chain
@@ -251,16 +253,16 @@ def smooth_peptide_binding_site_score(
     # get the peptide atoms and identify binding site by contact
     binding_site_threshold = max(threshold * 2, 10.0)
     _, _, _, peptide_atoms = get_binding_site(
-        structure_file, threshold=binding_site_threshold
+        structure_file, receptor_chain, peptide_chain, threshold=binding_site_threshold
     )
 
     structure = parse_structure(structure_file, structure_id="docked")
     model = structure[0]
-    receptor_chain = model["A"]
+    receptor_chain_obj = model[receptor_chain]
 
     # figure out absolute numbering for the chain
     min_receptor_residue_id = min(
-        res.id[1] for res in receptor_chain.get_residues() if res.id[0] == " "
+        res.id[1] for res in receptor_chain_obj.get_residues() if res.id[0] == " "
     )
     # convert zero-based → absolute
     abs_indices = [rel + min_receptor_residue_id
@@ -274,7 +276,7 @@ def smooth_peptide_binding_site_score(
     residue_scores = []
     for pdb_idx in abs_indices:
         key = (" ", pdb_idx, " ")
-        residue = receptor_chain[key]
+        residue = receptor_chain_obj[key]
         coords = np.array([atom.coord for atom in residue.get_atoms()])
         if coords.size == 0:
             continue

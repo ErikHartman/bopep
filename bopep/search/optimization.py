@@ -519,6 +519,8 @@ class BoPep:
         required_n_contact_residues = self.scoring_kwargs.get(
             "required_n_contact_residues", 5
         )
+        receptor_chain = self.scoring_kwargs.get("receptor_chain", "A")
+        peptide_chain = self.scoring_kwargs.get("peptide_chain", "B")
 
         if not scores_to_include:
             raise ValueError(
@@ -551,7 +553,9 @@ class BoPep:
                     n_jobs=1,
                     binding_site_distance_threshold=binding_site_distance_threshold,
                     required_n_contact_residues=required_n_contact_residues,
-                    template_structures=self.template_structures
+                    template_structures=self.template_structures,
+                    receptor_chain=receptor_chain,
+                    peptide_chain=peptide_chain,
                 )
                 new_scores.update(peptide_scores)
         else:
@@ -564,6 +568,8 @@ class BoPep:
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 required_n_contact_residues=required_n_contact_residues,
                 template_structures=self.template_structures,
+                receptor_chain=receptor_chain,
+                peptide_chain=peptide_chain,
             )
 
         return new_scores

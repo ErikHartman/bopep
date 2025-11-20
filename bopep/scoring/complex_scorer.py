@@ -272,12 +272,18 @@ class ComplexScorer(BaseScorer):
         required_n_contact_residues: Optional[int] = 5,
         binding_site_distance_threshold: Optional[int] = 5.0,
         template_structure: Optional[str] = None,
+        receptor_chain: str = "A",
+        peptide_chain: str = "B",
     ) -> dict:
         """
         Calculate and return selected scores for a peptide.
         
         All score names must be explicit - no auto-resolution.
         Use method-prefixed names like "alphafold_iptm", "boltz_confidence_score" etc.
+        
+        Args:
+            receptor_chain: Chain ID for the receptor/target protein (default: "A")
+            peptide_chain: Chain ID for the peptide (default: "B")
         """
         # Validate requested scores
         for score in scores_to_include:
@@ -347,7 +353,7 @@ class ComplexScorer(BaseScorer):
                             if peptide_sequence:
                                 break
             elif structure_file:
-                peptide_sequence = extract_sequence_from_structure(structure_file, chain_id="B")
+                peptide_sequence = extract_sequence_from_structure(structure_file, chain_id=peptide_chain)
             else:
                 raise ValueError("Could not determine peptide sequence from provided inputs")
         
@@ -427,36 +433,36 @@ class ComplexScorer(BaseScorer):
             scores["alphafold_packstat"] = rosetta_scorer.get_packstat()
         
         if "alphafold_distance_score" in scores_to_include:
-            scores["alphafold_distance_score"] = distance_score_from_structure(alphafold_model_file)
+            scores["alphafold_distance_score"] = distance_score_from_structure(alphafold_model_file, receptor_chain, peptide_chain)
         
         if "alphafold_receptor_contacts" in scores_to_include:
             scores["alphafold_receptor_contacts"] = get_receptor_contacts(
-                alphafold_model_file, "A", "B", binding_site_distance_threshold
+                alphafold_model_file, receptor_chain, peptide_chain, binding_site_distance_threshold
             )
         
         if "alphafold_n_contacts" in scores_to_include:
             receptor_contacts = get_receptor_contacts(
-                alphafold_model_file, "A", "B", binding_site_distance_threshold
+                alphafold_model_file, receptor_chain, peptide_chain, binding_site_distance_threshold
             )
             scores["alphafold_n_contacts"] = len(receptor_contacts)
         
         if "alphafold_in_binding_site" in scores_to_include:
             n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
-                alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
             scores["alphafold_in_binding_site"] = in_binding_site
             scores["alphafold_binding_site_n_contacts"] = n_contacts
         
         if "alphafold_in_binding_site_score" in scores_to_include:
             if binding_site_residue_indices is not None:
                 scores["alphafold_in_binding_site_score"] = smooth_peptide_binding_site_score(
-                    alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                    alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1, receptor_chain=receptor_chain, peptide_chain=peptide_chain)
             else:
                 scores["alphafold_in_binding_site_score"] = None
         
         if "alphafold_binding_site_n_contacts" in scores_to_include:
             if binding_site_residue_indices is not None:
                 n_contacts, _ = is_peptide_in_binding_site_pdb_file(
-                    alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                    alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
                 scores["alphafold_binding_site_n_contacts"] = n_contacts
             else:
                 scores["alphafold_binding_site_n_contacts"] = None
@@ -469,22 +475,22 @@ class ComplexScorer(BaseScorer):
         
         # AlphaFold confidence scores
         if "alphafold_peptide_plddt" in scores_to_include:
-            peptide_plddt = get_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file)
+            peptide_plddt = get_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file, peptide_chain)
             scores["alphafold_peptide_plddt"] = peptide_plddt
         
         if "alphafold_interface_peptide_plddt" in scores_to_include:
-            interface_peptide_plddt = get_weighted_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file)
+            interface_peptide_plddt = get_weighted_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file, peptide_chain, receptor_chain)
             scores["alphafold_interface_peptide_plddt"] = interface_peptide_plddt
 
         if "alphafold_peptide_pae" in scores_to_include:
-            peptide_pae = get_peptide_pae(alphafold_data.get("pae", []), alphafold_model_file)
+            peptide_pae = get_peptide_pae(alphafold_data.get("pae", []), alphafold_model_file, peptide_chain)
             scores["alphafold_peptide_pae"] = peptide_pae
 
         # AlphaFold IPSAE scores
         if "alphafold_ipsae_max" in scores_to_include or "alphafold_ipsae_min" in scores_to_include:
             pae_data = alphafold_data.get("pae", [])
             if pae_data:
-                ipsae_scores = get_ipsae_scores_from_structure_and_pae(alphafold_model_file, pae_data)
+                ipsae_scores = get_ipsae_scores_from_structure_and_pae(alphafold_model_file, pae_data, receptor_chain, peptide_chain)
                 if "alphafold_ipsae_max" in scores_to_include:
                     scores["alphafold_ipsae_max"] = ipsae_scores.get("ipsae_max")
                 if "alphafold_ipsae_min" in scores_to_include:
@@ -550,36 +556,36 @@ class ComplexScorer(BaseScorer):
             scores["boltz_packstat"] = rosetta_scorer.get_packstat()
         
         if "boltz_distance_score" in scores_to_include:
-            scores["boltz_distance_score"] = distance_score_from_structure(boltz_model_file)
+            scores["boltz_distance_score"] = distance_score_from_structure(boltz_model_file, receptor_chain, peptide_chain)
         
         if "boltz_receptor_contacts" in scores_to_include:
             scores["boltz_receptor_contacts"] = get_receptor_contacts(
-                boltz_model_file, "A", "B", binding_site_distance_threshold
+                boltz_model_file, receptor_chain, peptide_chain, binding_site_distance_threshold
             )
         
         if "boltz_n_contacts" in scores_to_include:
             receptor_contacts = get_receptor_contacts(
-                boltz_model_file, "A", "B", binding_site_distance_threshold
+                boltz_model_file, receptor_chain, peptide_chain, binding_site_distance_threshold
             )
             scores["boltz_n_contacts"] = len(receptor_contacts)
         
         if "boltz_in_binding_site" in scores_to_include:
             n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
-                boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
             scores["boltz_in_binding_site"] = in_binding_site
             scores["boltz_binding_site_n_contacts"] = n_contacts
         
         if "boltz_in_binding_site_score" in scores_to_include:
             if binding_site_residue_indices is not None:
                 scores["boltz_in_binding_site_score"] = smooth_peptide_binding_site_score(
-                    boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                    boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1, receptor_chain=receptor_chain, peptide_chain=peptide_chain)
             else:
                 scores["boltz_in_binding_site_score"] = None
         
         if "boltz_binding_site_n_contacts" in scores_to_include:
             if binding_site_residue_indices is not None:
                 n_contacts, _ = is_peptide_in_binding_site_pdb_file(
-                    boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                    boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
                 scores["boltz_binding_site_n_contacts"] = n_contacts
             else:
                 scores["boltz_binding_site_n_contacts"] = None
@@ -592,26 +598,26 @@ class ComplexScorer(BaseScorer):
         
         # Boltz confidence scores
         if "boltz_peptide_plddt" in scores_to_include:
-            peptide_plddt = get_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file)
+            peptide_plddt = get_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file, peptide_chain)
             scores["boltz_peptide_plddt"] = peptide_plddt
 
         if "boltz_interface_peptide_plddt" in scores_to_include:
-            interface_peptide_plddt = get_weighted_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file)
+            interface_peptide_plddt = get_weighted_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file, peptide_chain, receptor_chain)
             scores["boltz_interface_peptide_plddt"] = interface_peptide_plddt
         
         if "boltz_peptide_pae" in scores_to_include:
-            peptide_pae = get_peptide_pae(boltz_data.get("pae_matrix", []), boltz_model_file)
+            peptide_pae = get_peptide_pae(boltz_data.get("pae_matrix", []), boltz_model_file, peptide_chain)
             scores["boltz_peptide_pae"] = peptide_pae
 
         if "boltz_peptide_pde" in scores_to_include:
-            peptide_pde = get_peptide_pde(boltz_data.get("pde_matrix", []), boltz_model_file)
+            peptide_pde = get_peptide_pde(boltz_data.get("pde_matrix", []), boltz_model_file, peptide_chain)
             scores["boltz_peptide_pde"] = peptide_pde
 
         # Boltz IPSAE scores  
         if "boltz_ipsae_max" in scores_to_include or "boltz_ipsae_min" in scores_to_include:
             pae_data = boltz_data.get("pae_matrix", [])
             if pae_data:
-                ipsae_scores = get_ipsae_scores_from_structure_and_pae(boltz_model_file, pae_data)
+                ipsae_scores = get_ipsae_scores_from_structure_and_pae(boltz_model_file, pae_data, receptor_chain, peptide_chain)
                 if "boltz_ipsae_max" in scores_to_include:
                     scores["boltz_ipsae_max"] = ipsae_scores.get("ipsae_max")
                 if "boltz_ipsae_min" in scores_to_include:
@@ -706,13 +712,13 @@ class ComplexScorer(BaseScorer):
         if "distance_score" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file:
-                scores["alphafold_distance_score"] = distance_score_from_structure(alphafold_model_file)
+                scores["alphafold_distance_score"] = distance_score_from_structure(alphafold_model_file, receptor_chain, peptide_chain)
                 added = True
             if has_boltz and boltz_model_file:
-                scores["boltz_distance_score"] = distance_score_from_structure(boltz_model_file)
+                scores["boltz_distance_score"] = distance_score_from_structure(boltz_model_file, receptor_chain, peptide_chain)
                 added = True
             if not added:
-                scores["distance_score"] = distance_score_from_structure(target_structure_file)
+                scores["distance_score"] = distance_score_from_structure(target_structure_file, receptor_chain, peptide_chain)
             elif has_alphafold ^ has_boltz:
                 scores["distance_score"] = scores.get("alphafold_distance_score") or scores.get("boltz_distance_score")
         
@@ -720,19 +726,19 @@ class ComplexScorer(BaseScorer):
             added = False
             if has_alphafold and alphafold_model_file:
                 n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
-                    alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                    alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
                 scores["alphafold_in_binding_site"] = in_binding_site
                 scores["alphafold_binding_site_n_contacts"] = n_contacts
                 added = True
             if has_boltz and boltz_model_file:
                 n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
-                    boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                    boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
                 scores["boltz_in_binding_site"] = in_binding_site
                 scores["boltz_binding_site_n_contacts"] = n_contacts
                 added = True
             if not added:
                 n_contacts, in_binding_site = is_peptide_in_binding_site_pdb_file(
-                    target_structure_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                    target_structure_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
                 scores["in_binding_site"] = in_binding_site
                 scores["binding_site_n_contacts"] = n_contacts
             elif has_alphafold ^ has_boltz:
@@ -744,15 +750,15 @@ class ComplexScorer(BaseScorer):
             if binding_site_residue_indices is not None:
                 if has_alphafold and alphafold_model_file:
                     scores["alphafold_in_binding_site_score"] = smooth_peptide_binding_site_score(
-                        alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                        alphafold_model_file, binding_site_residue_indices, threshold=5.0, alpha=1, receptor_chain=receptor_chain, peptide_chain=peptide_chain)
                     added = True
                 if has_boltz and boltz_model_file:
                     scores["boltz_in_binding_site_score"] = smooth_peptide_binding_site_score(
-                        boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                        boltz_model_file, binding_site_residue_indices, threshold=5.0, alpha=1, receptor_chain=receptor_chain, peptide_chain=peptide_chain)
                     added = True
                 if not added:
                     scores["in_binding_site_score"] = smooth_peptide_binding_site_score(
-                        target_structure_file, binding_site_residue_indices, threshold=5.0, alpha=1)
+                        target_structure_file, binding_site_residue_indices, threshold=5.0, alpha=1, receptor_chain=receptor_chain, peptide_chain=peptide_chain)
                 elif has_alphafold ^ has_boltz:
                     scores["in_binding_site_score"] = scores.get("alphafold_in_binding_site_score") or scores.get("boltz_in_binding_site_score")
             else:
@@ -763,17 +769,17 @@ class ComplexScorer(BaseScorer):
             if binding_site_residue_indices is not None:
                 if has_alphafold and alphafold_model_file:
                     n_contacts, _ = is_peptide_in_binding_site_pdb_file(
-                        alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                        alphafold_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
                     scores["alphafold_binding_site_n_contacts"] = n_contacts
                     added = True
                 if has_boltz and boltz_model_file:
                     n_contacts, _ = is_peptide_in_binding_site_pdb_file(
-                        boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                        boltz_model_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
                     scores["boltz_binding_site_n_contacts"] = n_contacts
                     added = True
                 if not added:
                     n_contacts, _ = is_peptide_in_binding_site_pdb_file(
-                        target_structure_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues)
+                        target_structure_file, binding_site_residue_indices, binding_site_distance_threshold, required_n_contact_residues, receptor_chain, peptide_chain)
                     scores["binding_site_n_contacts"] = n_contacts
                 elif has_alphafold ^ has_boltz:
                     scores["binding_site_n_contacts"] = scores.get("alphafold_binding_site_n_contacts") or scores.get("boltz_binding_site_n_contacts")
@@ -801,7 +807,7 @@ class ComplexScorer(BaseScorer):
             # Calculate contacts for both methods if available
             if has_alphafold and alphafold_model_file:
                 alphafold_contacts = get_receptor_contacts(
-                    alphafold_model_file, "A", "B", binding_site_distance_threshold
+                    alphafold_model_file, receptor_chain, peptide_chain, binding_site_distance_threshold
                 )
                 if "receptor_contacts" in scores_to_include:
                     scores["alphafold_receptor_contacts"] = alphafold_contacts
@@ -810,7 +816,7 @@ class ComplexScorer(BaseScorer):
             
             if has_boltz and boltz_model_file:
                 boltz_contacts = get_receptor_contacts(
-                    boltz_model_file, "A", "B", binding_site_distance_threshold
+                    boltz_model_file, receptor_chain, peptide_chain, binding_site_distance_threshold
                 )
                 if "receptor_contacts" in scores_to_include:
                     scores["boltz_receptor_contacts"] = boltz_contacts
@@ -821,7 +827,7 @@ class ComplexScorer(BaseScorer):
             if not (has_alphafold or has_boltz):
                 # Single structure file case
                 contacts = get_receptor_contacts(
-                    target_structure_file, "A", "B", binding_site_distance_threshold
+                    target_structure_file, receptor_chain, peptide_chain, binding_site_distance_threshold
                 )
                 if "receptor_contacts" in scores_to_include:
                     scores["receptor_contacts"] = contacts
@@ -838,10 +844,10 @@ class ComplexScorer(BaseScorer):
         if "peptide_plddt" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file:
-                scores["alphafold_peptide_plddt"] = get_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file)
+                scores["alphafold_peptide_plddt"] = get_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file, peptide_chain)
                 added = True
             if has_boltz and boltz_model_file:
-                scores["boltz_peptide_plddt"] = get_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file)
+                scores["boltz_peptide_plddt"] = get_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file, peptide_chain)
                 added = True
             if not added:
                 raise ValueError("peptide_plddt requires docking output with model file")
@@ -851,10 +857,10 @@ class ComplexScorer(BaseScorer):
         if "interface_peptide_plddt" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file:
-                scores["alphafold_interface_peptide_plddt"] = get_weighted_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file)
+                scores["alphafold_interface_peptide_plddt"] = get_weighted_peptide_plddt(alphafold_data.get("plddt", []), alphafold_model_file, peptide_chain, receptor_chain)
                 added = True
             if has_boltz and boltz_model_file:
-                scores["boltz_interface_peptide_plddt"] = get_weighted_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file)
+                scores["boltz_interface_peptide_plddt"] = get_weighted_peptide_plddt(boltz_data.get("plddt", []), boltz_model_file, peptide_chain, receptor_chain)
                 added = True
             if not added:
                 raise ValueError("interface_peptide_plddt requires docking output with model file")
@@ -869,10 +875,10 @@ class ComplexScorer(BaseScorer):
                 boltz_data["pae_matrix"] = boltz_data["pae"]
             added = False
             if has_alphafold and alphafold_model_file:
-                scores["alphafold_peptide_pae"] = get_peptide_pae(alphafold_data.get("pae_matrix", []), alphafold_model_file)
+                scores["alphafold_peptide_pae"] = get_peptide_pae(alphafold_data.get("pae_matrix", []), alphafold_model_file, peptide_chain)
                 added = True
             if has_boltz and boltz_model_file:
-                scores["boltz_peptide_pae"] = get_peptide_pae(boltz_data.get("pae_matrix", []), boltz_model_file)
+                scores["boltz_peptide_pae"] = get_peptide_pae(boltz_data.get("pae_matrix", []), boltz_model_file, peptide_chain)
                 added = True
             if not added:
                 raise ValueError("peptide_pae requires docking output with model file")
@@ -882,7 +888,7 @@ class ComplexScorer(BaseScorer):
         if "peptide_pde" in scores_to_include:
             # Only Boltz currently provides PDE
             if has_boltz and boltz_model_file:
-                scores["boltz_peptide_pde"] = get_peptide_pde(boltz_data.get("pde_matrix", []), boltz_model_file)
+                scores["boltz_peptide_pde"] = get_peptide_pde(boltz_data.get("pde_matrix", []), boltz_model_file, peptide_chain)
                 scores["peptide_pde"] = scores["boltz_peptide_pde"]  # always expose generic alias since single source
             else:
                 raise ValueError("peptide_pde requires Boltz output with model file")
@@ -893,13 +899,13 @@ class ComplexScorer(BaseScorer):
             if has_alphafold and alphafold_model_file:
                 pae_data = alphafold_data.get("pae", [])
                 if pae_data:
-                    ipsae_scores = get_ipsae_scores_from_structure_and_pae(alphafold_model_file, pae_data)
+                    ipsae_scores = get_ipsae_scores_from_structure_and_pae(alphafold_model_file, pae_data, receptor_chain, peptide_chain)
                     scores["alphafold_ipsae_max"] = ipsae_scores.get("ipsae_max")
                     added = True
             if has_boltz and boltz_model_file:
                 pae_data = boltz_data.get("pae_matrix", [])
                 if pae_data:
-                    ipsae_scores = get_ipsae_scores_from_structure_and_pae(boltz_model_file, pae_data)
+                    ipsae_scores = get_ipsae_scores_from_structure_and_pae(boltz_model_file, pae_data, receptor_chain, peptide_chain)
                     scores["boltz_ipsae_max"] = ipsae_scores.get("ipsae_max")
                     added = True
             if not added:
@@ -912,13 +918,13 @@ class ComplexScorer(BaseScorer):
             if has_alphafold and alphafold_model_file:
                 pae_data = alphafold_data.get("pae", [])
                 if pae_data:
-                    ipsae_scores = get_ipsae_scores_from_structure_and_pae(alphafold_model_file, pae_data)
+                    ipsae_scores = get_ipsae_scores_from_structure_and_pae(alphafold_model_file, pae_data, receptor_chain, peptide_chain)
                     scores["alphafold_ipsae_min"] = ipsae_scores.get("ipsae_min")
                     added = True
             if has_boltz and boltz_model_file:
                 pae_data = boltz_data.get("pae_matrix", [])
                 if pae_data:
-                    ipsae_scores = get_ipsae_scores_from_structure_and_pae(boltz_model_file, pae_data)
+                    ipsae_scores = get_ipsae_scores_from_structure_and_pae(boltz_model_file, pae_data, receptor_chain, peptide_chain)
                     scores["boltz_ipsae_min"] = ipsae_scores.get("ipsae_min")
                     added = True
             if not added:
@@ -1026,6 +1032,8 @@ class ComplexScorer(BaseScorer):
         required_n_contact_residues: Optional[int] = None,
         template_structures: dict = None,
         n_jobs: int = None,
+        receptor_chain: str = "A",
+        peptide_chain: str = "B",
     ) -> dict:
         """
         Score multiple peptides in parallel.
@@ -1045,6 +1053,10 @@ class ComplexScorer(BaseScorer):
             Only used if "template_rmsd" is in scores_to_include.
         n_jobs : int, optional
             Number of parallel jobs to run. Default is None (use all available cores)
+        receptor_chain : str, default "A"
+            Chain ID for the receptor/target protein
+        peptide_chain : str, default "B"
+            Chain ID for the peptide
 
         Returns
         -------
@@ -1071,6 +1083,8 @@ class ComplexScorer(BaseScorer):
                     required_n_contact_residues,
                     binding_site_distance_threshold,
                     template_structures,
+                    receptor_chain,
+                    peptide_chain,
                 )
                 for input_val in inputs
             ]
@@ -1104,6 +1118,8 @@ class ComplexScorer(BaseScorer):
                         required_n_contact_residues,
                         binding_site_distance_threshold,
                         template_structures,
+                        receptor_chain,
+                        peptide_chain,
                     )
                     all_scores.update(result)
                     print(f"Scoring progress: {i}/{len(inputs)}")
@@ -1115,7 +1131,7 @@ class ComplexScorer(BaseScorer):
 
     @staticmethod
     def _process_single_input(
-        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices, required_n_contact_residues, binding_site_distance_threshold, template_structures
+        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices, required_n_contact_residues, binding_site_distance_threshold, template_structures, receptor_chain, peptide_chain
     ):
         """
         Process a single input for scoring.
@@ -1141,7 +1157,7 @@ class ComplexScorer(BaseScorer):
                             if peptide_sequence:
                                 break
                 elif input_type == "structure_file":
-                    peptide_sequence = extract_sequence_from_structure(input_value, chain_id="B")
+                    peptide_sequence = extract_sequence_from_structure(input_value, chain_id=peptide_chain)
                 else:
                     raise ValueError("Unsupported input_type for template_rmsd. Use 'structure_file' or 'processed_dir'.")
 
@@ -1163,6 +1179,8 @@ class ComplexScorer(BaseScorer):
                 required_n_contact_residues=required_n_contact_residues,
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 template_structure=template_structure,
+                receptor_chain=receptor_chain,
+                peptide_chain=peptide_chain,
             )
         elif input_type == "processed_dir":
             return scorer.score(
@@ -1172,11 +1190,15 @@ class ComplexScorer(BaseScorer):
                 required_n_contact_residues=required_n_contact_residues,
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 template_structure=template_structure,
+                receptor_chain=receptor_chain,
+                peptide_chain=peptide_chain,
             )
         elif input_type == "peptide_sequence":
             return scorer.score(
                 scores_to_include, 
                 peptide_sequence=input_value,
+                receptor_chain=receptor_chain,
+                peptide_chain=peptide_chain,
             )
 
 

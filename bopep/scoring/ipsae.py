@@ -209,7 +209,9 @@ def compute_ipsae(
 
 def get_ipsae_scores_from_structure_and_pae(
     structure_file: str, 
-    pae_data: np.ndarray, 
+    pae_data: np.ndarray,
+    receptor_chain: str = "A",
+    peptide_chain: str = "B",
     pae_cutoff: float = 10.0,
     residue_selector: Optional[Callable[[Any], bool]] = None
 ) -> Dict[str, float]:
@@ -222,6 +224,10 @@ def get_ipsae_scores_from_structure_and_pae(
         Path to structure file (PDB/CIF)
     pae_data : np.ndarray
         PAE matrix or flat array
+    receptor_chain : str, default "A"
+        Chain ID for the receptor/target protein
+    peptide_chain : str, default "B"
+        Chain ID for the peptide
     pae_cutoff : float, default 10.0
         PAE threshold for counting inter-chain pairs
     residue_selector : callable, optional
@@ -243,12 +249,12 @@ def get_ipsae_scores_from_structure_and_pae(
         residue_selector=residue_selector
     )
     
-    # Extract all max values from chain pairs
-    max_values = []
-    min_values = []
+    # Extract values specifically for the receptor-peptide pair
+    # Create a normalized pair key (alphabetically sorted)
+    pair_key = tuple(sorted([receptor_chain, peptide_chain]))
     
-    for pair_key, pair_data in results.items():
-        max_val = pair_data.get('max', 0.0)
+    if pair_key in results:
+        pair_data = results[pair_key]
         asym_data = pair_data.get('asym', {})
         
         # Get both asymmetric directions
@@ -258,15 +264,36 @@ def get_ipsae_scores_from_structure_and_pae(
                 direction_values.append(value)
         
         if direction_values:
-            max_values.append(max(direction_values))
-            min_values.append(min(direction_values))
+            ipsae_max = max(direction_values)
+            ipsae_min = min(direction_values)
         else:
-            max_values.append(max_val)
-            min_values.append(max_val)
-    
-    # Return overall max and min across all chain pairs
-    ipsae_max = max(max_values) if max_values else 0.0
-    ipsae_min = min(min_values) if min_values else 0.0
+            ipsae_max = pair_data.get('max', 0.0)
+            ipsae_min = pair_data.get('max', 0.0)
+    else:
+        # Fallback to old behavior if specific pair not found
+        max_values = []
+        min_values = []
+        
+        for pair_key, pair_data in results.items():
+            max_val = pair_data.get('max', 0.0)
+            asym_data = pair_data.get('asym', {})
+            
+            # Get both asymmetric directions
+            direction_values = []
+            for key, value in asym_data.items():
+                if not key.endswith('_res') and isinstance(value, (int, float)):
+                    direction_values.append(value)
+            
+            if direction_values:
+                max_values.append(max(direction_values))
+                min_values.append(min(direction_values))
+            else:
+                max_values.append(max_val)
+                min_values.append(max_val)
+        
+        # Return overall max and min across all chain pairs
+        ipsae_max = max(max_values) if max_values else 0.0
+        ipsae_min = min(min_values) if min_values else 0.0
     
     return {
         'ipsae_max': ipsae_max,
