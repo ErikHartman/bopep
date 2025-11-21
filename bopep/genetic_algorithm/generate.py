@@ -629,6 +629,13 @@ class BoGA:
             init_reduced = self._embed_peptides(list(scores.keys()))
             print("Optimizing initial hyperparameters...")
             self._optimize_hyperparameters(init_reduced, objectives)
+            self.logger.log_hyperparameters(
+                            iteration=0,
+                            hyperparams=self.surrogate_manager.best_hyperparams,
+                            model_type=self.surrogate_model_kwargs['model_type'],
+                            network_type=self.surrogate_model_kwargs['network_type']
+                        )
+
         else:
             print("Loaded objectives:")
             print(f"Total sequences: {len(objectives)}")
