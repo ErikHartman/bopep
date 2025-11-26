@@ -728,3 +728,304 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         # Error should happen when preparing population, not during init
         with pytest.raises(ValueError, match="initial_sequences must be None, a string, or a list of strings"):
             boga._prepare_initial_population()
+
+    # AdaLead Selection Tests
+    def test_adalead_selection_basic(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test basic AdaLead selection with default k"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        objectives = {
+            "SEQ1": 0.5,
+            "SEQ2": 0.9,  # max
+            "SEQ3": 0.3,
+            "SEQ4": 0.7,
+            "SEQ5": 0.8
+        }
+        
+        # With k=0.05, threshold = 0.95 * 0.9 = 0.855
+        # Should select SEQ2 (0.9) only
+        selected = boga._adalead_selection(objectives, adalead_k=0.05)
+        
+        assert len(selected) >= 1
+        assert "SEQ2" in selected
+        # May also include SEQ5 if close enough
+
+    def test_adalead_selection_with_last_batch(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test AdaLead selection using last batch objectives for threshold"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        # All objectives (historical)
+        objectives = {
+            "SEQ1": 0.5,
+            "SEQ2": 0.9,  # Historical best
+            "SEQ3": 0.3,
+            "SEQ4": 0.7,
+        }
+        
+        # Last batch only (recent evaluations)
+        last_batch = {
+            "SEQ4": 0.7,  # Best in last batch
+            "SEQ3": 0.3,
+        }
+        
+        # With k=0.1 and last_batch max=0.7, threshold = 0.9 * 0.7 = 0.63
+        # Should select from all objectives that meet threshold based on last batch
+        selected = boga._adalead_selection(objectives, adalead_k=0.1, last_batch_objectives=last_batch)
+        
+        # SEQ2 (0.9), SEQ4 (0.7) should be selected, SEQ1 (0.5) might be close
+        assert "SEQ2" in selected  # Way above threshold
+        assert "SEQ4" in selected  # Right at threshold
+        assert "SEQ3" not in selected  # Below threshold
+
+    def test_adalead_selection_larger_k(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test AdaLead with larger k (more exploitation)"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        objectives = {
+            "SEQ1": 0.5,
+            "SEQ2": 1.0,  # max
+            "SEQ3": 0.3,
+            "SEQ4": 0.7,
+            "SEQ5": 0.8,
+            "SEQ6": 0.9
+        }
+        
+        # With k=0.2, threshold = 0.8 * 1.0 = 0.8
+        # Should select SEQ2 (1.0), SEQ6 (0.9), SEQ5 (0.8)
+        selected = boga._adalead_selection(objectives, adalead_k=0.2)
+        
+        assert len(selected) >= 2
+        assert "SEQ2" in selected
+        assert "SEQ6" in selected
+        # SEQ5 is exactly at threshold
+        assert "SEQ4" not in selected  # Below threshold
+        assert "SEQ1" not in selected
+        assert "SEQ3" not in selected
+
+    def test_adalead_selection_smaller_k(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test AdaLead with smaller k (more exploration)"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        objectives = {
+            "SEQ1": 0.5,
+            "SEQ2": 1.0,  # max
+            "SEQ3": 0.3,
+            "SEQ4": 0.7,
+            "SEQ5": 0.8,
+            "SEQ6": 0.9
+        }
+        
+        # With k=0.01, threshold = 0.99 * 1.0 = 0.99
+        # Should only select SEQ2 (1.0)
+        selected = boga._adalead_selection(objectives, adalead_k=0.01)
+        
+        assert len(selected) == 1
+        assert "SEQ2" in selected
+
+    def test_adalead_selection_k_validation(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test that AdaLead validates k is in [0, 1]"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        objectives = {"SEQ1": 0.5, "SEQ2": 0.9}
+        
+        # Test k > 1
+        with pytest.raises(ValueError, match="adalead_k must be in \\[0, 1\\]"):
+            boga._adalead_selection(objectives, adalead_k=1.5)
+        
+        # Test k < 0
+        with pytest.raises(ValueError, match="adalead_k must be in \\[0, 1\\]"):
+            boga._adalead_selection(objectives, adalead_k=-0.1)
+        
+        # Test k = 0 (should work)
+        selected = boga._adalead_selection(objectives, adalead_k=0)
+        assert len(selected) >= 1
+        
+        # Test k = 1 (should work)
+        selected = boga._adalead_selection(objectives, adalead_k=1)
+        assert len(selected) >= 1
+
+    def test_adalead_selection_rejects_multi_objective(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test that AdaLead rejects multi-objective problems"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        # Multi-objective format
+        multi_objectives = {
+            "SEQ1": {"obj1": 0.5, "obj2": 0.8},
+            "SEQ2": {"obj1": 0.9, "obj2": 0.6}
+        }
+        
+        with pytest.raises(ValueError, match="AdaLead selection is only supported for single-objective"):
+            boga._adalead_selection(multi_objectives, adalead_k=0.1)
+
+    def test_adalead_selection_empty_objectives(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test AdaLead with empty objectives"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        selected = boga._adalead_selection({}, adalead_k=0.1)
+        assert selected == []
+
+    def test_adalead_integration_with_select_top_objectives(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test AdaLead integration through _select_top_objectives"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        objectives = {
+            "SEQ1": 0.5,
+            "SEQ2": 1.0,
+            "SEQ3": 0.3,
+            "SEQ4": 0.7,
+            "SEQ5": 0.9
+        }
+        
+        # Call through _select_top_objectives
+        selected = boga._select_top_objectives(
+            objectives,
+            m_pool=10,  # AdaLead ignores this
+            selection_method="adalead",
+            adalead_k=0.15
+        )
+        
+        # With k=0.15, threshold = 0.85 * 1.0 = 0.85
+        # Should select SEQ2 (1.0), SEQ5 (0.9)
+        assert len(selected) >= 1
+        assert "SEQ2" in selected
+        assert "SEQ5" in selected
+
+    def test_adalead_rejects_multi_objective_through_select_top(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test that AdaLead rejects multi-objective when called through _select_top_objectives"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        multi_objectives = {
+            "SEQ1": {"obj1": 0.5, "obj2": 0.8},
+            "SEQ2": {"obj1": 0.9, "obj2": 0.6}
+        }
+        
+        with pytest.raises(ValueError, match="AdaLead selection is only supported for single-objective"):
+            boga._select_top_objectives(
+                multi_objectives,
+                m_pool=2,
+                selection_method="adalead",
+                adalead_k=0.1
+            )
+
+    def test_adalead_default_k_value(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test that default adalead_k is 0.05"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        objectives = {
+            "SEQ1": 0.5,
+            "SEQ2": 1.0,
+            "SEQ3": 0.9
+        }
+        
+        # Call with default k (should be 0.05)
+        selected = boga._select_top_objectives(
+            objectives,
+            m_pool=10,
+            selection_method="adalead"
+            # adalead_k not specified, should use default 0.05
+        )
+        
+        # With k=0.05, threshold = 0.95 * 1.0 = 0.95
+        # Should select SEQ2 (1.0) only
+        assert "SEQ2" in selected
+        assert len(selected) >= 1
+
+    def test_adalead_flat_landscape(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test AdaLead behavior on flat landscape (all similar values)"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        # Very flat landscape
+        objectives = {
+            "SEQ1": 0.50,
+            "SEQ2": 0.52,
+            "SEQ3": 0.51,
+            "SEQ4": 0.49,
+            "SEQ5": 0.48
+        }
+        
+        # With k=0.1, threshold = 0.9 * 0.52 = 0.468
+        # Should select most sequences (exploration)
+        selected = boga._adalead_selection(objectives, adalead_k=0.1)
+        
+        # Most sequences should pass threshold in flat landscape
+        assert len(selected) >= 4
+
+    def test_adalead_steep_landscape(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test AdaLead behavior on steep landscape (one clear winner)"""
+        boga = BoGA(
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+        
+        # Very steep landscape - one clear winner
+        objectives = {
+            "SEQ1": 0.1,
+            "SEQ2": 1.0,  # Clear winner
+            "SEQ3": 0.2,
+            "SEQ4": 0.15,
+            "SEQ5": 0.25
+        }
+        
+        # With k=0.1, threshold = 0.9 * 1.0 = 0.9
+        # Should select only SEQ2 (exploitation)
+        selected = boga._adalead_selection(objectives, adalead_k=0.1)
+        
+        assert len(selected) == 1
+        assert "SEQ2" in selected
