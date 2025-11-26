@@ -69,14 +69,6 @@ class SelfAttention(torch.nn.Module):
     def forward(self, sequences: torch.Tensor, mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply self-attention over sequence positions.
-        
-        Args:
-            sequences: [batch_size, seq_length, hidden_dim]
-            mask: [batch_size, seq_length] - binary mask (1 for valid positions, 0 for padding)
-            
-        Returns:
-            context_vector: [batch_size, hidden_dim] - weighted sum of sequence vectors
-            attention_weights: [batch_size, seq_length] - attention distribution
         """
         # Project to attention space
         projection = torch.tanh(self.projection(sequences))  # [batch_size, seq_length, attention_dim]

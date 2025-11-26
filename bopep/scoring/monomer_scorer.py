@@ -58,20 +58,6 @@ class MonomerScorer(BaseScorer):
     ) -> List[str]:
         """
         Get scores available for the given context.
-        
-        Parameters
-        ----------
-        processed_dir : str, optional
-            Path to processed directory with AlphaFold output
-        structure_file : str, optional
-            Path to structure file (.pdb/.cif)
-        template_structure : str, optional
-            Template PDB file for RMSD calculation
-            
-        Returns
-        -------
-        list
-            List of available score names
         """
         available = []
         
@@ -105,26 +91,6 @@ class MonomerScorer(BaseScorer):
     ) -> Dict[str, Dict[str, Any]]:
         """
         Calculate scores for a monomer protein.
-        
-        Parameters
-        ----------
-        scores_to_include : list
-            List of score names to calculate
-        sequence : str, optional
-            Protein sequence (required if no structure_file or processed_dir)
-        structure_file : str, optional
-            Path to structure file (PDB/CIF)
-        processed_dir : str, optional
-            Path to processed AlphaFold output directory
-        template_structure : str, optional
-            Path to template PDB for RMSD calculation
-        chain_id : str
-            Chain ID to analyze (default: "A")
-            
-        Returns
-        -------
-        dict
-            Dictionary mapping sequence to scores: {sequence: {score_name: value, ...}}
         """
         # Validate inputs
         if not sequence and not structure_file and not processed_dir:
@@ -222,24 +188,6 @@ class MonomerScorer(BaseScorer):
         Process a single input for scoring.
         
         This is a static method to allow pickling for multiprocessing.
-        
-        Parameters
-        ----------
-        scorer : MonomerScorer
-            Scorer instance
-        scores_to_include : list
-            Scores to calculate
-        input_value : str
-            Input value (sequence, structure file, or processed dir)
-        input_type : str
-            Type: "sequence", "structure_file", or "processed_dir"
-        extra_kwargs : dict
-            Additional parameters
-            
-        Returns
-        -------
-        dict
-            Scoring results
         """
         template_structure = extra_kwargs.get("template_structure")
         chain_id = extra_kwargs.get("chain_id", "A")

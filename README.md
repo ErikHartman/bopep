@@ -27,9 +27,6 @@ We also provide a way to generate large candidate datasets using an RFdiffusion 
 
 ## Generation with evolutionary algorithm (BoGA)
 The surrogate models can also be leveraged from design. The BoGA algorithm uses the surrogate models in an evolutionary algorithm to generate a binder from a biological prior. The prior can be either a single sequence or a set of sequences.
-<p align="center">
-  <img src="assets/boga.png" width="1000", alt="BoPep">
-</p>
 
 *_preprint coming soon_
 

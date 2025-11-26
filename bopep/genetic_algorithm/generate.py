@@ -17,6 +17,17 @@ from bopep.logging.logger import Logger
 from bopep.genetic_algorithm.mutate import PeptideMutator
 import torch
 
+"""
+TODO:
+Add the AdaLead resampling scheme where we define a threshold y_t and resample from all sequences with y >= y_t.
+Where y_t is (1-k) * max(y).
+When the landscape is flat, this helps explore more broadly among the top performers.
+When the landscape is steep, this focuses on the very best.
+
+Given that we now have resampling as top_fraction, top_k and uniform vs exponential selection, we maybe should
+have a separate argument for the resampling kwargs.
+"""
+
 class BoGA:
     """
     Genetic algorithm for protein discovery using surrogate modeling.

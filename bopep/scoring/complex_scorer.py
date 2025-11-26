@@ -63,7 +63,7 @@ class ComplexScorer(BaseScorer):
             "isoelectric_point",
             "gravy",
             "helix_fraction",
-            "turn_fraction", 
+            "loop_fraction", 
             "sheet_fraction",
             "hydrophobic_aa_percent",
             "polar_aa_percent",
@@ -984,8 +984,8 @@ class ComplexScorer(BaseScorer):
             scores["gravy"] = peptide_properties.get_gravy()
         if "helix_fraction" in scores_to_include:
             scores["helix_fraction"] = peptide_properties.get_helix_fraction()
-        if "turn_fraction" in scores_to_include:
-            scores["turn_fraction"] = peptide_properties.get_turn_fraction()
+        if "loop_fraction" in scores_to_include:
+            scores["loop_fraction"] = peptide_properties.get_loop_fraction()
         if "sheet_fraction" in scores_to_include:
             scores["sheet_fraction"] = peptide_properties.get_sheet_fraction()
         if "hydrophobic_aa_percent" in scores_to_include:
