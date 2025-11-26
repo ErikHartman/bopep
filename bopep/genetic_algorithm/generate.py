@@ -17,16 +17,6 @@ from bopep.logging.logger import Logger
 from bopep.genetic_algorithm.mutate import PeptideMutator
 import torch
 
-"""
-TODO:
-Add the AdaLead resampling scheme where we define a threshold y_t and resample from all sequences with y >= y_t.
-Where y_t is (1-k) * max(y).
-When the landscape is flat, this helps explore more broadly among the top performers.
-When the landscape is steep, this focuses on the very best.
-
-Given that we now have resampling as top_fraction, top_k and uniform vs exponential selection, we maybe should
-have a separate argument for the resampling kwargs.
-"""
 
 class BoGA:
     """
@@ -382,7 +372,8 @@ class BoGA:
         objective_directions: Dict[str, str] = None, 
         top_fraction: float = 0.3,
         selection_method: str = "uniform",
-        beta: float = 1.0
+        beta: float = 1.0,
+        adalead_k: float = 0.15
     ) -> List[str]:
         """
         Select top m_pool sequences based on objectives, with support for sampling from top contenders.
@@ -393,8 +384,11 @@ class BoGA:
             objective_directions: Optional dict specifying 'max' or 'min' for each objective
             top_fraction: If float < 1.0, fraction of sequences to consider as top candidates.
                          If int >= 1, absolute number of top sequences per objective to consider.
-            selection_method: 'uniform' for uniform random sampling, 'exponential' for fitness-weighted sampling
+            selection_method: 'uniform' for uniform random sampling, 'exponential' for fitness-weighted sampling,
+                            'adalead' for adaptive threshold-based selection
             beta: Selection intensity for exponential method (higher = stronger selection pressure)
+            adalead_k: Threshold parameter for AdaLead selection. Threshold is (1-k)*max(y).
+                      Smaller k = more exploration, larger k = more exploitation (default: 0.15)
         """
         if not objectives:
             return []
@@ -450,6 +444,9 @@ class BoGA:
             elif selection_method == "exponential":
                 # For multi-objective, use aggregated normalized objectives
                 return self._exponential_selection(top_candidates, objectives, m_pool, beta, objective_directions)
+            elif selection_method == "adalead":
+                # AdaLead: adaptive threshold-based selection
+                return self._adalead_selection(objectives, m_pool, adalead_k, objective_directions)
             else:
                 raise ValueError(f"Unknown selection_method: {selection_method}")
         else:
@@ -478,6 +475,9 @@ class BoGA:
                 # Create objectives dict for top candidates only
                 top_objectives = {seq: obj for seq, obj in sorted_sequences[:n_top]}
                 return self._exponential_selection(top_candidates, top_objectives, m_pool, beta)
+            elif selection_method == "adalead":
+                # AdaLead: adaptive threshold-based selection
+                return self._adalead_selection(objectives, m_pool, adalead_k)
             else:
                 raise ValueError(f"Unknown selection_method: {selection_method}")
 
@@ -557,6 +557,95 @@ class BoGA:
         # Sample without replacement
         selected_indices = np.random.choice(len(candidates), size=m_pool, replace=False, p=probs)
         return [candidates[i] for i in selected_indices]
+
+    def _adalead_selection(
+        self,
+        objectives: Dict[str, Any],
+        m_pool: int,
+        adalead_k: float,
+        objective_directions: Dict[str, str] = None
+    ) -> List[str]:
+        """
+        AdaLead selection: adaptive threshold-based resampling.
+        
+        Defines threshold y_t = (1-k) * max(y) and samples from all sequences with y >= y_t.
+        - Flat landscapes: smaller differences mean more sequences pass threshold (exploration)
+        - Steep landscapes: larger differences mean fewer sequences pass threshold (exploitation)
+        """
+        if not objectives:
+            return []
+        
+        # Check if single or multi-objective
+        sample_obj = next(iter(objectives.values()))
+        
+        if isinstance(sample_obj, dict):
+            # Multi-objective case: apply threshold per objective and combine
+            obj_names = list(sample_obj.keys())
+            peptides = list(objectives.keys())
+            
+            # Collect candidates that pass threshold for at least one objective
+            candidates_above_threshold = set()
+            
+            for obj_name in obj_names:
+                # Get all values for this objective
+                obj_values = {seq: objectives[seq][obj_name] for seq in peptides}
+                
+                # Determine max based on direction
+                if objective_directions and obj_name in objective_directions:
+                    maximize = objective_directions[obj_name] == "max"
+                else:
+                    maximize = True  # Default to maximization
+                
+                if maximize:
+                    best_value = max(obj_values.values())
+                    threshold = (1 - adalead_k) * best_value
+                    # Select sequences above threshold
+                    for seq, val in obj_values.items():
+                        if val >= threshold:
+                            candidates_above_threshold.add(seq)
+                else:
+                    # For minimization, invert the logic
+                    best_value = min(obj_values.values())
+                    threshold = (1 + adalead_k) * best_value
+                    # Select sequences below threshold
+                    for seq, val in obj_values.items():
+                        if val <= threshold:
+                            candidates_above_threshold.add(seq)
+            
+            candidates = list(candidates_above_threshold)
+            
+            # If not enough candidates, fall back to all sequences
+            if len(candidates) < m_pool:
+                print(f"AdaLead: Only {len(candidates)} candidates above threshold, using all sequences")
+                candidates = peptides
+            
+            # Sample uniformly from candidates
+            if len(candidates) <= m_pool:
+                return candidates
+            else:
+                return random.sample(candidates, m_pool)
+        
+        else:
+            # Single objective case
+            peptides = list(objectives.keys())
+            
+            # Find best value and compute threshold
+            best_value = max(objectives.values())
+            threshold = (1 - adalead_k) * best_value
+            
+            # Select sequences above threshold
+            candidates = [seq for seq, val in objectives.items() if val >= threshold]
+            
+            # If not enough candidates, fall back to all sequences
+            if len(candidates) < m_pool:
+                print(f"AdaLead: Only {len(candidates)} candidates above threshold, using all sequences")
+                candidates = peptides
+            
+            # Sample uniformly from candidates
+            if len(candidates) <= m_pool:
+                return candidates
+            else:
+                return random.sample(candidates, m_pool)
 
     def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
         if acquisition_kwargs is None:
@@ -688,7 +777,8 @@ class BoGA:
                     objective_directions=objective_directions,
                     top_fraction=acquisition_kwargs.get("top_fraction", 0.3),
                     selection_method=acquisition_kwargs.get("selection_method", "uniform"),
-                    beta=acquisition_kwargs.get("beta", 1.0)
+                    beta=acquisition_kwargs.get("beta", 1.0),
+                    adalead_k=acquisition_kwargs.get("adalead_k", 0.15)
                 )
                 print(f"Selected top {len(parents)} parents for mutation")
                 
