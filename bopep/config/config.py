@@ -30,6 +30,11 @@ class Config:
         if script == "BoGA":
             # Use built-in defaults from bopep/config/boga_defaults.yaml
             defaults_path = Path(__file__).parent / "boga_defaults.yaml"
+        elif script == "BoPep":
+            # Use built-in defaults from bopep/config/bopep_defaults.yaml
+            defaults_path = Path(__file__).parent / "bopep_defaults.yaml"
+        else:
+            raise ValueError(f"Unknown script type: {script}. Must be 'BoGA' or 'BoPep'")
         
         self.defaults_path = Path(defaults_path)
         self.config = self._load_yaml(self.defaults_path)

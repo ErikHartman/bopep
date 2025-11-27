@@ -13,6 +13,7 @@ from bopep.search.structure_utils import _check_binding_site_residue_indices
 from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
 from bopep.search.selection import PeptideSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
+from bopep.config import Config
 import torch
 import logging
 
@@ -32,12 +33,13 @@ class BoPep:
         scoring_kwargs: Optional[Dict[str, Any]] = None,
         docker_kwargs: Optional[Dict[str, Any]] = None,
         hpo_kwargs: Optional[Dict[str, Any]] = None,
-        log_dir: str = "logs",
+        log_dir: str = None,
         overwrite_logs: Optional[bool] = None,
         custom_scorer: Optional[Callable] = None,
-        min_validation_samples: int = 3,
-        min_training_samples: int = 10,
-        checkpoint_interval: int = 5,
+        min_validation_samples: int = None,
+        min_training_samples: int = None,
+        checkpoint_interval: int = None,
+        config: Optional[Config] = None,
     ):
         """
         Initialize the BoPep optimizer with various configuration options.
@@ -56,14 +58,66 @@ class BoPep:
                     returns score dictionaries. If provided, this will be used
                     instead of the default scorer.
             checkpoint_interval: Number of iterations between automatic checkpoints (default: 5)
+            config: Optional Config object for BoPep. If not provided, defaults will be loaded.
         """
+        # Initialize or load config
+        if config is None:
+            config = Config(script="BoPep")  # Load defaults
+        self.config = config
+        
+        # Get flattened config for easy parameter access
+        cfg = self.config.flatten()
+        
+        # Helper function to get parameter value (user override > config)
+        def get_param(user_val, config_key):
+            return user_val if user_val is not None else cfg.get(config_key)
 
-        self.surrogate_model_kwargs = surrogate_model_kwargs or {}
+        # Get surrogate model kwargs
+        if surrogate_model_kwargs is not None:
+            self.surrogate_model_kwargs = surrogate_model_kwargs
+        else:
+            # Extract from flattened config
+            self.surrogate_model_kwargs = {
+                'model_type': cfg.get('surrogate_model.model_type'),
+                'network_type': cfg.get('surrogate_model.network_type'),
+            }
+        
+        # Get HPO kwargs
+        if hpo_kwargs is not None:
+            self.hpo_kwargs = hpo_kwargs
+        else:
+            # Extract from flattened config
+            self.hpo_kwargs = {
+                'n_trials': cfg.get('hpo.n_trials'),
+                'n_splits': cfg.get('hpo.n_splits'),
+                'random_state': cfg.get('hpo.random_state'),
+                'hpo_interval': cfg.get('hpo.hpo_interval'),
+            }
+        
+        # Get scoring kwargs
+        if scoring_kwargs is not None:
+            self.scoring_kwargs = scoring_kwargs
+        else:
+            # Extract all scoring.* keys from flattened config
+            self.scoring_kwargs = {
+                k.replace('scoring.', ''): v 
+                for k, v in cfg.items() 
+                if k.startswith('scoring.')
+            }
+        
+        # Get docker kwargs
+        if docker_kwargs is not None:
+            self.docker_kwargs = docker_kwargs
+        else:
+            # Extract all docker.* keys from flattened config
+            self.docker_kwargs = {
+                k.replace('docker.', ''): v 
+                for k, v in cfg.items() 
+                if k.startswith('docker.')
+            }
+
         self.objective_function = objective_function
         self.objective_function_kwargs = objective_function_kwargs or {}
-        self.docker_kwargs = docker_kwargs or {}
-        self.hpo_kwargs = hpo_kwargs or {}
-        self.scoring_kwargs = scoring_kwargs or {}
         self.custom_scorer = custom_scorer
 
         # Initialize components
@@ -80,12 +134,17 @@ class BoPep:
         )
 
         _validate_surrogate_model_kwargs(self.surrogate_model_kwargs)
-        self.log_dir = log_dir
-        self.overwrite_logs = overwrite_logs
+        
+        # Get logging parameters from config
+        self.log_dir = get_param(log_dir, 'logging.log_dir')
+        self.overwrite_logs = get_param(overwrite_logs, 'logging.overwrite_logs')
 
-        self.MIN_VALIDATION_SAMPLES = min_validation_samples
-        self.MIN_TRAINING_SAMPLES = min_training_samples
-        self.checkpoint_interval = checkpoint_interval
+        # Get validation parameters from config
+        self.min_validation_samples = get_param(min_validation_samples, 'validation.min_validation_samples')
+        self.min_training_samples = get_param(min_training_samples, 'validation.min_training_samples')
+        
+        # Get checkpointing parameters from config
+        self.checkpoint_interval = get_param(checkpoint_interval, 'checkpointing.checkpoint_interval')
         
         # checkpointing functions
         self._next_checkpoint_dir = _next_checkpoint_dir.__get__(self, BoPep)
@@ -98,14 +157,14 @@ class BoPep:
     def run(
         self,
         schedule: List[Dict[str, Any]],
-        batch_size: int,
-        target_structure_path: str,
+        batch_size: int = None,
+        target_structure_path: str = None,
         embeddings: Optional[Dict[str, Any]] = None,
-        num_initial: Optional[int] = 10,
+        num_initial: Optional[int] = None,
         n_validate: Optional[Union[float, int]] = None,
         binding_site_residue_indices: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         initial_peptides: Optional[List[str]] = None,
-        initial_method: str = "kmeans",
+        initial_method: str = None,
         assume_zero_indexed: Optional[bool] = None,
         checkpoint_path: Optional[str] = None,
         template_structures: Optional[Dict[str, str]] = None,
@@ -127,12 +186,48 @@ class BoPep:
             binding_site_residue_indices: List of residue indices defining the binding site,
                 or dict mapping peptides to their specific binding site residue indices.
             initial_peptides: Optional list of initial peptides to dock.
+            initial_method: Method for selecting initial peptides ('kmeans' or 'random').
             assume_zero_indexed: If True, assumes residue indices are zero-indexed.
             checkpoint_path: Path to a checkpoint directory to continue from. If none is provided,
                 a fresh optimization will be started.
             template_structures: Optional dictionary mapping peptide sequences to template PDB paths.
 
         """
+        # Get flattened config for parameter access
+        cfg = self.config.flatten()
+        
+        # Helper function to get parameter value (user override > config)
+        def get_param(user_val, config_key):
+            return user_val if user_val is not None else cfg.get(config_key)
+        
+        # Get parameters from config or user overrides
+        batch_size = get_param(batch_size, 'batch_size')
+        num_initial = get_param(num_initial, 'num_initial')
+        initial_method = get_param(initial_method, 'initial_method')
+        n_validate = get_param(n_validate, 'validation.n_validate')
+        
+        if batch_size is None:
+            raise ValueError("batch_size must be provided either as argument or in config")
+        if target_structure_path is None:
+            raise ValueError("target_structure_path must be provided")
+        
+        # Update config with actually-used values for reproducibility
+        self.config.update_from_used_values(
+            batch_size=batch_size,
+            num_initial=num_initial,
+            initial_method=initial_method,
+            **{'validation.n_validate': n_validate},
+            **{'validation.min_validation_samples': self.min_validation_samples},
+            **{'validation.min_training_samples': self.min_training_samples},
+            **{'logging.log_dir': self.log_dir},
+            **{'logging.overwrite_logs': self.overwrite_logs},
+            **{'checkpointing.checkpoint_interval': self.checkpoint_interval},
+        )
+        
+        # Save config to log directory
+        config_path = self.config.save(self.log_dir, filename='bopep_config_used.yaml')
+        logging.info(f"Saved configuration to {config_path}")
+        
         continue_from_checkpoint = False if checkpoint_path is None else True
         self.template_structures = template_structures
         self.checkpoint_path = checkpoint_path
@@ -416,8 +511,8 @@ class BoPep:
                     embeddings=docked_embeddings,
                     objectives=objectives,
                     validation_size=n_validate,
-                    min_training_samples=self.MIN_TRAINING_SAMPLES,
-                    min_validation_samples=self.MIN_VALIDATION_SAMPLES
+                    min_training_samples=self.min_training_samples,
+                    min_validation_samples=self.min_validation_samples
                 )
 
                 # Extract loss - use validation loss if available, otherwise training loss
