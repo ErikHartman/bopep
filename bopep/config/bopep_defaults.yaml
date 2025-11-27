@@ -1,9 +1,9 @@
 # BoPep Default Configuration
-# This file contains default parameters for the Bayesian Optimization Peptide (BoPep) search
+# This file contains default parameters for the Bayesian Optimization for Sequences search
 
 # Initial population parameters
 num_initial: 10
-initial_method: 'kmeans'  # Method for selecting initial peptides: 'kmeans' or 'random'
+initial_method: 'kmeans'  # Method for selecting initial sequences: 'kmeans' or 'random'
 
 # Batch size for optimization
 batch_size: 10
@@ -33,7 +33,7 @@ scoring:
   binding_site_distance_threshold: 5
   n_jobs: 12
   receptor_chain: 'A'
-  peptide_chain: 'B'
+  sequence_chain: 'B'
 
 # Docker/Docking configuration
 docker:

@@ -3,9 +3,10 @@ import glob
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from bopep.scoring.is_peptide_in_binding_site import (
-    is_peptide_near_binding_site_by_centroid,
-    n_peptides_in_binding_site_colab_dir,
+from bopep.scoring.is_in_binding_site import (
+    is_sequence_in_binding_site_pdb_file,
+    is_sequence_near_binding_site_by_centroid,
+    n_sequences_in_binding_site_processed_dir
 )
 
 sns.set_context("paper")
@@ -41,11 +42,11 @@ for i, entry in enumerate(files, start=1):
 
     # compute centroid distance
     try:
-        dist, _near = is_peptide_near_binding_site_by_centroid(
+        dist, _near = is_sequence_near_binding_site_by_centroid(
             pdb_file,
             binding_site_residue_indices,
             receptor_chain="A",
-            peptide_chain="B",
+            sequence_chain="B",
             cutoff=10.0,
         )
     except Exception as e:
@@ -53,7 +54,7 @@ for i, entry in enumerate(files, start=1):
         continue
 
     try:
-        frac_contacts, _in_site, nr_contacts = n_peptides_in_binding_site_colab_dir(
+        frac_contacts, _in_site, nr_contacts = n_sequences_in_binding_site_processed_dir(
             colab_dir,
             binding_site_residue_indices=binding_site_residue_indices,
             threshold=5.0,

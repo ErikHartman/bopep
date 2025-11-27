@@ -14,7 +14,7 @@ from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.search.utils import _validate_surrogate_model_kwargs
 from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.logging.logger import Logger
-from bopep.genetic_algorithm.mutate import PeptideMutator
+from bopep.genetic_algorithm.mutate import Mutator
 from bopep.config import Config
 import torch
 
@@ -215,8 +215,8 @@ class BoGA:
         self.embedder = Embedder()
         self.acquisition_function_obj = AcquisitionFunction()
         
-        # Initialize peptide mutator
-        self.mutator = PeptideMutator(
+        # Initialize sequence mutator
+        self.mutator = Mutator(
             min_sequence_length=self.min_sequence_length,
             max_sequence_length=self.max_sequence_length,
             mutation_rate=self.mutation_rate,
@@ -255,7 +255,7 @@ class BoGA:
         if isinstance(sample_obj, dict):
             # Multi-objective case: show top performers for each objective (like optimization.py)
             obj_names = list(sample_obj.keys())
-            print(f"Top {print_n} peptides (multiobjective):")
+            print(f"Top {print_n} sequences (multiobjective):")
             
             for obj_name in obj_names:
                 print(f"\n--- {obj_name} ---")
@@ -266,13 +266,13 @@ class BoGA:
                 else:
                     reverse_sort = True  # Default to maximization
                 
-                sorted_peptides = sorted(objectives.items(), 
+                sorted_sequences = sorted(objectives.items(), 
                                        key=lambda x: x[1][obj_name], 
                                        reverse=reverse_sort)[:print_n]
                 print(f"{'Peptide':<20} | {obj_name:<15}")
                 print("-" * 40)
-                for peptide, obj_dict in sorted_peptides:
-                    print(f"{peptide:<20} | {obj_dict[obj_name]:<15.4f}")
+                for sequence, obj_dict in sorted_sequences:
+                    print(f"{sequence:<20} | {obj_dict[obj_name]:<15.4f}")
         else:
             # Single objective case: original behavior
             sorted_leaderboard = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:print_n]
@@ -331,17 +331,17 @@ class BoGA:
         else:
             raise ValueError("initial_sequences must be None, a string, or a list of strings")
 
-    def _embed_peptides(self, peptides: List[str]) -> Dict[str, Any]:
+    def _embed_sequences(self, sequences: List[str]) -> Dict[str, Any]:
         """
-        Embed, scale, and apply PCA to a list of peptides.
+        Embed, scale, and apply PCA to a list of sequences.
         """
-        if not peptides:
+        if not sequences:
             return {}
         
-        # Fresh embed all peptides
+        # Fresh embed all sequences
         if self.embed_method == 'esm':
             raw_embeddings = self.embedder.embed_esm(
-                peptides,
+                sequences,
                 average=self.embed_average,
                 model_path=self.embed_model_path,
                 batch_size=self.embed_batch_size,
@@ -350,7 +350,7 @@ class BoGA:
             )
         elif self.embed_method == 'aaindex':
             raw_embeddings = self.embedder.embed_aaindex(
-                peptides,
+                sequences,
                 average=self.embed_average,
                 filter=False
             )
@@ -366,17 +366,17 @@ class BoGA:
         
         return reduced_embeddings
 
-    def _embed_generation(self, scored_peptides: List[str], candidate_peptides: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def _embed_generation(self, scored_sequences: List[str], candidate_sequences: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Embed and reduce peptides for this generation, ensuring consistent scaling/PCA.
+        Embed and reduce sequences for this generation, ensuring consistent scaling/PCA.
         """
-        # Combine all peptides for consistent scaling and PCA
-        all_peptides = scored_peptides + candidate_peptides
-        all_embeddings = self._embed_peptides(all_peptides)
+        # Combine all sequences for consistent scaling and PCA
+        all_sequences = scored_sequences + candidate_sequences
+        all_embeddings = self._embed_sequences(all_sequences)
         
         # Split back into training and candidate sets
-        training_embeddings = {p: all_embeddings[p] for p in scored_peptides if p in all_embeddings}
-        candidate_embeddings = {p: all_embeddings[p] for p in candidate_peptides if p in all_embeddings}
+        training_embeddings = {p: all_embeddings[p] for p in scored_sequences if p in all_embeddings}
+        candidate_embeddings = {p: all_embeddings[p] for p in candidate_sequences if p in all_embeddings}
         
         return training_embeddings, candidate_embeddings
 
@@ -400,7 +400,7 @@ class BoGA:
             )
         else:  # mode == 'binding'
             # Binding mode: dock and score complexes
-            dock_dirs = self.docker.dock_peptides(sequences)
+            dock_dirs = self.docker.dock_sequences(sequences)
             scores = self.scorer.score_batch(
                 scores_to_include=self.scoring_kwargs.get('scores_to_include', []),
                 inputs=dock_dirs,
@@ -470,22 +470,22 @@ class BoGA:
         if isinstance(sample_obj, dict):
             # Multi-objective case: matrix-based sampling approach
             obj_names = list(sample_obj.keys())
-            peptides = list(selection_objectives.keys())
+            sequences = list(selection_objectives.keys())
             
             # Create ranking matrix: each column is a different objective, sorted by rank
-            rankings = {}  # {objective_name: [peptide_list_sorted_by_that_objective]}
+            rankings = {}  # {objective_name: [sequence_list_sorted_by_that_objective]}
             
             for obj_name in obj_names:
-                # Sort peptides by this objective
+                # Sort sequences by this objective
                 if objective_directions and obj_name in objective_directions:
                     reverse_sort = objective_directions[obj_name] == "max"
                 else:
                     reverse_sort = True  # Default to maximization
                 
-                sorted_peptides = sorted(peptides, 
+                sorted_sequences = sorted(sequences, 
                                        key=lambda p: selection_objectives[p][obj_name], 
                                        reverse=reverse_sort)
-                rankings[obj_name] = sorted_peptides
+                rankings[obj_name] = sorted_sequences
             
             # Sample from the top portion of each objective ranking
             top_candidates = set()
@@ -493,16 +493,16 @@ class BoGA:
             # Handle both fraction and integer specifications
             if isinstance(top_n_or_frac, float) and top_n_or_frac < 1.0:
                 # Fraction mode: take top fraction of sequences
-                n_top_per_objective = max(1, int(len(peptides) * top_n_or_frac))
+                n_top_per_objective = max(1, int(len(sequences) * top_n_or_frac))
             elif isinstance(top_n_or_frac, int) or (isinstance(top_n_or_frac, float) and top_n_or_frac >= 1.0):
                 # Integer mode: take exact number of top sequences
                 n_top_per_objective = int(top_n_or_frac)
             else:
                 raise ValueError(f"top_n_or_frac must be a positive number, got {top_n_or_frac}")
             
-            for obj_name, ranked_peptides in rankings.items():
+            for obj_name, ranked_sequences in rankings.items():
                 # Take top performers for this objective
-                top_for_this_obj = ranked_peptides[:n_top_per_objective]
+                top_for_this_obj = ranked_sequences[:n_top_per_objective]
                 top_candidates.update(top_for_this_obj)
             
             if selection_method == "adalead":
@@ -562,9 +562,9 @@ class BoGA:
         
         scores = {}
         for _, row in df.iterrows():
-            sequence = row['peptide']
+            sequence = row['sequence']
             score_columns = [col for col in df.columns 
-                           if col not in ['peptide', 'iteration', 'phase', 'timestamp']]
+                           if col not in ['sequence', 'iteration', 'phase', 'timestamp']]
             scores[sequence] = {col: row[col] for col in score_columns}
 
         evaluated_sequences = set(scores.keys())
@@ -617,7 +617,7 @@ class BoGA:
             init_seqs = self._prepare_initial_population()
             print(f"Generated initial population of {len(init_seqs)} sequences")
 
-            init_reduced = self._embed_peptides(init_seqs)
+            init_reduced = self._embed_sequences(init_seqs)
 
             # Dock and score initial population
             print("Evaluating initial population...")
@@ -644,7 +644,7 @@ class BoGA:
             self._print_leaderboard(objectives, 0, objective_directions=objective_directions)
 
             # Initial hyperparameter tuning for fresh runs
-            init_reduced = self._embed_peptides(list(scores.keys()))
+            init_reduced = self._embed_sequences(list(scores.keys()))
             print("Optimizing initial hyperparameters...")
             self._optimize_hyperparameters(init_reduced, objectives)
             if self.logger:
@@ -662,7 +662,7 @@ class BoGA:
             self._print_leaderboard(objectives, last_iteration, objective_directions=objective_directions)
             
             # For continued runs, optimize hyperparameters on existing data
-            existing_reduced = self._embed_peptides(list(scores.keys()))
+            existing_reduced = self._embed_sequences(list(scores.keys()))
             print("Optimizing hyperparameters on existing data...")
             self._optimize_hyperparameters(existing_reduced, objectives)
 
@@ -706,7 +706,7 @@ class BoGA:
                 pool = self.mutator.mutate_pool(parents, self.k_propose, self._evaluated_sequences, objectives)
                 print(f"Generated candidate pool of {len(pool)} sequences")
 
-                # Embed scored peptides + candidates together with fresh scaling/PCA
+                # Embed scored sequences + candidates together with fresh scaling/PCA
                 scored_seqs = list(scores.keys())
                 training_embeddings, candidate_embeddings = self._embed_generation(scored_seqs, pool)
 

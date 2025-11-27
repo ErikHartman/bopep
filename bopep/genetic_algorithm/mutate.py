@@ -5,9 +5,9 @@ import numpy as np
 _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 
-class PeptideMutator:
+class Mutator:
     """
-    Simple peptide mutation and crossover for genetic algorithms.
+    Simple sequence mutation and crossover for genetic algorithms.
     
     Supports:
       - Uniform random substitution mutations
@@ -29,7 +29,7 @@ class PeptideMutator:
         self.p_del = float(p_del)
 
     def generate_random_sequence(self) -> str:
-        """Generate a random peptide sequence within length constraints."""
+        """Generate a random sequence sequence within length constraints."""
         L = random.randint(self.min_sequence_length, self.max_sequence_length)
         return ''.join(random.choice(_AMINO_ACIDS) for _ in range(L))
 
@@ -98,7 +98,7 @@ class PeptideMutator:
         return list(pool)
 
 if __name__ == "__main__":
-    mutator = PeptideMutator()
+    mutator = Mutator()
     parent1 = "ACDEFGHIKLMNPQRSTVWY"
     parent2 = "WYVSRTQPNMLKIHGFEDCA"
     evaluated = {parent1, parent2}

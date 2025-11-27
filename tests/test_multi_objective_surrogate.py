@@ -2,7 +2,7 @@
 Comprehensive test suite for multi-objective surrogate models.
 
 This module tests multi-objective functionality using only the current 
-named objective format: {peptide: {obj_name: value}}
+named objective format: {sequence: {obj_name: value}}
 
 Tests include:
 1. All surrogate model types with multiple objectives
@@ -50,8 +50,8 @@ def generate_multi_objective_data(
     Generate synthetic multi-objective data with named objectives.
     
     Returns:
-        embedding_dict: {peptide_id: embedding_array}
-        objective_dict: {peptide_id: {obj_name: value}}
+        embedding_dict: {sequence_id: embedding_array}
+        objective_dict: {sequence_id: {obj_name: value}}
     """
     if objective_names is None:
         objective_names = ["binding_affinity", "stability", "selectivity"]
@@ -60,7 +60,7 @@ def generate_multi_objective_data(
     objective_dict = {}
     
     for i in range(n_samples):
-        peptide_id = f"peptide_{i}"
+        sequence_id = f"sequence_{i}"
         
         if variable_length:
             # Variable sequence length
@@ -85,8 +85,8 @@ def generate_multi_objective_data(
             
             objectives[obj_name] = float(score)
         
-        embedding_dict[peptide_id] = embedding
-        objective_dict[peptide_id] = objectives
+        embedding_dict[sequence_id] = embedding
+        objective_dict[sequence_id] = objectives
     
     return embedding_dict, objective_dict
 
@@ -107,8 +107,8 @@ def generate_simple_training_data(
     x_values = np.random.uniform(-2, 2, n_samples)
     
     for i, x in enumerate(x_values):
-        peptide_id = f"sample_{i}"
-        embedding_dict[peptide_id] = np.array([x], dtype=np.float32)
+        sequence_id = f"sample_{i}"
+        embedding_dict[sequence_id] = np.array([x], dtype=np.float32)
         
         # Simple polynomial relationships
         objectives = {}
@@ -121,7 +121,7 @@ def generate_simple_training_data(
         for j in range(2, len(objective_names)):
             objectives[objective_names[j]] = float(x ** 2 * j + np.random.normal(0, 0.1))
         
-        objective_dict[peptide_id] = objectives
+        objective_dict[sequence_id] = objectives
     
     return embedding_dict, objective_dict
 
@@ -185,8 +185,8 @@ class TestTraditionalMultiObjectiveModels:
             device=device
         )
         
-        # Check format: {peptide: {obj_name: (mean, std)}}
-        for peptide_id, pred_dict in predictions.items():
+        # Check format: {sequence: {obj_name: (mean, std)}}
+        for sequence_id, pred_dict in predictions.items():
             assert isinstance(pred_dict, dict)
             assert set(pred_dict.keys()) == {"binding_affinity", "stability", "selectivity"}
             for obj_name, (mean, std) in pred_dict.items():
@@ -225,7 +225,7 @@ class TestTraditionalMultiObjectiveModels:
             device=device
         )
         
-        for peptide_id, pred_dict in predictions.items():
+        for sequence_id, pred_dict in predictions.items():
             assert isinstance(pred_dict, dict)
             assert set(pred_dict.keys()) == {"obj1", "obj2"}
             for obj_name, (mean, std) in pred_dict.items():
@@ -263,7 +263,7 @@ class TestTraditionalMultiObjectiveModels:
             device=device
         )
         
-        for peptide_id, pred_dict in predictions.items():
+        for sequence_id, pred_dict in predictions.items():
             assert isinstance(pred_dict, dict)
             assert set(pred_dict.keys()) == {"affinity", "stability"}
     
@@ -297,7 +297,7 @@ class TestTraditionalMultiObjectiveModels:
             device=device
         )
         
-        for peptide_id, pred_dict in predictions.items():
+        for sequence_id, pred_dict in predictions.items():
             assert isinstance(pred_dict, dict)
             assert set(pred_dict.keys()) == {"score1", "score2", "score3"}
     
@@ -336,7 +336,7 @@ class TestTraditionalMultiObjectiveModels:
             )
             
             # Check consistent format
-            for peptide_id, pred_dict in predictions.items():
+            for sequence_id, pred_dict in predictions.items():
                 assert isinstance(pred_dict, dict)
                 assert set(pred_dict.keys()) == {"obj_a", "obj_b"}
 
@@ -392,7 +392,7 @@ class TestMultiModelWrapper:
         assert isinstance(predictions, dict)
         assert len(predictions) == len(embedding_dict)
         
-        for peptide_id, pred_dict in predictions.items():
+        for sequence_id, pred_dict in predictions.items():
             assert isinstance(pred_dict, dict)
             assert set(pred_dict.keys()) == {"aff", "stab", "sel"}
             for obj_name, (mean, std) in pred_dict.items():
@@ -429,7 +429,7 @@ class TestMultiModelWrapper:
         
         # Predictions should maintain sorted order
         predictions = multi_model.predict_dict(embedding_dict)
-        for peptide_id, pred_dict in predictions.items():
+        for sequence_id, pred_dict in predictions.items():
             assert list(pred_dict.keys()) == ["a_first", "m_middle", "z_last"]
     
     def test_multi_model_wrapper_different_model_types(self):
@@ -468,7 +468,7 @@ class TestMultiModelWrapper:
             predictions = multi_model.predict_dict(embedding_dict)
             assert len(predictions) == len(embedding_dict)
             
-            for peptide_id, pred_dict in predictions.items():
+            for sequence_id, pred_dict in predictions.items():
                 assert isinstance(pred_dict, dict)
                 assert set(pred_dict.keys()) == {"obj1", "obj2"}
 
@@ -510,7 +510,7 @@ class TestMultiObjectiveWithVariableLength:
             device=device
         )
         
-        for peptide_id, pred_dict in predictions.items():
+        for sequence_id, pred_dict in predictions.items():
             assert isinstance(pred_dict, dict)
             assert set(pred_dict.keys()) == {"binding", "stability"}
             for obj_name, (mean, std) in pred_dict.items():
@@ -552,7 +552,7 @@ class TestMultiObjectiveWithVariableLength:
             device=device
         )
         
-        for peptide_id, pred_dict in predictions.items():
+        for sequence_id, pred_dict in predictions.items():
             assert isinstance(pred_dict, dict)
             assert set(pred_dict.keys()) == {"score_a", "score_b", "score_c"}
 
@@ -672,7 +672,7 @@ class TestSurrogateModelManagerMultiObjective:
         assert isinstance(predictions, dict)
         assert len(predictions) == len(embedding_dict)
         
-        for peptide_id, pred in predictions.items():
+        for sequence_id, pred in predictions.items():
             assert isinstance(pred, dict)
             assert set(pred.keys()) == {"aff", "stab", "sel"}
             for obj_name, (mean, std) in pred.items():
@@ -713,7 +713,7 @@ class TestSurrogateModelManagerMultiObjective:
         assert isinstance(predictions, dict)
         assert len(predictions) == len(embedding_dict)
         
-        for peptide_id, pred in predictions.items():
+        for sequence_id, pred in predictions.items():
             assert isinstance(pred, dict)
             assert set(pred.keys()) == {"bind", "stab"}
     
@@ -756,7 +756,7 @@ class TestSurrogateModelManagerMultiObjective:
                 predictions = manager.predict(embedding_dict)
                 
                 # Verify format consistency
-                for peptide_id, pred in predictions.items():
+                for sequence_id, pred in predictions.items():
                     assert isinstance(pred, dict)
                     assert set(pred.keys()) == {"obj1", "obj2"}
 
@@ -830,17 +830,17 @@ class TestMultiObjectiveValidation:
         # Both should have same format
         assert len(trad_pred) == len(multi_pred)
         
-        for peptide_id in embedding_dict.keys():
-            assert isinstance(trad_pred[peptide_id], dict)
-            assert isinstance(multi_pred[peptide_id], dict)
-            assert set(trad_pred[peptide_id].keys()) == set(multi_pred[peptide_id].keys())
+        for sequence_id in embedding_dict.keys():
+            assert isinstance(trad_pred[sequence_id], dict)
+            assert isinstance(multi_pred[sequence_id], dict)
+            assert set(trad_pred[sequence_id].keys()) == set(multi_pred[sequence_id].keys())
             
-            for obj_name in trad_pred[peptide_id].keys():
+            for obj_name in trad_pred[sequence_id].keys():
                 # Both should be (mean, std) tuples
-                assert isinstance(trad_pred[peptide_id][obj_name], tuple)
-                assert isinstance(multi_pred[peptide_id][obj_name], tuple)
-                assert len(trad_pred[peptide_id][obj_name]) == 2
-                assert len(multi_pred[peptide_id][obj_name]) == 2
+                assert isinstance(trad_pred[sequence_id][obj_name], tuple)
+                assert isinstance(multi_pred[sequence_id][obj_name], tuple)
+                assert len(trad_pred[sequence_id][obj_name]) == 2
+                assert len(multi_pred[sequence_id][obj_name]) == 2
 
 
 if __name__ == "__main__":

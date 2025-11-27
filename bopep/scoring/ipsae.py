@@ -211,32 +211,12 @@ def get_ipsae_scores_from_structure_and_pae(
     structure_file: str, 
     pae_data: np.ndarray,
     receptor_chain: str = "A",
-    peptide_chain: str = "B",
+    sequence_chain: str = "B",
     pae_cutoff: float = 10.0,
     residue_selector: Optional[Callable[[Any], bool]] = None
 ) -> Dict[str, float]:
     """
     Compute IPSAE scores from structure file (PDB/CIF) and PAE data.
-    
-    Parameters
-    ----------
-    structure_file : str
-        Path to structure file (PDB/CIF)
-    pae_data : np.ndarray
-        PAE matrix or flat array
-    receptor_chain : str, default "A"
-        Chain ID for the receptor/target protein
-    peptide_chain : str, default "B"
-        Chain ID for the peptide
-    pae_cutoff : float, default 10.0
-        PAE threshold for counting inter-chain pairs
-    residue_selector : callable, optional
-        Function to filter residues
-        
-    Returns
-    -------
-    dict
-        Dictionary containing 'ipsae_max' and 'ipsae_min' scores
     """
     from bopep.structure.parser import parse_structure
     
@@ -249,9 +229,9 @@ def get_ipsae_scores_from_structure_and_pae(
         residue_selector=residue_selector
     )
     
-    # Extract values specifically for the receptor-peptide pair
+    # Extract values specifically for the receptor-sequence pair
     # Create a normalized pair key (alphabetically sorted)
-    pair_key = tuple(sorted([receptor_chain, peptide_chain]))
+    pair_key = tuple(sorted([receptor_chain, sequence_chain]))
     
     if pair_key in results:
         pair_data = results[pair_key]
@@ -304,7 +284,6 @@ def get_ipsae_scores_from_structure_and_pae(
 if __name__ == "__main__":
     # Example usage
     from bopep.structure.parser import parse_structure
-    import sys
     import json
 
     pdb_file = "/srv/data1/er8813ha/bopep/docked/cd14/4glf_NYLSELSEHV/4glf_NYLSELSEHV_relaxed_rank_001_alphafold2_multimer_v3_model_5_seed_000.pdb"

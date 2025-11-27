@@ -11,7 +11,7 @@ from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.search.utils import (_validate_args, _validate_surrogate_model_kwargs)
 from bopep.search.structure_utils import _check_binding_site_residue_indices
 from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
-from bopep.search.selection import PeptideSelector
+from bopep.search.selection import SequenceSelector
 from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.config import Config
 import torch
@@ -124,7 +124,7 @@ class BoPep:
         self.scorer = ComplexScorer()
         self.docker = Docker(self.docker_kwargs)
         self.acquisition_function_obj = AcquisitionFunction()
-        self.selector = PeptideSelector()
+        self.selector = SequenceSelector()
         self.scores_to_objective = ScoresToObjective()
 
         # Initialize surrogate model manager
@@ -163,34 +163,34 @@ class BoPep:
         num_initial: Optional[int] = None,
         n_validate: Optional[Union[float, int]] = None,
         binding_site_residue_indices: Optional[Union[List[int], Dict[str, List[int]]]] = None,
-        initial_peptides: Optional[List[str]] = None,
+        initial_sequences: Optional[List[str]] = None,
         initial_method: str = None,
         assume_zero_indexed: Optional[bool] = None,
         checkpoint_path: Optional[str] = None,
         template_structures: Optional[Dict[str, str]] = None,
     ):
         """
-        Runs Bayesian optimization on peptide sequences.
+        Runs Bayesian optimization on sequence sequences.
 
         Args:
             schedule: List of dictionaries defining the optimization phases.
                 Each dict should have 'acquisition' and 'iterations' keys.
                 Optionally can include 'acquisition_kwargs' for multi-objective
                 acquisition functions (e.g., parego_chebyshev_ei).
-            batch_size: Number of peptides to dock in each iteration.
+            batch_size: Number of sequences to dock in each iteration.
             target_structure_path: Path to the target structure PDB file.
-            embeddings: Dictionary of peptide embeddings {peptide: embedding}. Required for fresh initialization.
-            num_initial: Number of initial peptides to dock and score.
-            n_validate: Number of peptides to use for validation.
+            embeddings: Dictionary of sequence embeddings {sequence: embedding}. Required for fresh initialization.
+            num_initial: Number of initial sequences to dock and score.
+            n_validate: Number of sequences to use for validation.
                 If None, no validation is performed.
             binding_site_residue_indices: List of residue indices defining the binding site,
-                or dict mapping peptides to their specific binding site residue indices.
-            initial_peptides: Optional list of initial peptides to dock.
-            initial_method: Method for selecting initial peptides ('kmeans' or 'random').
+                or dict mapping sequences to their specific binding site residue indices.
+            initial_sequences: Optional list of initial sequences to dock.
+            initial_method: Method for selecting initial sequences ('kmeans' or 'random').
             assume_zero_indexed: If True, assumes residue indices are zero-indexed.
             checkpoint_path: Path to a checkpoint directory to continue from. If none is provided,
                 a fresh optimization will be started.
-            template_structures: Optional dictionary mapping peptide sequences to template PDB paths.
+            template_structures: Optional dictionary mapping sequence sequences to template PDB paths.
 
         """
         # Get flattened config for parameter access
@@ -250,7 +250,7 @@ class BoPep:
             if not embeddings:
                 raise ValueError("embeddings must be provided for fresh initialization")
             logging.info("Fresh initialization")
-            self._fresh_init(initial_peptides, num_initial, assume_zero_indexed)
+            self._fresh_init(initial_sequences, num_initial, assume_zero_indexed)
             starting_iteration = 0
         else:
             logging.info("Continuing from checkpoint")
@@ -260,8 +260,8 @@ class BoPep:
         self._run_phase_loop(
             schedule=schedule,
             all_logged_objectives=self.all_logged_objectives,
-            docked_peptides=self.docked_peptides,
-            not_docked_peptides=self.not_docked_peptides,
+            docked_sequences=self.docked_sequences,
+            not_docked_sequences=self.not_docked_sequences,
             scores=self.scores,
             batch_size=batch_size,
             n_validate=n_validate,
@@ -270,19 +270,19 @@ class BoPep:
 
     def _fresh_init(
         self,
-        initial_peptides: Optional[List[str]] = None,
+        initial_sequences: Optional[List[str]] = None,
         num_initial: int = 10,
         assume_zero_indexed: Optional[bool] = None,
     ):
         """
         Initializes the BoPep optimizer for a fresh search
         """
-        peptides = list(self.embeddings.keys())
-        for peptide in peptides:
-            if not all(aa in _AMINO_ACIDS for aa in peptide):
-                raise ValueError(f"Invalid amino acids in peptide sequence: {peptide}. Allowed amino acids are: {_AMINO_ACIDS}")
-        self.docked_peptides = set()
-        self.not_docked_peptides = set(peptides)
+        sequences = list(self.embeddings.keys())
+        for sequence in sequences:
+            if not all(aa in _AMINO_ACIDS for aa in sequence):
+                raise ValueError(f"Invalid amino acids in sequence sequence: {sequence}. Allowed amino acids are: {_AMINO_ACIDS}")
+        self.docked_sequences = set()
+        self.not_docked_sequences = set(sequences)
         self.scores = dict()
 
         # Validate args
@@ -318,17 +318,17 @@ class BoPep:
 
         self.best_hyperparams = None
 
-        if initial_peptides is None:
-            initial_peptides = self.selector.select_initial_peptides(
+        if initial_sequences is None:
+            initial_sequences = self.selector.select_initial_sequences(
                 embeddings=self.embeddings, num_initial=num_initial, random_state=42, method=self.initial_method
             )
 
-        logging.info("Docking initial peptides")
-        docked_dirs = self.docker.dock_peptides(initial_peptides)
-        self.docked_peptides.update(initial_peptides)
-        self.not_docked_peptides.difference_update(initial_peptides)
+        logging.info("Docking initial sequences")
+        docked_dirs = self.docker.dock_sequences(initial_sequences)
+        self.docked_sequences.update(initial_sequences)
+        self.not_docked_sequences.difference_update(initial_sequences)
 
-        logging.info(f"Scoring {len(initial_peptides)} initial peptides")
+        logging.info(f"Scoring {len(initial_sequences)} initial sequences")
         initial_scores = self._score_batch(docked_dirs=docked_dirs)
         self.scores.update(initial_scores)
         self.logger.log_scores(initial_scores, iteration=0, acquisition_name="initial")
@@ -340,7 +340,7 @@ class BoPep:
         self.all_logged_objectives = set(objectives.keys())
 
         # Optimize hyperparameters and initialize model using surrogate manager
-        docked_embs = {p: self.embeddings[p] for p in self.docked_peptides}
+        docked_embs = {p: self.embeddings[p] for p in self.docked_sequences}
         # Filter hpo_kwargs to only include parameters accepted by the manager
         manager_hpo_kwargs = {k: v for k, v in self.hpo_kwargs.items() 
                              if k in ['n_trials', 'n_splits', 'random_state']}
@@ -402,7 +402,7 @@ class BoPep:
         objectives = self.scores_to_objective.create_objective(
             self.scores, self.objective_function, **self.objective_function_kwargs
         )
-        docked_embs = {p: self.embeddings[p] for p in self.docked_peptides}
+        docked_embs = {p: self.embeddings[p] for p in self.docked_sequences}
         
         last_iteration = meta["global_iteration"]
         
@@ -423,7 +423,7 @@ class BoPep:
         self._save_checkpoint(last_iteration)
 
         logging.info(f"Resumed from iteration {last_iteration} with "
-                    f"{len(self.docked_peptides)} peptides docked")
+                    f"{len(self.docked_sequences)} sequences docked")
         
         return last_iteration
 
@@ -431,8 +431,8 @@ class BoPep:
         self,
         schedule: List[Dict[str, Any]],
         all_logged_objectives: set,
-        docked_peptides: set,
-        not_docked_peptides: set,
+        docked_sequences: set,
+        not_docked_sequences: set,
         scores: dict,
         batch_size: int,
         n_validate: Optional[Union[int, float]] = None,
@@ -454,10 +454,10 @@ class BoPep:
                 )
 
                 # Initialize fresh model for each iteration
-                # Use embeddings from current docked peptides for initialization
-                current_docked_embs = {p: self.embeddings[p] for p in self.docked_peptides}
+                # Use embeddings from current docked sequences for initialization
+                current_docked_embs = {p: self.embeddings[p] for p in self.docked_sequences}
                 
-                # Turn scores into a scalarized score dict of peptide: score
+                # Turn scores into a scalarized score dict of sequence: score
                 objectives = self.scores_to_objective.create_objective(
                     scores, self.objective_function, **self.objective_function_kwargs
                 )
@@ -465,9 +465,9 @@ class BoPep:
                 self.surrogate_manager.initialize_model(self.best_hyperparams, current_docked_embs, objectives)
 
                 # Log the new objective values
-                new_objective_peptides = set(objectives.keys()) - all_logged_objectives
+                new_objective_sequences = set(objectives.keys()) - all_logged_objectives
                 new_objectives = {
-                    peptide: objectives[peptide] for peptide in new_objective_peptides
+                    sequence: objectives[sequence] for sequence in new_objective_sequences
                 }
 
                 if new_objectives:
@@ -478,8 +478,8 @@ class BoPep:
                     )
                     all_logged_objectives.update(new_objectives.keys())
 
-                # Train the model on *only the peptides we have scores for*
-                docked_embeddings = {p: self.embeddings[p] for p in docked_peptides}
+                # Train the model on *only the sequences we have scores for*
+                docked_embeddings = {p: self.embeddings[p] for p in docked_sequences}
 
                 # Run hyperparameter optimization every N steps
                 if global_iteration % self.hpo_kwargs.get("hpo_interval", 10) == 0:
@@ -503,7 +503,7 @@ class BoPep:
                         )
 
                 logging.info(
-                    f"Model will be trained (potentially validated) on {len(docked_peptides)} peptides"
+                    f"Model will be trained (potentially validated) on {len(docked_sequences)} sequences"
                 )
 
                 # Train the model with automatic (optional) validation split
@@ -521,9 +521,9 @@ class BoPep:
                 # Log the loss and metrics
                 self.logger.log_model_metrics(loss, global_iteration, metrics)
 
-                # Predict for *the not-yet-docked* peptides
+                # Predict for *the not-yet-docked* sequences
                 candidate_embeddings = {
-                    p: self.embeddings[p] for p in not_docked_peptides
+                    p: self.embeddings[p] for p in not_docked_sequences
                 }
                 predictions = self.surrogate_manager.predict(candidate_embeddings)
 
@@ -536,7 +536,7 @@ class BoPep:
                     predictions=predictions,
                     acquisition_function=acquisition,
                     **acquisition_kwargs
-                )  # acquisition_values is {peptide: acquisition_value}
+                )  # acquisition_values is {sequence: acquisition_value}
 
                 # Log acquisition
                 self.logger.log_acquisition(
@@ -545,18 +545,18 @@ class BoPep:
                     iteration=global_iteration,
                 )
 
-                # Select the next set of peptides to dock
-                next_peptides = self.selector.select_next_peptides(
-                    peptides=not_docked_peptides,
+                # Select the next set of sequences to dock
+                next_sequences = self.selector.select_next_sequences(
+                    sequences=not_docked_sequences,
                     embeddings=candidate_embeddings,
                     acquisition_values=acquisition_values,
                     n_select=batch_size,
                 )
 
                 # Dock them
-                docked_dirs = self.docker.dock_peptides(next_peptides)
-                docked_peptides.update(next_peptides)
-                not_docked_peptides.difference_update(next_peptides)
+                docked_dirs = self.docker.dock_sequences(next_sequences)
+                docked_sequences.update(next_sequences)
+                not_docked_sequences.difference_update(next_sequences)
 
                 # Score them
                 new_scores = self._score_batch(docked_dirs=docked_dirs)
@@ -577,8 +577,8 @@ class BoPep:
                     logging.info(f"Creating regular checkpoint (every {self.checkpoint_interval} iterations)")
                     self._save_checkpoint(global_iteration)
                 
-                if not not_docked_peptides:
-                    logging.info("All peptides docked, stopping early")
+                if not not_docked_sequences:
+                    logging.info("All sequences docked, stopping early")
                     break
                 
         logging.info(f"Optimization completed at global iteration {global_iteration}")
@@ -586,12 +586,12 @@ class BoPep:
         final_objectives = self.scores_to_objective.create_objective(
             scores, self.objective_function, **self.objective_function_kwargs
         )
-        final_new_objective_peptides = (
+        final_new_objective_sequences = (
             set(final_objectives.keys()) - all_logged_objectives
         )
         final_new_objectives = {
-            peptide: final_objectives[peptide]
-            for peptide in final_new_objective_peptides
+            sequence: final_objectives[sequence]
+            for sequence in final_new_objective_sequences
         }
         if final_new_objectives:
             self.logger.log_objectives(
@@ -615,7 +615,7 @@ class BoPep:
             "required_n_contact_residues", 5
         )
         receptor_chain = self.scoring_kwargs.get("receptor_chain", "A")
-        peptide_chain = self.scoring_kwargs.get("peptide_chain", "B")
+        sequence_chain = self.scoring_kwargs.get("sequence_chain", "B")
 
         if not scores_to_include:
             raise ValueError(
@@ -623,36 +623,36 @@ class BoPep:
             )
 
         if isinstance(self.binding_site_residue_indices, dict):
-            peptides_in_batch = []
+            sequences_in_batch = []
             for dir_path in docked_dirs:
                 dir_name = Path(dir_path).name
                 if '_' in dir_name:
-                    peptide = dir_name.split('_')[-1]
+                    sequence = dir_name.split('_')[-1]
                 else:
-                    peptide = dir_name
-                peptides_in_batch.append(peptide)
+                    sequence = dir_name
+                sequences_in_batch.append(sequence)
 
             new_scores = {}
-            for dir_path, peptide in zip(docked_dirs, peptides_in_batch):
-                if peptide in self.binding_site_residue_indices:
-                    peptide_binding_sites = self.binding_site_residue_indices[peptide]
+            for dir_path, sequence in zip(docked_dirs, sequences_in_batch):
+                if sequence in self.binding_site_residue_indices:
+                    sequence_binding_sites = self.binding_site_residue_indices[sequence]
                 else:
-                    logging.warning(f"No binding site defined for peptide {peptide}, skipping scoring")
+                    logging.warning(f"No binding site defined for sequence {sequence}, skipping scoring")
                     continue
                 
-                peptide_scores = self.scorer.score_batch(
+                sequence_scores = self.scorer.score_batch(
                     scores_to_include=scores_to_include,
                     inputs=[dir_path],
                     input_type="colab_dir",
-                    binding_site_residue_indices=peptide_binding_sites,
+                    binding_site_residue_indices=sequence_binding_sites,
                     n_jobs=1,
                     binding_site_distance_threshold=binding_site_distance_threshold,
                     required_n_contact_residues=required_n_contact_residues,
                     template_structures=self.template_structures,
                     receptor_chain=receptor_chain,
-                    peptide_chain=peptide_chain,
+                    sequence_chain=sequence_chain,
                 )
-                new_scores.update(peptide_scores)
+                new_scores.update(sequence_scores)
         else:
             new_scores = self.scorer.score_batch(
                 scores_to_include=scores_to_include,
@@ -664,7 +664,7 @@ class BoPep:
                 required_n_contact_residues=required_n_contact_residues,
                 template_structures=self.template_structures,
                 receptor_chain=receptor_chain,
-                peptide_chain=peptide_chain,
+                sequence_chain=sequence_chain,
             )
 
         return new_scores
@@ -682,14 +682,14 @@ class BoPep:
             if network_type in ["bilstm", "bigru"]:
                 if emb.ndim != 2:
                     raise ValueError(
-                        f"For {network_type}, each peptide embedding must be 2D. "
-                        f"Peptide '{pep}' has shape {emb.shape}."
+                        f"For {network_type}, each sequence embedding must be 2D. "
+                        f"Sequence '{pep}' has shape {emb.shape}."
                     )
             elif network_type == "mlp":
                 if emb.ndim != 1:
                     raise ValueError(
-                        f"For mlp, each peptide embedding must be 1D. "
-                        f"Peptide '{pep}' has shape {emb.shape}."
+                        f"For mlp, each sequence embedding must be 1D. "
+                        f"Sequence '{pep}' has shape {emb.shape}."
                     )
 
     def _print_top_performers(self, objectives: dict, top_n: int = 10):
@@ -701,22 +701,22 @@ class BoPep:
         if isinstance(sample_obj, dict):
             # Multi-objective case: show top performers for each objective
             obj_names = list(sample_obj.keys())
-            logging.info(f"Top {top_n} peptides (multiobjective):")
+            logging.info(f"Top {top_n} sequences (multiobjective):")
             
             for obj_name in obj_names:
                 logging.info(f"\n--- {obj_name} ---")
-                sorted_peptides = sorted(objectives.items(), 
+                sorted_sequences = sorted(objectives.items(), 
                                        key=lambda x: x[1][obj_name], reverse=True)[:top_n]
-                logging.info(f"{'Peptide':<20} | {obj_name:<15}")
+                logging.info(f"{'Sequence':<20} | {obj_name:<15}")
                 logging.info("-" * 40)
-                for peptide, obj_dict in sorted_peptides:
-                    logging.info(f"{peptide:<20} | {obj_dict[obj_name]:<15.4f}")
+                for sequence, obj_dict in sorted_sequences:
+                    logging.info(f"{sequence:<20} | {obj_dict[obj_name]:<15.4f}")
         else:
             # Single objective case (original)
-            sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:top_n]
-            logging.info(f"Top {top_n} peptides:")
-            logging.info(f"{'Peptide':<20} | {'Objective':<10} ")
+            sorted_sequences = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            logging.info(f"Top {top_n} sequences:")
+            logging.info(f"{'Sequence':<20} | {'Objective':<10} ")
             logging.info("-" * 60)
-            for peptide, obj_value in sorted_peptides:
-                logging.info(f"{peptide:<20} | {obj_value:<10.4f} ")
+            for sequence, obj_value in sorted_sequences:
+                logging.info(f"{sequence:<20} | {obj_value:<10.4f} ")
 

@@ -4,7 +4,7 @@ from bopep.scoring.monomer_scorer import MonomerScorer as MonomerScorer
 from bopep.folding.alphafold_monomer import AlphaFoldMonomer as AlphaFoldMonomer
 from bopep.embedding.embedder import Embedder as Embedder
 from bopep.docking.docker import Docker as Docker
-from bopep.scoring.is_peptide_in_binding_site import get_binding_site as get_binding_site
+from bopep.scoring.is_in_binding_site import get_binding_site as get_binding_site
 from bopep.scoring.scores_to_objective import bopep_objective_v0, bopep_objective_v1
 from bopep.design.borf import Borf as Borf
 from bopep.structure.parser import StructureParser as StructureParser, parse_structure as parse_structure

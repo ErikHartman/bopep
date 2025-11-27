@@ -45,12 +45,12 @@ class BaseDockingModel(ABC):
         os.makedirs(self.processed_output_dir, exist_ok=True)
     
     @abstractmethod
-    def dock(self, peptide_sequences: List[str], target_structure: str, 
+    def dock(self, sequences: List[str], target_structure: str, 
              target_sequence: str, target_name: str) -> List[str]:
 
         pass
     
-    def _dock_with_common_logic(self, peptide_sequences: List[str], target_structure: str, 
+    def _dock_with_common_logic(self, sequences: List[str], target_structure: str, 
                                target_sequence: str, target_name: str) -> List[str]:
         """
         Common docking logic that can be reused by subclasses.
@@ -62,19 +62,19 @@ class BaseDockingModel(ABC):
         4. Processing raw output to standardized format
         """
         method_name = getattr(self, 'method_name', 'unknown')
-        logging.info(f"Starting {method_name} docking for {len(peptide_sequences)} sequences...")
+        logging.info(f"Starting {method_name} docking for {len(sequences)} sequences...")
         
         # Check for existing results
         previously_docked_dirs = []
         sequences_to_dock = []
         
-        for peptide in peptide_sequences:
-            exists, processed_dir = self.check_existing_results(peptide, target_name)
+        for sequence in sequences:
+            exists, processed_dir = self.check_existing_results(sequence, target_name)
             if exists and not self.overwrite_results:
                 previously_docked_dirs.append(processed_dir)
-                logging.info(f"Found existing results for {peptide}, skipping docking...")
+                logging.info(f"Found existing results for {sequence}, skipping docking...")
             else:
-                sequences_to_dock.append(peptide)
+                sequences_to_dock.append(sequence)
         
         if not sequences_to_dock:
             logging.info("All sequences already docked. Returning existing results.")
@@ -90,9 +90,9 @@ class BaseDockingModel(ABC):
             raw_docked_dirs = []
             # Use the first GPU for sequential processing
             gpu_id = self.gpu_ids[0] if self.gpu_ids else "0"
-            for i, peptide in enumerate(sequences_to_dock, 1):
-                print(f"Docking progress: {i}/{len(sequences_to_dock)} - {peptide}")
-                raw_dir = self._dock_single_peptide(peptide, target_structure, 
+            for i, sequence in enumerate(sequences_to_dock, 1):
+                print(f"Docking progress: {i}/{len(sequences_to_dock)} - {sequence}")
+                raw_dir = self._dock_single_sequence(sequence, target_structure, 
                                                   target_sequence, target_name, gpu_id)
                 raw_docked_dirs.append(raw_dir)
         
@@ -101,20 +101,20 @@ class BaseDockingModel(ABC):
         print(f"Processing {len(raw_docked_dirs)} docked structures...")
         
         if len(self.gpu_ids) > 1 and len(sequences_to_dock) > 1:
-            # Parallel processing case: raw_docked_dirs contains (peptide, raw_dir) tuples
-            for i, (peptide, raw_dir) in enumerate(raw_docked_dirs, 1):
+            # Parallel processing case: raw_docked_dirs contains (sequence, raw_dir) tuples
+            for i, (sequence, raw_dir) in enumerate(raw_docked_dirs, 1):
                 if raw_dir and os.path.exists(raw_dir):
-                    print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {peptide}")
-                    processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
+                    print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {sequence}")
+                    processed_dir = self.process_raw_output(raw_dir, sequence, target_name)
                     processed_dirs.append(processed_dir)
                     # Clean up raw output if save_raw is False
                     self._cleanup_raw_output(raw_dir)
         else:
             # Sequential processing case: raw_docked_dirs contains just raw directories
-            for i, (raw_dir, peptide) in enumerate(zip(raw_docked_dirs, sequences_to_dock), 1):
+            for i, (raw_dir, sequence) in enumerate(zip(raw_docked_dirs, sequences_to_dock), 1):
                 if raw_dir and os.path.exists(raw_dir):
-                    print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {peptide}")
-                    processed_dir = self.process_raw_output(raw_dir, peptide, target_name)
+                    print(f"Processing progress: {i}/{len(raw_docked_dirs)} - {sequence}")
+                    processed_dir = self.process_raw_output(raw_dir, sequence, target_name)
                     processed_dirs.append(processed_dir)
                     # Clean up raw output if save_raw is False
                     self._cleanup_raw_output(raw_dir)
@@ -128,12 +128,12 @@ class BaseDockingModel(ABC):
         return all_processed_dirs
         
     @abstractmethod
-    def _dock_single_peptide(self, peptide_sequence: str, target_structure: str,
+    def _dock_single_sequence(self, sequence_sequence: str, target_structure: str,
                            target_sequence: str, target_name: str, gpu_id: str = "0") -> str:
 
         pass
     
-    def _dock_parallel(self, peptide_sequences: List[str], target_structure: str,
+    def _dock_parallel(self, sequences: List[str], target_structure: str,
                       target_sequence: str, target_name: str) -> List[str]:
         """
         Common parallel docking logic for multiple GPUs.
@@ -145,11 +145,11 @@ class BaseDockingModel(ABC):
         
         # Group sequences by GPU
         sequences_by_gpu = [[] for _ in range(len(self.gpu_ids))]
-        for i, peptide in enumerate(peptide_sequences):
+        for i, sequence in enumerate(sequences):
             gpu_index = i % len(self.gpu_ids)
-            sequences_by_gpu[gpu_index].append(peptide)
+            sequences_by_gpu[gpu_index].append(sequence)
         
-        # Log peptide distribution across GPUs
+        # Log sequence distribution across GPUs
         for gpu_index, gpu_sequences in enumerate(sequences_by_gpu):
             if gpu_sequences:
                 print(f"GPU {self.gpu_ids[gpu_index]}: {len(gpu_sequences)} sequences")
@@ -186,7 +186,7 @@ class BaseDockingModel(ABC):
         with context.Pool(processes=len(process_args)) as pool:
             all_docked_results = pool.starmap(self._dock_sequences_for_gpu, process_args)
         
-        # Flatten the list of lists - each result is now (peptide, raw_dir) tuple
+        # Flatten the list of lists - each result is now (sequence, raw_dir) tuple
         flattened_results = [result for results in all_docked_results for result in results]
         print(f"Parallel docking complete! Processed {len(flattened_results)} sequences.")
         return flattened_results
@@ -204,36 +204,36 @@ class BaseDockingModel(ABC):
         Process sequences on a specific GPU.
         
         Returns:
-            List of (peptide_sequence, raw_dir_path) tuples
+            List of (sequence_sequence, raw_dir_path) tuples
         """
         pass
     
-    def _create_raw_peptide_dir(self, target_name: str, peptide_sequence: str) -> str:
+    def _create_raw_sequence_dir(self, target_name: str, sequence_sequence: str) -> str:
         """
         Create standardized directory name for raw output.
         
         Format: TARGETNAME_PEPTIDESEQ
         """
-        peptide_dir_name = f"{target_name}_{peptide_sequence}"
-        peptide_dir_path = os.path.join(self.raw_output_dir, peptide_dir_name)
-        os.makedirs(peptide_dir_path, exist_ok=True)
-        return peptide_dir_path
+        sequence_dir_name = f"{target_name}_{sequence_sequence}"
+        sequence_dir_path = os.path.join(self.raw_output_dir, sequence_dir_name)
+        os.makedirs(sequence_dir_path, exist_ok=True)
+        return sequence_dir_path
     
     @abstractmethod
-    def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
+    def process_raw_output(self, raw_sequence_dir: str, sequence_sequence: str, 
                           target_name: str) -> str:
         pass
     
-    def _create_processed_peptide_dir(self, target_name: str, peptide_sequence: str) -> str:
+    def _create_processed_sequence_dir(self, target_name: str, sequence_sequence: str) -> str:
         """
         Create standardized directory name for processed output.
         
         Format: TARGETNAME_PEPTIDESEQ
         """
-        peptide_dir_name = f"{target_name}_{peptide_sequence}"
-        peptide_dir_path = os.path.join(self.processed_output_dir, peptide_dir_name)
-        os.makedirs(peptide_dir_path, exist_ok=True)
-        return peptide_dir_path
+        sequence_dir_name = f"{target_name}_{sequence_sequence}"
+        sequence_dir_path = os.path.join(self.processed_output_dir, sequence_dir_name)
+        os.makedirs(sequence_dir_path, exist_ok=True)
+        return sequence_dir_path
     
     def _save_metrics_json(self, metrics: Dict[str, Any], output_dir: str, prefix: str = "metrics") -> None:
         """
@@ -265,9 +265,9 @@ class BaseDockingModel(ABC):
         method_name = getattr(self, 'method_name', 'model')
         return f"{method_name}_model_{model_index}{extension}"
     
-    def check_existing_results(self, peptide_sequence: str, target_name: str) -> tuple:
-        peptide_dir_name = f"{target_name}_{peptide_sequence}"
-        processed_dir = os.path.join(self.processed_output_dir, peptide_dir_name)
+    def check_existing_results(self, sequence_sequence: str, target_name: str) -> tuple:
+        sequence_dir_name = f"{target_name}_{sequence_sequence}"
+        processed_dir = os.path.join(self.processed_output_dir, sequence_dir_name)
         
         if os.path.exists(processed_dir):
             # Check for method-specific metrics file

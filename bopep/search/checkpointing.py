@@ -47,8 +47,8 @@ def _save_checkpoint(self, global_iteration: int, force_embeddings: bool = False
         "hpo_kwargs": self.hpo_kwargs,
         "objective_function_kwargs": self.objective_function_kwargs,
         "scoring_kwargs": self.scoring_kwargs,
-        "num_docked_peptides": len(self.docked_peptides),
-        "num_remaining_peptides": len(self.not_docked_peptides),
+        "num_docked_sequences": len(self.docked_sequences),
+        "num_remaining_sequences": len(self.not_docked_sequences),
     }
 
     if self.checkpoint_path:
@@ -163,9 +163,9 @@ def _rebuild_logs_from_csvs(self, checkpoint_path: Optional[Path] = None):
     with open(scores_path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            pep = row["peptide"]
+            pep = row["sequence"]
             score_cols = [c for c in reader.fieldnames
-                            if c not in ("timestamp", "iteration", "peptide", "phase")]
+                            if c not in ("timestamp", "iteration", "sequence", "phase")]
             sc = {}
             for col in score_cols:
                 val = row[col]
@@ -182,10 +182,10 @@ def _rebuild_logs_from_csvs(self, checkpoint_path: Optional[Path] = None):
     with open(obj_path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            self.all_logged_objectives.add(row["peptide"])
+            self.all_logged_objectives.add(row["sequence"])
 
-    self.docked_peptides = set(self.scores.keys())
-    self.not_docked_peptides = set(self.embeddings.keys()) - self.docked_peptides
+    self.docked_sequences = set(self.scores.keys())
+    self.not_docked_sequences = set(self.embeddings.keys()) - self.docked_sequences
 
 
 def _validate_checkpoint(checkpoint_path: Path):

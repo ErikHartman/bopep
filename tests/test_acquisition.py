@@ -18,7 +18,7 @@ class TestAcquisitionFunction:
         self.acq = AcquisitionFunction(rng_seed=42)
         
         # Single-objective test data
-        self.peptides_single = ["PEPTIDE1", "PEPTIDE2", "PEPTIDE3"]
+        self.sequences_single = ["PEPTIDE1", "PEPTIDE2", "PEPTIDE3"]
         self.means_single = np.array([1.0, 2.0, 3.0])
         self.stds_single = np.array([0.1, 0.2, 0.3])
         
@@ -44,13 +44,13 @@ class TestSingleObjectiveFunctions(TestAcquisitionFunction):
     def test_expected_improvement_maximize(self):
         """Test expected improvement with maximize=True."""
         result = self.acq.expected_improvement(
-            self.peptides_single, self.means_single, self.stds_single, maximize=True
+            self.sequences_single, self.means_single, self.stds_single, maximize=True
         )
         
         # Check return type and structure
         assert isinstance(result, dict)
-        assert len(result) == len(self.peptides_single)
-        assert all(p in result for p in self.peptides_single)
+        assert len(result) == len(self.sequences_single)
+        assert all(p in result for p in self.sequences_single)
         assert all(isinstance(v, float) for v in result.values())
         
         # EI values should be non-negative
@@ -63,12 +63,12 @@ class TestSingleObjectiveFunctions(TestAcquisitionFunction):
     def test_expected_improvement_minimize(self):
         """Test expected improvement with maximize=False."""
         result = self.acq.expected_improvement(
-            self.peptides_single, self.means_single, self.stds_single, maximize=False
+            self.sequences_single, self.means_single, self.stds_single, maximize=False
         )
         
         # Check return type and structure
         assert isinstance(result, dict)
-        assert len(result) == len(self.peptides_single)
+        assert len(result) == len(self.sequences_single)
         assert all(isinstance(v, float) for v in result.values())
         
         # EI values should be non-negative
@@ -81,41 +81,41 @@ class TestSingleObjectiveFunctions(TestAcquisitionFunction):
         """Test upper confidence bound with maximize=True."""
         kappa = 1.96
         result = self.acq.upper_confidence_bound(
-            self.peptides_single, self.means_single, self.stds_single, 
+            self.sequences_single, self.means_single, self.stds_single, 
             kappa=kappa, maximize=True
         )
         
         # Check return type and structure
         assert isinstance(result, dict)
-        assert len(result) == len(self.peptides_single)
+        assert len(result) == len(self.sequences_single)
         
         # For maximize=True, UCB should be mean + kappa * std
-        for i, peptide in enumerate(self.peptides_single):
+        for i, sequence in enumerate(self.sequences_single):
             expected = self.means_single[i] + kappa * self.stds_single[i]
-            assert abs(result[peptide] - expected) < 1e-10
+            assert abs(result[sequence] - expected) < 1e-10
     
     def test_upper_confidence_bound_minimize(self):
         """Test upper confidence bound with maximize=False."""
         kappa = 1.96
         result = self.acq.upper_confidence_bound(
-            self.peptides_single, self.means_single, self.stds_single,
+            self.sequences_single, self.means_single, self.stds_single,
             kappa=kappa, maximize=False
         )
         
         # For maximize=False, UCB should be mean - kappa * std (lower confidence bound)
-        for i, peptide in enumerate(self.peptides_single):
+        for i, sequence in enumerate(self.sequences_single):
             expected = self.means_single[i] - kappa * self.stds_single[i]
-            assert abs(result[peptide] - expected) < 1e-10
+            assert abs(result[sequence] - expected) < 1e-10
     
     def test_probability_of_improvement_maximize(self):
         """Test probability of improvement with maximize=True."""
         result = self.acq.probability_of_improvement(
-            self.peptides_single, self.means_single, self.stds_single, maximize=True
+            self.sequences_single, self.means_single, self.stds_single, maximize=True
         )
         
         # Check return type and structure
         assert isinstance(result, dict)
-        assert len(result) == len(self.peptides_single)
+        assert len(result) == len(self.sequences_single)
         
         # PI values should be between 0 and 1
         assert all(0.0 <= v <= 1.0 for v in result.values())
@@ -123,39 +123,39 @@ class TestSingleObjectiveFunctions(TestAcquisitionFunction):
     def test_probability_of_improvement_minimize(self):
         """Test probability of improvement with maximize=False.""" 
         result = self.acq.probability_of_improvement(
-            self.peptides_single, self.means_single, self.stds_single, maximize=False
+            self.sequences_single, self.means_single, self.stds_single, maximize=False
         )
         
         # Check return type and structure
         assert isinstance(result, dict)
-        assert len(result) == len(self.peptides_single)
+        assert len(result) == len(self.sequences_single)
         
         # PI values should be between 0 and 1
         assert all(0.0 <= v <= 1.0 for v in result.values())
     
     def test_standard_deviation(self):
         """Test standard deviation function."""
-        result = self.acq.standard_deviation(self.peptides_single, self.stds_single)
+        result = self.acq.standard_deviation(self.sequences_single, self.stds_single)
         
         # Check return type and structure
         assert isinstance(result, dict)
-        assert len(result) == len(self.peptides_single)
+        assert len(result) == len(self.sequences_single)
         
         # Values should match input standard deviations
-        for i, peptide in enumerate(self.peptides_single):
-            assert abs(result[peptide] - self.stds_single[i]) < 1e-10
+        for i, sequence in enumerate(self.sequences_single):
+            assert abs(result[sequence] - self.stds_single[i]) < 1e-10
     
     def test_mean(self):
         """Test mean function."""
-        result = self.acq.mean(self.peptides_single, self.means_single)
+        result = self.acq.mean(self.sequences_single, self.means_single)
         
         # Check return type and structure
         assert isinstance(result, dict)
-        assert len(result) == len(self.peptides_single)
+        assert len(result) == len(self.sequences_single)
         
         # Values should match input means
-        for i, peptide in enumerate(self.peptides_single):
-            assert abs(result[peptide] - self.means_single[i]) < 1e-10
+        for i, sequence in enumerate(self.sequences_single):
+            assert abs(result[sequence] - self.means_single[i]) < 1e-10
 
 
 class TestMultiObjectiveFunctions(TestAcquisitionFunction):
@@ -318,13 +318,13 @@ class TestEdgeCasesAndErrors(TestAcquisitionFunction):
         
         # Should not crash and should return valid results
         result_ei = self.acq.expected_improvement(
-            self.peptides_single, self.means_single, zero_stds
+            self.sequences_single, self.means_single, zero_stds
         )
         assert isinstance(result_ei, dict)
         assert all(v >= 0.0 for v in result_ei.values())
         
         result_pi = self.acq.probability_of_improvement(
-            self.peptides_single, self.means_single, zero_stds
+            self.sequences_single, self.means_single, zero_stds
         )
         assert isinstance(result_pi, dict)
         assert all(0.0 <= v <= 1.0 for v in result_pi.values())
@@ -335,14 +335,14 @@ class TestEdgeCasesAndErrors(TestAcquisitionFunction):
         
         # Should not crash and should return valid results
         result_ei = self.acq.expected_improvement(
-            self.peptides_single, self.means_single, small_stds
+            self.sequences_single, self.means_single, small_stds
         )
         assert isinstance(result_ei, dict)
         assert all(v >= 0.0 for v in result_ei.values())
 
     
-    def test_single_peptide(self):
-        """Test with single peptide input."""
+    def test_single_sequence(self):
+        """Test with single sequence input."""
         single_predictions = {"PEPTIDE1": (1.0, 0.1)}
         
         result = self.acq.compute_acquisition(
@@ -355,15 +355,15 @@ class TestEdgeCasesAndErrors(TestAcquisitionFunction):
     def test_negative_kappa_ucb(self):
         """Test UCB with negative kappa value."""
         result = self.acq.upper_confidence_bound(
-            self.peptides_single, self.means_single, self.stds_single,
+            self.sequences_single, self.means_single, self.stds_single,
             kappa=-1.0, maximize=True
         )
         
         # Should still work and give mean - |kappa| * std for maximize=True
         assert isinstance(result, dict)
-        for i, peptide in enumerate(self.peptides_single):
+        for i, sequence in enumerate(self.sequences_single):
             expected = self.means_single[i] - 1.0 * self.stds_single[i]
-            assert abs(result[peptide] - expected) < 1e-10
+            assert abs(result[sequence] - expected) < 1e-10
     
     def test_multi_objective_missing_directions(self):
         """Test multi-objective functions without objective_directions."""
@@ -383,7 +383,7 @@ class TestEdgeCasesAndErrors(TestAcquisitionFunction):
         
         # Should not crash with extreme values
         result_ei = self.acq.expected_improvement(
-            self.peptides_single, extreme_means, extreme_stds
+            self.sequences_single, extreme_means, extreme_stds
         )
         assert isinstance(result_ei, dict)
         assert all(not np.isnan(v) for v in result_ei.values())
@@ -396,12 +396,12 @@ class TestEdgeCasesAndErrors(TestAcquisitionFunction):
         
         # Run EI to update best_so_far_ei
         self.acq.expected_improvement(
-            self.peptides_single, self.means_single, self.stds_single
+            self.sequences_single, self.means_single, self.stds_single
         )
         
         # Run PI to update best_so_far_pi
         self.acq.probability_of_improvement(
-            self.peptides_single, self.means_single, self.stds_single
+            self.sequences_single, self.means_single, self.stds_single
         )
         
         # Best values should have been updated

@@ -19,14 +19,14 @@ def rmsd(coords1 : np.ndarray, coords2 : np.ndarray) -> float:
     return np.sqrt(np.mean(np.sum((coords1 - coords2) ** 2, axis=1)))
 
 def align_and_compute_rmsd(
-    ref_structure_file : str, structure_file : str, peptide_sequence :str,
+    ref_structure_file : str, structure_file : str, sequence :str,
 ):
     """
     Given multiple structure files (PDB/CIF), align each structure's receptor (chain A by default)
-    and compute a distance matrix of peptide RMSDs between all pairs.
+    and compute a distance matrix of sequence RMSDs between all pairs.
 
     Each structure's receptor is aligned to the first structure's receptor, then
-    peptide RMSD is computed between all pairs of aligned structures.
+    sequence RMSD is computed between all pairs of aligned structures.
     """
     try:
         ref_chain_seqs = get_chain_sequences(ref_structure_file)
@@ -35,24 +35,24 @@ def align_and_compute_rmsd(
             raise ValueError("Reference structure file must have exactly two chains.")
         ref_keys = list(ref_chain_seqs.keys())
 
-        # Assign peptide/receptor chains by sequence match
+        # Assign sequence/receptor chains by sequence match
         
         pairs = [
             (ref_keys[0], ref_keys[1]),
             (ref_keys[1], ref_keys[0])
         ]
-        for pep_id, rec_id in pairs:
-            if ref_chain_seqs.get(pep_id, "") == peptide_sequence:
-                ref_pep_chain_id = pep_id
+        for seq_id, rec_id in pairs:
+            if ref_chain_seqs.get(seq_id, "") == sequence:
+                ref_seq_chain_id = seq_id
                 ref_rec_chain_id, ref_rec_seq = rec_id, ref_chain_seqs[rec_id]
                 break
         else:
-            raise ValueError("The peptide sequence found in reference chains does not match the new peptide sequence.")
+            raise ValueError("The sequence sequence found in reference chains does not match the new sequence sequence.")
 
         ref_rec_coords = np.array(get_chain_coordinates(ref_structure_file, ref_rec_chain_id))
-        ref_pep_coords = np.array(get_chain_coordinates(ref_structure_file, ref_pep_chain_id))
+        ref_seq_coords = np.array(get_chain_coordinates(ref_structure_file, ref_seq_chain_id))
         new_rec_coords = np.array(get_chain_coordinates(structure_file, "A"))
-        new_pep_coords = np.array(get_chain_coordinates(structure_file, "B"))
+        new_seq_coords = np.array(get_chain_coordinates(structure_file, "B"))
         new_rec_seq = new_chain_seqs.get("A", "")
 
         ref_rec_coords_trunc, new_rec_coords_trunc = match_and_truncate(ref_rec_seq, ref_rec_coords, new_rec_seq, new_rec_coords)
@@ -60,20 +60,20 @@ def align_and_compute_rmsd(
         sup.set(ref_rec_coords_trunc, new_rec_coords_trunc)
         sup.run()
         rot, tran = sup.get_rotran()
-        new_pep_coords_aligned = np.dot(new_pep_coords, rot) + tran
-        return rmsd(ref_pep_coords, new_pep_coords_aligned)
+        new_seq_coords_aligned = np.dot(new_seq_coords, rot) + tran
+        return rmsd(ref_seq_coords, new_seq_coords_aligned)
     
     except Exception as e:
         print(f"Warning: Template RMSD calculation failed: {e}")
         print(f"  Reference file: {ref_structure_file}")
         print(f"  Target file: {structure_file}")
-        print(f"  Peptide sequence: {peptide_sequence}")
+        print(f"  Peptide sequence: {sequence}")
     return None
 
 
-def compute_intra_model_rmsd(processed_dir: str, peptide_sequence: str):
+def compute_intra_model_rmsd(processed_dir: str, sequence: str):
     """
-    Compute intra-model RMSD metrics for peptide chains within and across docking methods.
+    Compute intra-model RMSD metrics for sequence chains within and across docking methods.
     """
     results = {}
 
@@ -82,17 +82,17 @@ def compute_intra_model_rmsd(processed_dir: str, peptide_sequence: str):
     boltz_models = sorted(glob.glob(os.path.join(processed_dir, "boltz_model_*.pdb")))
 
     def _prep_ref_mapping(pdb_path: str, pep_seq: str):
-        """Return (ref_pep_chain_id, ref_rec_chain_id) for a file, or None if not found."""
+        """Return (ref_seq_chain_id, ref_rec_chain_id) for a file, or None if not found."""
         seqs = get_chain_sequences(pdb_path)  # Now uses caching automatically
         keys = list(seqs.keys())
         if len(keys) != 2:
             return None
-        # Try to find which chain matches the peptide
+        # Try to find which chain matches the sequence
         if seqs.get(keys[0], "") == pep_seq:
             return keys[0], keys[1]
         if seqs.get(keys[1], "") == pep_seq:
             return keys[1], keys[0]
-        # Fallback to common convention (B is peptide)
+        # Fallback to common convention (B is sequence)
         if seqs.get("B", "") == pep_seq:
             return "B", "A"
         return None
@@ -101,11 +101,11 @@ def compute_intra_model_rmsd(processed_dir: str, peptide_sequence: str):
         if len(model_files) < 2:
             return None
 
-        # Choose a reference model that we can map (peptide/receptor chain IDs)
+        # Choose a reference model that we can map (sequence/receptor chain IDs)
         ref_file = None
         ref_mapping = None
         for f in model_files:
-            m = _prep_ref_mapping(f, peptide_sequence)
+            m = _prep_ref_mapping(f, sequence)
             if m is not None:
                 ref_file = f
                 ref_mapping = m
@@ -114,14 +114,14 @@ def compute_intra_model_rmsd(processed_dir: str, peptide_sequence: str):
             return None
 
         # Prepare reference receptor sequence and coordinates
-        ref_pep_id, ref_rec_id = ref_mapping
+        ref_seq_id, ref_rec_id = ref_mapping
         ref_seqs = get_chain_sequences(ref_file)  # Uses caching
         ref_rec_seq = ref_seqs.get(ref_rec_id, "")
         ref_rec_coords = np.array(get_chain_coordinates(ref_file, ref_rec_id))  # Uses caching
 
         # For each model, align its receptor (assumed A) to the reference receptor once,
-        # then store its peptide coords transformed into the reference frame
-        aligned_pep_coords = {}
+        # then store its sequence coords transformed into the reference frame
+        aligned_seq_coords = {}
         for f in model_files:
             try:
                 comp_rec_coords = np.array(get_chain_coordinates(f, "A"))  # Uses caching
@@ -137,22 +137,22 @@ def compute_intra_model_rmsd(processed_dir: str, peptide_sequence: str):
                 sup.set(ref_rec_coords_trunc, comp_rec_coords_trunc)
                 sup.run()
                 rot, tran = sup.get_rotran()
-                aligned_pep_coords[f] = np.dot(comp_pep_coords, rot) + tran
+                aligned_seq_coords[f] = np.dot(comp_pep_coords, rot) + tran
             except Exception:
                 # Skip files that fail alignment
                 continue
 
         # Need at least two successfully aligned models
-        if len(aligned_pep_coords) < 2:
+        if len(aligned_seq_coords) < 2:
             return None
 
-        # Compute pairwise RMSDs among pre-aligned peptide coordinates
-        files = list(aligned_pep_coords.keys())
+        # Compute pairwise RMSDs among pre-aligned sequence coordinates
+        files = list(aligned_seq_coords.keys())
         rmsd_values = []
         for i in range(len(files)):
             for j in range(i + 1, len(files)):
                 try:
-                    rmsd_values.append(rmsd(aligned_pep_coords[files[i]], aligned_pep_coords[files[j]]))
+                    rmsd_values.append(rmsd(aligned_seq_coords[files[i]], aligned_seq_coords[files[j]]))
                 except Exception:
                     continue
 
@@ -180,6 +180,6 @@ if __name__ == "__main__":
 
     print(seq_dict["B"], seq_dict["A"])
     
-    distance_matrix = align_and_compute_rmsd(ref_structure_file=structure_file_path, structure_file=structure_file_path, peptide_sequence=seq_dict["B"])
+    distance_matrix = align_and_compute_rmsd(ref_structure_file=structure_file_path, structure_file=structure_file_path, sequence=seq_dict["B"])
     print(f"Distance matrix for {structure_file_path}:")
     print(distance_matrix)

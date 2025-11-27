@@ -7,16 +7,16 @@ import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from bopep.genetic_algorithm.mutate import PeptideMutator
+from bopep.genetic_algorithm.mutate import Mutator
 from bopep.genetic_algorithm.generate import BoGA
 
 
-class TestPeptideMutator:
-    """Test the PeptideMutator class"""
+class TestMutator:
+    """Test the Mutator class"""
 
     def test_init_default(self):
         """Test mutator initialization with default parameters"""
-        mutator = PeptideMutator()
+        mutator = Mutator()
         assert mutator.min_sequence_length == 6
         assert mutator.max_sequence_length == 40
         assert mutator.mutation_rate == 0.01
@@ -25,7 +25,7 @@ class TestPeptideMutator:
 
     def test_init_custom(self):
         """Test mutator initialization with custom parameters"""
-        mutator = PeptideMutator(
+        mutator = Mutator(
             min_sequence_length=8,
             max_sequence_length=20,
             mutation_rate=0.05,
@@ -40,7 +40,7 @@ class TestPeptideMutator:
 
     def test_generate_random_sequence(self):
         """Test random sequence generation"""
-        mutator = PeptideMutator(min_sequence_length=5, max_sequence_length=10)
+        mutator = Mutator(min_sequence_length=5, max_sequence_length=10)
         
         sequence = mutator.generate_random_sequence()
         
@@ -50,7 +50,7 @@ class TestPeptideMutator:
 
     def test_mutate_sequence_uniform_mode(self):
         """Test sequence mutation with uniform substitutions"""
-        mutator = PeptideMutator(
+        mutator = Mutator(
             min_sequence_length=5,
             max_sequence_length=15,
             mutation_rate=0.5  # High rate to ensure mutation
@@ -69,7 +69,7 @@ class TestPeptideMutator:
 
     def test_mutate_sequence_length_constraints(self):
         """Test that mutations respect length constraints"""
-        mutator = PeptideMutator(
+        mutator = Mutator(
             min_sequence_length=8,
             max_sequence_length=10,
             mutation_rate=1.0  # High rate to force many mutations
@@ -84,7 +84,7 @@ class TestPeptideMutator:
 
     def test_mutate_sequence_avoids_evaluated(self):
         """Test that mutation avoids previously evaluated sequences"""
-        mutator = PeptideMutator(
+        mutator = Mutator(
             min_sequence_length=5,
             max_sequence_length=8,
             mutation_rate=0.1
@@ -100,7 +100,7 @@ class TestPeptideMutator:
 
     def test_mutate_pool(self):
         """Test mutation of a pool of sequences"""
-        mutator = PeptideMutator(
+        mutator = Mutator(
             min_sequence_length=5,
             max_sequence_length=10,
             mutation_rate=0.2
@@ -119,7 +119,7 @@ class TestPeptideMutator:
 
     def test_mutate_pool_large_evaluated_set(self):
         """Test mutation pool with large evaluated set"""
-        mutator = PeptideMutator(
+        mutator = Mutator(
             min_sequence_length=5,
             max_sequence_length=6,
             mutation_rate=0.1
@@ -397,8 +397,8 @@ class TestBoGA:
         sequences = boga._prepare_initial_population()
         assert len(sequences) == 20  # Current implementation returns all sequences when enough are provided
 
-    def test_embed_peptides(self, mock_dependencies, basic_surrogate_kwargs):
-        """Test that embedding peptides works properly (no longer uses caching)"""
+    def test_embed_sequences(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test that embedding sequences works properly (no longer uses caching)"""
         schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
@@ -427,8 +427,8 @@ class TestBoGA:
         mock_dependencies['embedder'].scale_embeddings.return_value = mock_scaled_embeddings
         mock_dependencies['embedder'].reduce_embeddings_pca.return_value = mock_reduced_embeddings
         
-        # Test embedding peptides
-        result = boga._embed_peptides(["ACDEFG", "HIJKLM"])
+        # Test embedding sequences
+        result = boga._embed_sequences(["ACDEFG", "HIJKLM"])
         assert "ACDEFG" in result
         assert "HIJKLM" in result
         
@@ -549,7 +549,7 @@ class TestBoGA:
         # Create mock log file
         log_dir = Path(temp_dir)
         scores_file = log_dir / "scores.csv"
-        scores_content = """peptide,rosetta_score,distance_score,iteration,phase,timestamp
+        scores_content = """sequence,rosetta_score,distance_score,iteration,phase,timestamp
 ACDEFG,-10.5,0.8,0,initial,2024-01-01
 HIKLMN,-8.2,0.6,1,phase1,2024-01-01
 """
@@ -595,7 +595,7 @@ HIKLMN,-8.2,0.6,1,phase1,2024-01-01
         # Create mock log file with iteration 5 as the last iteration
         log_dir = Path(temp_dir)
         scores_file = log_dir / "scores.csv"
-        scores_content = """peptide,rosetta_score,distance_score,iteration,phase,timestamp
+        scores_content = """sequence,rosetta_score,distance_score,iteration,phase,timestamp
 ACDEFG,-10.5,0.8,0,initial,2024-01-01
 HIKLMN,-8.2,0.6,5,phase1,2024-01-01
 """
@@ -617,7 +617,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         
         mock_dependencies['scores_to_obj'].create_objective.return_value = mock_objectives
         
-        def mock_embed_peptides(sequences):
+        def mock_embed_sequences(sequences):
             return {seq: np.random.randn(3) for seq in sequences}
         
         def mock_embed_generation(scored, candidates):
@@ -626,7 +626,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
             cand_emb = {seq: np.random.randn(3) for seq in candidates}
             return train_emb, cand_emb
             
-        boga._embed_peptides = mock_embed_peptides
+        boga._embed_sequences = mock_embed_sequences
         boga._embed_generation = mock_embed_generation
         mock_dependencies['surr_mgr'].train_with_validation_split.return_value = (0.1, {})
         mock_dependencies['surr_mgr'].predict.return_value = {"NEWSEQ": (0.6, 0.1)}
@@ -721,7 +721,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         mock_embeddings = {"ACDEFG": np.random.randn(5), "HIJKLM": np.random.randn(5)}
         
         # Mock external calls
-        mock_dependencies['docker'].dock_peptides.return_value = ["dir1", "dir2"]
+        mock_dependencies['docker'].dock_sequences.return_value = ["dir1", "dir2"]
         mock_dependencies['complex_scorer'].score_batch.return_value = mock_scores
         mock_dependencies['scores_to_obj'].create_objective.return_value = mock_objectives
         

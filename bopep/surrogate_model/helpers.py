@@ -26,7 +26,7 @@ class ObjectiveMixin:
     
     def _format_predictions(
         self, 
-        peptides: List[str], 
+        sequences: List[str], 
         mean_array: np.ndarray, 
         std_array: np.ndarray
     ) -> Dict[str, Union[Tuple[float, float], Dict[str, Tuple[float, float]]]]:
@@ -34,18 +34,18 @@ class ObjectiveMixin:
         predictions = {}
         
         if self._objective_names:
-            # Multi-objective: {peptide: {obj_name: (mean, std)}}
-            for i, pep in enumerate(peptides):
+            # Multi-objective: {sequence: {obj_name: (mean, std)}}
+            for i, pep in enumerate(sequences):
                 obj_predictions = {}
                 for j, obj_name in enumerate(self._objective_names):
                     obj_predictions[obj_name] = (float(mean_array[i, j]), float(std_array[i, j]))
                 predictions[pep] = obj_predictions
         else:
-            # Single objective: {peptide: (mean, std)}
+            # Single objective: {sequence: (mean, std)}
             mean_flat = mean_array.flatten() if mean_array.ndim > 1 else mean_array
             std_flat = std_array.flatten() if std_array.ndim > 1 else std_array
             
-            for i, pep in enumerate(peptides):
+            for i, pep in enumerate(sequences):
                 predictions[pep] = (float(mean_flat[i]), float(std_flat[i]))
         
         return predictions
@@ -62,11 +62,11 @@ class DictHandler:
           - X_torch is either (N, D) for MLP or (N, L, D) for LSTM
           - Y_torch is (N,) or (N, 1) for regression
         """
-        peptides = list(embedding_dict.keys())
+        sequences = list(embedding_dict.keys())
         # Stack up embeddings
         X_list = []
         Y_list = []
-        for p in peptides:
+        for p in sequences:
             if p in objective_dict:
                 X_list.append(embedding_dict[p])
                 Y_list.append(objective_dict[p])
@@ -80,18 +80,18 @@ class DictHandler:
         X_torch = torch.tensor(X, dtype=torch.float32)
         Y_torch = torch.tensor(Y, dtype=torch.float32).view(-1, 1)  # shape (N, 1)
 
-        return peptides, X_torch, Y_torch
+        return sequences, X_torch, Y_torch
 
     def prepare_predictions_dict(
-        self, peptides: list, mean_pred: np.ndarray, std_pred: np.ndarray
+        self, sequences: list, mean_pred: np.ndarray, std_pred: np.ndarray
     ) -> Dict[str, Tuple[float, float]]:
         """
         Convert arrays of mean and std back to a dictionary:
-            { peptide: (mean, std), ... }
+            { sequence: (mean, std), ... }
         """
         return {
             pep: (float(m), float(s))
-            for pep, m, s in zip(peptides, mean_pred, std_pred)
+            for pep, m, s in zip(sequences, mean_pred, std_pred)
         }
 
 
@@ -101,8 +101,8 @@ class VariableLengthDataset(Dataset):
     Each embedding can have shape (D,) for MLP or (L, D) for a variable-length embedding.
     
     Supported objective formats:
-    - Single objective: Dict[str, float] -> {peptide: score, peptide: score}
-    - Multi objective: Dict[str, Dict[str, float]] -> {peptide: {name: score, name: score}}
+    - Single objective: Dict[str, float] -> {sequence: score, sequence: score}
+    - Multi objective: Dict[str, Dict[str, float]] -> {sequence: {name: score, name: score}}
     """
 
     def __init__(
@@ -110,14 +110,14 @@ class VariableLengthDataset(Dataset):
         objective_dict: Dict[str, Union[float, Dict[str, float]]]
     ):
         super().__init__()
-        self.peptides = list(embedding_dict.keys())
+        self.sequences = list(embedding_dict.keys())
         self.embeddings = [
-            torch.tensor(embedding_dict[p], dtype=torch.float32) for p in self.peptides
+            torch.tensor(embedding_dict[p], dtype=torch.float32) for p in self.sequences
         ]
         
         # Handle different objective formats
         self.scores = []
-        for p in self.peptides:
+        for p in self.sequences:
             score = objective_dict[p]
             
             if isinstance(score, dict):
@@ -133,7 +133,7 @@ class VariableLengthDataset(Dataset):
                 self.scores.append(torch.tensor(score, dtype=torch.float32))
 
     def __len__(self):
-        return len(self.peptides)
+        return len(self.sequences)
 
     def __getitem__(self, idx):
         # Return (embedding_tensor, score_tensor)
@@ -205,9 +205,9 @@ class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
         Train using dictionaries of embeddings and scores, with optional validation set.
 
         Args:
-            embedding_dict: {peptide: embedding_array}
-            objective_dict: {peptide: score} for single-objective, 
-                            {peptide: {"obj1": (mean, std), "obj2": (mean, std)}} for multi-objective
+            embedding_dict: {sequence: embedding_array}
+            objective_dict: {sequence: score} for single-objective, 
+                            {sequence: {"obj1": (mean, std), "obj2": (mean, std)}} for multi-objective
             val_embedding_dict: Optional validation embeddings
             val_objective_dict: Optional validation scores (same format as objective_dict)
             epochs: Number of training epochs
@@ -423,7 +423,7 @@ class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
         """Predict for a dictionary of embeddings.
         
         Args:
-            embedding_dict: Dictionary mapping peptides to their embeddings
+            embedding_dict: Dictionary mapping sequences to their embeddings
             batch_size: Batch size for prediction
             device: Device to use for prediction
             uncertainty_mode: Which uncertainty component to use (for DeepEvidentialRegression)
@@ -436,11 +436,11 @@ class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
         if device is None:
             device = next(self.parameters()).device
             
-        # We'll gather peptides in the same order as the dataset
-        peptides = list(embedding_dict.keys())
+        # We'll gather sequences in the same order as the dataset
+        sequences = list(embedding_dict.keys())
 
         # Build a dataset without scores
-        dummy_scores = {p: 0.0 for p in peptides}
+        dummy_scores = {p: 0.0 for p in sequences}
         dataset = VariableLengthDataset(embedding_dict, dummy_scores)
         dataloader = DataLoader(
             dataset,
@@ -476,7 +476,7 @@ class BasePredictionModel(ObjectiveMixin, torch.nn.Module):
         mean_array = all_means.numpy()
         std_array = all_stds.numpy()
         
-        return self._format_predictions(peptides, mean_array, std_array)
+        return self._format_predictions(sequences, mean_array, std_array)
     
     def _calculate_loss(self, batch_x, batch_y, lengths, criterion):
         """

@@ -49,35 +49,35 @@ class BoltzDocker(BaseDockingModel):
         self.force = kwargs.get("force", True)
         self.threshold = kwargs.get("threshold", 2)
         
-    def dock(self, peptide_sequences: List[str], target_structure: str, 
+    def dock(self, sequences: List[str], target_structure: str, 
              target_sequence: str, target_name: str) -> List[str]:
         """
         Dock sequences using Boltz.
         
         Returns list of processed output directories.
         """
-        return self._dock_with_common_logic(peptide_sequences, target_structure, 
+        return self._dock_with_common_logic(sequences, target_structure, 
                                           target_sequence, target_name)
     
-    def _dock_single_peptide(self, peptide_sequence: str, target_structure: str,
+    def _dock_single_sequence(self, sequence_sequence: str, target_structure: str,
                             target_sequence: str, target_name: str, gpu_id: str = "0") -> str:
         """
-        Dock a single peptide using Boltz.
+        Dock a single sequence using Boltz.
         """
-        logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
+        logging.info(f"Docking sequence '{sequence_sequence}' on GPU {gpu_id}...")
         
-        raw_peptide_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
-        processed_peptide_dir = self._create_processed_peptide_dir(target_name, peptide_sequence)
+        raw_sequence_dir = self._create_raw_sequence_dir(target_name, sequence_sequence)
+        processed_sequence_dir = self._create_processed_sequence_dir(target_name, sequence_sequence)
         
-        yaml_path = self._create_yaml_config(peptide_sequence, target_sequence, 
-                                           target_name, raw_peptide_dir, target_structure)
+        yaml_path = self._create_yaml_config(sequence_sequence, target_sequence, 
+                                           target_name, raw_sequence_dir, target_structure)
 
-        self._run_boltz_prediction(yaml_path, raw_peptide_dir, gpu_id)
+        self._run_boltz_prediction(yaml_path, raw_sequence_dir, gpu_id)
     
-        self._process_boltz_output(raw_peptide_dir, processed_peptide_dir, 
-                                    peptide_sequence, target_name)
+        self._process_boltz_output(raw_sequence_dir, processed_sequence_dir, 
+                                    sequence_sequence, target_name)
         
-        return raw_peptide_dir
+        return raw_sequence_dir
     
     def _get_method_parameters(self) -> dict:
         """
@@ -102,7 +102,7 @@ class BoltzDocker(BaseDockingModel):
         Process a batch of sequences on a specific GPU using Boltz.
         
         Returns:
-            List of (peptide_sequence, raw_dir_path) tuples
+            List of (sequence_sequence, raw_dir_path) tuples
         """
         # raw_output_dir is like: /base/raw/boltz
         # We need to get back to /base (go up 2 levels: remove /boltz and /raw)
@@ -115,13 +115,13 @@ class BoltzDocker(BaseDockingModel):
         )
         
         docked_results = []
-        for i, peptide in enumerate(sequences, 1):
-            print(f"GPU {gpu_id} progress: {i}/{len(sequences)} - docking {peptide}")
-            dir_path = temp_docker._dock_single_peptide(
-                peptide, target_structure, target_sequence, target_name, gpu_id
+        for i, sequence in enumerate(sequences, 1):
+            print(f"GPU {gpu_id} progress: {i}/{len(sequences)} - docking {sequence}")
+            dir_path = temp_docker._dock_single_sequence(
+                sequence, target_structure, target_sequence, target_name, gpu_id
             )
             if dir_path:
-                docked_results.append((peptide, dir_path))
+                docked_results.append((sequence, dir_path))
         
         
         return docked_results
@@ -145,7 +145,7 @@ class BoltzDocker(BaseDockingModel):
         logging.info(f"Detected protein chain '{protein_chain_id}' with {len(protein_sequence)} residues")
         return protein_chain_id, protein_sequence
     
-    def _create_yaml_config(self, peptide_sequence: str, target_sequence: str,
+    def _create_yaml_config(self, sequence_sequence: str, target_sequence: str,
                            target_name: str, output_dir: str, target_structure: str) -> str:
         """
         Create a YAML configuration file for Boltz.
@@ -171,7 +171,7 @@ class BoltzDocker(BaseDockingModel):
                 {
                     "protein": {
                         "id": "B", 
-                        "sequence": peptide_sequence,
+                        "sequence": sequence_sequence,
                         "msa": "empty"  # Placeholder for MSA
                     }
                 }
@@ -188,7 +188,7 @@ class BoltzDocker(BaseDockingModel):
             }
         ]
         
-        yaml_path = os.path.join(output_dir, f"{target_name}_{peptide_sequence}.yaml")
+        yaml_path = os.path.join(output_dir, f"{target_name}_{sequence_sequence}.yaml")
         
         with open(yaml_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False)
@@ -272,13 +272,13 @@ class BoltzDocker(BaseDockingModel):
             raise
     
     def _process_boltz_output(self, raw_dir: str, processed_dir: str,
-                             peptide_sequence: str, target_name: str):
+                             sequence_sequence: str, target_name: str):
         """
         Process Boltz raw output into standardized format with best model as model_1.
         """
         logging.info("Processing Boltz output into standardized format...")
         
-        boltz_results_pattern = f"boltz_results_{target_name}_{peptide_sequence}"
+        boltz_results_pattern = f"boltz_results_{target_name}_{sequence_sequence}"
         boltz_results_dir = os.path.join(raw_dir, boltz_results_pattern)
         
         predictions_dir = os.path.join(boltz_results_dir, "predictions")
@@ -296,7 +296,7 @@ class BoltzDocker(BaseDockingModel):
         input_dir = os.path.join(predictions_dir, input_dirs[0])
         
         # Extract metrics and get best model ID
-        metrics, best_model_id = self._extract_boltz_metrics(input_dir, peptide_sequence)
+        metrics, best_model_id = self._extract_boltz_metrics(input_dir, sequence_sequence)
         
         # Find structure files
         if self.output_format == "pdb":
@@ -338,7 +338,7 @@ class BoltzDocker(BaseDockingModel):
         
         logging.info(f"Created standardized metrics file: {metrics_file}")
     
-    def _extract_boltz_metrics(self, input_dir: str, peptide_sequence: str) -> tuple[Dict[str, Any], int]:
+    def _extract_boltz_metrics(self, input_dir: str, sequence_sequence: str) -> tuple[Dict[str, Any], int]:
         """
         Extract metrics from Boltz output files and return only the best model based on ipTM.
         """
@@ -369,7 +369,7 @@ class BoltzDocker(BaseDockingModel):
         
         # Create metrics dict with only the best model's data
         metrics = {
-            "peptide_sequence": peptide_sequence,
+            "sequence_sequence": sequence_sequence,
             "docking_method": "boltz",
             "best_model_id": best_model_id,
             # Store all metrics from best model at root level (like AlphaFold)
@@ -388,7 +388,7 @@ class BoltzDocker(BaseDockingModel):
         
         return metrics, best_model_id
     
-    def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
+    def process_raw_output(self, raw_sequence_dir: str, sequence_sequence: str, 
                           target_name: str) -> str:
         """
         Process raw Boltz output into standardized format.
@@ -396,20 +396,20 @@ class BoltzDocker(BaseDockingModel):
         This method implements the abstract method from BaseDockingModel.
         """
         # Create the processed directory path using the same pattern as base class
-        peptide_dir_name = f"{target_name}_{peptide_sequence}"
-        processed_dir = os.path.join(self.processed_output_dir, peptide_dir_name)
+        sequence_dir_name = f"{target_name}_{sequence_sequence}"
+        processed_dir = os.path.join(self.processed_output_dir, sequence_dir_name)
         os.makedirs(processed_dir, exist_ok=True)
         
         # Extract target name from directory structure if not provided
         if target_name is None:
             # Try to extract from the directory name
-            dir_name = os.path.basename(raw_peptide_dir)
+            dir_name = os.path.basename(raw_sequence_dir)
             if "_" in dir_name:
                 target_name = dir_name.split("_")[0]
             else:
                 target_name = "unknown"
         
-        self._process_boltz_output(raw_peptide_dir, processed_dir, peptide_sequence, target_name)
+        self._process_boltz_output(raw_sequence_dir, processed_dir, sequence_sequence, target_name)
         return processed_dir
     
     def _extract_npz_data_to_metrics(self, input_dir: str, metrics: Dict[str, Any], best_model_id: int) -> None:

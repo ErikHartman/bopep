@@ -28,37 +28,37 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from bopep.genetic_algorithm.generate import BoGA
 
 
-def mock_dock_peptides(self, peptides):
+def mock_dock(self, sequences):
     """Mock docking function that returns fake directories."""
     mock_dirs = []
-    for peptide in peptides:
+    for sequence in sequences:
         # Create a fake directory name
-        mock_dir = f"/fake/dock/dir/{peptide}"
+        mock_dir = f"/fake/dock/dir/{sequence}"
         mock_dirs.append(mock_dir)
     return mock_dirs
 
 
 def mock_score_batch(self, scores_to_include, inputs, input_type, **kwargs):
-    """Mock scoring function that returns fake scores based on peptide properties."""
+    """Mock scoring function that returns fake scores based on sequence properties."""
     scores = {}
     
     for input_path in inputs:
-        # Extract peptide from the fake path
-        peptide = input_path.split('/')[-1]
+        # Extract sequence from the fake path
+        sequence = input_path.split('/')[-1]
         
-        # Generate fake scores based on peptide properties
+        # Generate fake scores based on sequence properties
         # This creates a somewhat realistic landscape for testing
-        length_score = 1.0 - abs(len(peptide) - 12) / 20.0  # Prefer ~12 residues
+        length_score = 1.0 - abs(len(sequence) - 12) / 20.0  # Prefer ~12 residues
         
         # Favor certain amino acids (simplified binding preference)
         positive_aas = {'K', 'R', 'H'}  # Basic residues
         hydrophobic_aas = {'F', 'W', 'Y', 'L', 'I', 'V'}  # Hydrophobic
         
-        positive_count = sum(1 for aa in peptide if aa in positive_aas)
-        hydrophobic_count = sum(1 for aa in peptide if aa in hydrophobic_aas)
+        positive_count = sum(1 for aa in sequence if aa in positive_aas)
+        hydrophobic_count = sum(1 for aa in sequence if aa in hydrophobic_aas)
         
-        # Simple scoring function that favors balanced peptides
-        balance_score = 1.0 - abs(positive_count - hydrophobic_count) / len(peptide)
+        # Simple scoring function that favors balanced sequences
+        balance_score = 1.0 - abs(positive_count - hydrophobic_count) / len(sequence)
         
         # Add some noise for realism
         noise = random.gauss(0, 0.1)
@@ -70,7 +70,7 @@ def mock_score_batch(self, scores_to_include, inputs, input_type, **kwargs):
             'rosetta_score': random.gauss(-50.0, 20.0),  # Rosetta energy
         }
         
-        scores[peptide] = fake_scores
+        scores[sequence] = fake_scores
     
     return scores
 
@@ -78,14 +78,14 @@ def mock_score_batch(self, scores_to_include, inputs, input_type, **kwargs):
 def custom_objective(scores_dict):
     """Custom objective function that maximizes iptm and minimizes pae."""
     objectives = {}
-    for peptide, scores in scores_dict.items():
+    for sequence, scores in scores_dict.items():
         # Simple multi-objective: maximize iptm, minimize pae
         iptm = scores.get('iptm', 0.5)
         pae = scores.get('pae', 15.0)
         
         # Normalize and combine (higher is better)
         obj = iptm - (pae / 30.0)  # Scale pae to roughly same range as iptm
-        objectives[peptide] = obj
+        objectives[sequence] = obj
     
     return objectives
 
@@ -107,7 +107,7 @@ def run_basic_example():
     
     try:
         # Mock the expensive operations
-        with patch('bopep.docking.docker.Docker.dock_peptides', mock_dock_peptides), \
+        with patch('bopep.docking.docker.Docker.dock_sequences', mock_dock), \
              patch('bopep.scoring.scorer.Scorer.score_batch', mock_score_batch):
             
             # Define the optimization schedule
@@ -197,7 +197,7 @@ def run_continuation_example(previous_log_dir):
     
     try:
         # Mock the expensive operations
-        with patch('bopep.docking.docker.Docker.dock_peptides', mock_dock_peptides), \
+        with patch('bopep.docking.docker.Docker.dock_sequences', mock_dock), \
              patch('bopep.scoring.scorer.Scorer.score_batch', mock_score_batch):
             
             # Define the continuation schedule

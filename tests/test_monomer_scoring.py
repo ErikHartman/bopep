@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from bopep.scoring.monomer_scorer import MonomerScorer
-from bopep.scoring.peptide_properties import PeptideProperties
+from bopep.scoring.sequence_properties import SequenceProperties
 
 
 class TestMonomerScorer:
@@ -335,7 +335,7 @@ class TestMonomerScorerComparison:
         # Should not have binding-specific scores
         assert 'n_contacts' not in available
         assert 'binding_site_n_contacts' not in available
-        assert 'peptide_rmsd' not in available
+        assert 'sequence_rmsd' not in available
         
         # Should have confidence scores
         assert 'ptm' in available

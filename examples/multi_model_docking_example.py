@@ -16,7 +16,7 @@ logging.basicConfig(
 def main():
     """Run the complete multi-model docking and scoring pipeline."""
     
-    peptide_sequence = "NYLSELSEHV"
+    sequence = "NYLSELSEHV"
     target_pdb_path = "./data/4glf.cif" 
     output_dir = "./examples/docking/"
 
@@ -44,7 +44,7 @@ def main():
 
     docker.set_target_structure(target_pdb_path)
 
-    results = docker.dock_peptides([peptide_sequence])
+    results = docker.dock_peptides([sequence])
 
     print(results)
         
@@ -94,7 +94,7 @@ def main():
     results = scorer.score(
         scores_to_include=scores_to_compute,
         processed_dir=results[0],
-        peptide_sequence=peptide_sequence,
+        peptide_sequence=sequence,
         binding_site_residue_indices=[22, 23, 24, 42, 43, 44, 45, 46, 47, 48, 49, 
             50, 51, 52, 53, 69, 70, 71, 72,
                 73, 74, 75, 76, 77, 81, 82, 83, 84, 85, 86, 87, 

@@ -67,7 +67,7 @@ def sample_csv_path():
 def sample_csv_data():
     """Sample CSV data for testing."""
     return pd.DataFrame({
-        'peptide_sequence': ['ACDEF', 'GHIKL', 'MNPQR'],
+        'sequence': ['ACDEF', 'GHIKL', 'MNPQR'],
         'length': [5, 5, 5],
         'target_length': [10, 10, 10]
     })

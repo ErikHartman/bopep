@@ -16,3 +16,5 @@ Before using this module, ensure you have:
 ## Basic Usage
 
 See and run `/bopep/examples/design_example.py` for a complete usage example.
+
+This module was created by Malcolm Siljehag Alencar and partly by Erik Hartman.

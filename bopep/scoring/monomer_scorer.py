@@ -1,17 +1,9 @@
-"""
-Monomer scorer for unconditional protein generation.
-
-This module provides scoring functionality for single-chain proteins
-predicted by AlphaFold monomer, focusing on intrinsic properties rather
-than binding interactions.
-"""
-
 import os
 import json
 import traceback
 from typing import Optional, Dict, Any, List
 from bopep.scoring.base_scorer import BaseScorer
-from bopep.scoring.peptide_properties import PeptideProperties
+from bopep.scoring.sequence_properties import SequenceProperties
 from bopep.structure.parser import extract_sequence_from_structure
 
 
@@ -133,11 +125,11 @@ class MonomerScorer(BaseScorer):
             if pdb_files:
                 structure_file = os.path.join(processed_dir, pdb_files[0])
         
-        # Initialize peptide properties for sequence-based scoring
-        peptide_properties = PeptideProperties(peptide_sequence=sequence)
+        # Initialize sequence properties for sequence-based scoring
+        sequence_properties = SequenceProperties(sequence=sequence)
         
         # Score sequence properties
-        seq_scores = self._score_sequence_properties(scores_to_include, peptide_properties)
+        seq_scores = self._score_sequence_properties(scores_to_include, sequence_properties)
         scores.update(seq_scores)
         
         # Score DSSP if structure available

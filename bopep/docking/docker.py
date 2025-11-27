@@ -138,15 +138,10 @@ class Docker:
                 logging.info("Removed waters and ligands, keeping only standard amino acids")
         self._log_config()
 
-    def dock_sequences(self, peptide_sequences: list):
+    def dock_sequences(self, sequences: list):
         """
         Dock sequences using all specified models.
-        
-        Parameters:
-        - peptide_sequences: List of peptide sequences to dock
-        
-        Returns:
-        - Dictionary with model names as keys and list of processed directories as values
+
         """
         if not self.target_structure_path:
             raise ValueError(
@@ -160,9 +155,9 @@ class Docker:
             logging.info(f"Starting docking with {model.upper()}...")
             
             if model == "alphafold":
-                docker_dirs = self._dock_with_alphafold(peptide_sequences)
+                docker_dirs = self._dock_with_alphafold(sequences)
             elif model == "boltz":
-                docker_dirs = self._dock_with_boltz(peptide_sequences)
+                docker_dirs = self._dock_with_boltz(sequences)
             else:
                 raise ValueError(f"Unsupported model: {model}")
             all_docked_dirs[model] = docker_dirs
@@ -179,7 +174,7 @@ class Docker:
    
         return docker_dirs
         
-    def _dock_with_alphafold(self, peptide_sequences: list):
+    def _dock_with_alphafold(self, sequences: list):
         """Dock sequences using AlphaFold/ColabFold."""
         # Create alphafold instance and let it handle its own parameters
         alphafold_docker = AlphaFoldDocker(
@@ -189,13 +184,13 @@ class Docker:
         
         # Dock the sequences
         return alphafold_docker.dock(
-            peptide_sequences, 
+            sequences, 
             self.target_structure_path, 
             self.target_sequence, 
             self.target_name
         )
 
-    def _dock_with_boltz(self, peptide_sequences: list):
+    def _dock_with_boltz(self, sequences: list):
         """Dock sequences using Boltz."""
         # Create boltz instance and let it handle its own parameters
         boltz_docker = BoltzDocker(
@@ -205,7 +200,7 @@ class Docker:
         
         # Dock the sequences
         return boltz_docker.dock(
-            peptide_sequences, 
+            sequences, 
             self.target_structure_path, 
             self.target_sequence, 
             self.target_name

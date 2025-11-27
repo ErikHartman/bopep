@@ -91,8 +91,8 @@ class MultiModelWrapper(BasePredictionModel):
         Train all individual models.
         
         Args:
-            embedding_dict: {peptide: embedding_array}
-            objective_dict: {peptide: {obj_name: value}} or {peptide: value} for single objective
+            embedding_dict: {sequence: embedding_array}
+            objective_dict: {sequence: {obj_name: value}} or {sequence: value} for single objective
             val_embedding_dict: Optional validation embeddings
             val_objective_dict: Optional validation objectives
             **kwargs: Training arguments
@@ -100,9 +100,9 @@ class MultiModelWrapper(BasePredictionModel):
         Returns:
             Average training loss across all models
         """
-        # MultiModelWrapper always expects multi-objective format: {peptide: {obj_name: value}}
+        # MultiModelWrapper always expects multi-objective format: {sequence: {obj_name: value}}
         if not isinstance(next(iter(objective_dict.values())), dict):
-            raise ValueError("MultiModelWrapper expects multi-objective format: {peptide: {obj_name: value}}")
+            raise ValueError("MultiModelWrapper expects multi-objective format: {sequence: {obj_name: value}}")
             
         # Use same objective ordering approach as ObjectiveMixin for consistency
         sample_objective = next(iter(objective_dict.values()))
@@ -137,15 +137,15 @@ class MultiModelWrapper(BasePredictionModel):
         for i, (obj_name, model) in enumerate(zip(objective_names, self.models)):
             # Extract single-objective data
             single_obj_dict = {
-                peptide: obj_values[obj_name] 
-                for peptide, obj_values in objective_dict.items()
+                sequence: obj_values[obj_name] 
+                for sequence, obj_values in objective_dict.items()
                 if obj_name in obj_values
             }
             
             # Filter embeddings to match
             single_emb_dict = {
-                peptide: embedding_dict[peptide] 
-                for peptide in single_obj_dict.keys()
+                sequence: embedding_dict[sequence] 
+                for sequence in single_obj_dict.keys()
             }
             
             # Prepare validation data if provided
@@ -153,13 +153,13 @@ class MultiModelWrapper(BasePredictionModel):
             val_single_obj_dict = None
             if val_embedding_dict is not None and val_objective_dict is not None:
                 val_single_obj_dict = {
-                    peptide: obj_values[obj_name] 
-                    for peptide, obj_values in val_objective_dict.items()
+                    sequence: obj_values[obj_name] 
+                    for sequence, obj_values in val_objective_dict.items()
                     if obj_name in obj_values
                 }
                 val_single_emb_dict = {
-                    peptide: val_embedding_dict[peptide] 
-                    for peptide in val_single_obj_dict.keys()
+                    sequence: val_embedding_dict[sequence] 
+                    for sequence in val_single_obj_dict.keys()
                 }
             
             # Train the individual model
@@ -224,11 +224,11 @@ class MultiModelWrapper(BasePredictionModel):
         Make predictions using all individual models.
         
         Args:
-            embedding_dict: {peptide: embedding_array}
+            embedding_dict: {sequence: embedding_array}
             **kwargs: Additional prediction arguments
             
         Returns:
-            For multi-objective: {peptide: {obj_name: (mean, std)}}
+            For multi-objective: {sequence: {obj_name: (mean, std)}}
         """
         objective_names = self.objective_names
  
@@ -241,14 +241,14 @@ class MultiModelWrapper(BasePredictionModel):
             model_predictions.append(pred)
         
         # Combine predictions into multi-objective format
-        for peptide in embedding_dict.keys():
-            results[peptide] = {}
+        for sequence in embedding_dict.keys():
+            results[sequence] = {}
             for i, obj_name in enumerate(objective_names):
-                if peptide in model_predictions[i]:
-                    results[peptide][obj_name] = model_predictions[i][peptide]
+                if sequence in model_predictions[i]:
+                    results[sequence][obj_name] = model_predictions[i][sequence]
                 else:
                     # Fallback
-                    results[peptide][obj_name] = (0.0, 1.0)
+                    results[sequence][obj_name] = (0.0, 1.0)
         
         return results
     

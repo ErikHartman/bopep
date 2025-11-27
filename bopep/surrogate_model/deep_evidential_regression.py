@@ -163,16 +163,16 @@ class DeepEvidentialRegression(BasePredictionModel):
     ) -> Dict[str, Dict[str, float]]:
         """
         Predict with uncertainty decomposition for a dictionary of embeddings.
-        Returns {peptide: {'mean': val, 'aleatoric': val, 'epistemic': val, 'total': val}}
+        Returns {sequence: {'mean': val, 'aleatoric': val, 'epistemic': val, 'total': val}}
         """
         if device is None:
             device = next(self.parameters()).device
             
         # Process in batches to handle large dictionaries
-        peptides = list(embedding_dict.keys())
+        sequences = list(embedding_dict.keys())
         
         # Build a dataset without scores
-        dummy_scores = {p: 0.0 for p in peptides}
+        dummy_scores = {p: 0.0 for p in sequences}
         dataset = VariableLengthDataset(embedding_dict, dummy_scores)
         dataloader = DataLoader(
             dataset,
@@ -206,7 +206,7 @@ class DeepEvidentialRegression(BasePredictionModel):
         
         # Format results
         result = {}
-        for i, p in enumerate(peptides):
+        for i, p in enumerate(sequences):
             result[p] = {k: float(v[i]) for k, v in components_np.items()}
             
         return result

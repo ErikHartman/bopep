@@ -1,7 +1,7 @@
 from typing import Optional
 from bopep.embedding.embed_esm import embed_esm
 from bopep.embedding.embed_aaindex import embed_aaindex
-from bopep.embedding.utils import filter_peptides
+from bopep.embedding.utils import filter_sequences
 from sklearn.decomposition import PCA
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -17,9 +17,9 @@ class Embedder:
         self.esm_model = None
         self.alphabet = None
 
-    def embed_esm(self, peptides: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True, device : Optional[str] = None) -> dict:
+    def embed_esm(self, sequences: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True, device : Optional[str] = None) -> dict:
         if filter:
-            peptides = filter_peptides(peptides)
+            sequences = filter_sequences(sequences)
 
         if device:
             device = device
@@ -51,13 +51,13 @@ class Embedder:
             self.esm_model = self.esm_model .to(device)
             print(f"ESM moved to {device}.")
 
-        embeddings = embed_esm(peptides, self.esm_model, self.alphabet, average, batch_size, device=device)
+        embeddings = embed_esm(sequences, self.esm_model, self.alphabet, average, batch_size, device=device)
         return embeddings
 
-    def embed_aaindex(self, peptides: list, average: bool, filter:bool = True) -> dict:
+    def embed_aaindex(self, sequences: list, average: bool, filter:bool = True) -> dict:
         if filter:
-            peptides = filter_peptides(peptides)
-        embeddings = embed_aaindex(peptides, average)
+            sequences = filter_sequences(sequences)
+        embeddings = embed_aaindex(sequences, average)
         return embeddings
     
     def scale_embeddings(self, embeddings: dict) -> dict:
@@ -81,13 +81,13 @@ class Embedder:
         
         # Transform embeddings while preserving original shapes
         scaled_embeddings = {}
-        for peptide, emb in embeddings.items():
+        for sequence, emb in embeddings.items():
             if len(emb.shape) == 2:  # Matrix form
                 # Scale each position's embedding separately
                 scaled = scaler.transform(emb)
             else:  # Vector form
                 scaled = scaler.transform(emb.reshape(1, -1))[0]
-            scaled_embeddings[peptide] = scaled
+            scaled_embeddings[sequence] = scaled
             
         return scaled_embeddings
 
@@ -97,11 +97,11 @@ class Embedder:
     ):
         """
         Reduces the dimensionality of the embeddings using PCA.
-        Works with both averaged embeddings (1D per peptide) and 
-        sequence embeddings (2D per peptide, with varying lengths).
+        Works with both averaged embeddings (1D per sequence) and 
+        sequence embeddings (2D per sequence, with varying lengths).
         
         Args:
-            embeddings: Dictionary mapping peptide sequences to their embeddings
+            embeddings: Dictionary mapping sequence sequences to their embeddings
             explained_variance_ratio: Target explained variance ratio for PCA
             
         Returns:
@@ -128,10 +128,10 @@ class Embedder:
                 pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
             pca.fit(all_position_embeddings)
             
-            # Transform each peptide's sequence of embeddings
+            # Transform each sequence's sequence of embeddings
             reduced_embeddings = {}
-            for peptide, emb in embeddings.items():
-                reduced_embeddings[peptide] = pca.transform(emb)
+            for sequence, emb in embeddings.items():
+                reduced_embeddings[sequence] = pca.transform(emb)
                 
             print(f"Original embedding dimension: {first_emb.shape[1]}")
             print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[1]}")
@@ -140,7 +140,7 @@ class Embedder:
             print("Performing PCA on averaged (1d) embeddings...")
             # For averaged embeddings (average=True case) - original implementation
             embedding_array = np.array(list(embeddings.values()))
-            peptide_sequences = list(embeddings.keys())
+            sequences = list(embeddings.keys())
 
             if n_components is not None:
                 pca = PCA(n_components=n_components)
@@ -152,8 +152,8 @@ class Embedder:
             print("The reduced embeddings are of shape: ", reduced_embeddings_array.shape)
 
             reduced_embeddings = {
-                peptide_sequences[i]: reduced_embeddings_array[i]
-                for i in range(len(peptide_sequences))
+                sequences[i]: reduced_embeddings_array[i]
+                for i in range(len(sequences))
             }
 
         return reduced_embeddings
@@ -168,7 +168,7 @@ class Embedder:
         or variational autoencoder.
         
         Args:
-            embeddings: Dictionary mapping peptide sequences to their embeddings
+            embeddings: Dictionary mapping sequence sequences to their embeddings
             latent_dim: Target dimension for the reduced representation
             hidden_layers: List of dimensions for hidden layers (default: [2*latent_dim])
             batch_size: Batch size for training

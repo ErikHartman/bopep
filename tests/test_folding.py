@@ -10,7 +10,7 @@ import tempfile
 import os
 import json
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from bopep.folding.alphafold_monomer import AlphaFoldMonomer
 

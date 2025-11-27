@@ -5,11 +5,11 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from bopep.scoring.complex_scorer import ComplexScorer
-from bopep.scoring.peptide_properties import PeptideProperties
+from bopep.scoring.sequence_properties import SequenceProperties
 from bopep.scoring.dssp import DSSPAnalyzer, get_dssp_scores_from_structure
 from bopep.scoring.scores_to_objective import ScoresToObjective
 from bopep.scoring.pep_prot_distance import distance_score_from_structure
-from bopep.scoring.is_peptide_in_binding_site import is_peptide_in_binding_site_pdb_file
+from bopep.scoring.is_in_binding_site import is_sequence_in_binding_site_pdb_file
 from bopep.structure.parser import extract_sequence_from_structure
 
 # Alias for backward compatibility in tests
@@ -30,8 +30,8 @@ def sample_pdb_file():
 
 
 @pytest.fixture 
-def peptide_sequence_from_1ssc():
-    """Extract peptide sequence from chain B of 1ssc.pdb"""
+def sequence_from_1ssc():
+    """Extract sequence sequence from chain B of 1ssc.pdb"""
     if not TEST_PDB_FILE.exists():
         pytest.skip(f"Test PDB file not found: {TEST_PDB_FILE}")
     return extract_sequence_from_structure(str(TEST_PDB_FILE), chain_id="B")
@@ -45,7 +45,7 @@ class TestScorer:
         scorer = Scorer()
         assert hasattr(scorer, 'core_docking_scores')
         assert hasattr(scorer, 'structural_scores')
-        assert hasattr(scorer, 'peptide_property_scores')
+        assert hasattr(scorer, 'sequence_property_scores')
         assert hasattr(scorer, 'method_specific_scores')
         assert hasattr(scorer, 'supported_methods')
         
@@ -60,7 +60,7 @@ class TestScorer:
         scorer = Scorer()
         available = scorer.get_available_scores()
         
-        # Should include basic peptide properties
+        # Should include basic sequence properties
         assert "molecular_weight" in available
         assert "aromaticity" in available
         assert "instability_index" in available
@@ -231,8 +231,8 @@ class TestScorer:
             # But NO generic template_rmsd when both models available
             assert 'template_rmsd' not in available_with_template
 
-    def test_get_available_scores_peptide_properties_always_available(self):
-        """Test that peptide property scores are always available regardless of model availability"""
+    def test_get_available_scores_sequence_properties_always_available(self):
+        """Test that sequence property scores are always available regardless of model availability"""
         import tempfile
         import json
         
@@ -255,13 +255,13 @@ class TestScorer:
                 json.dump({'iptm': 0.7}, f)
             available_both_models = scorer.get_available_scores(processed_dir=temp_dir)
         
-        # Peptide property scores should always be present
-        peptide_prop_scores = scorer.peptide_property_scores
+        # Sequence property scores should always be present
+        sequence_prop_scores = scorer.sequence_property_scores
         
-        for prop_score in peptide_prop_scores:
-            assert prop_score in available_no_models, f"Missing peptide property {prop_score} with no models"
-            assert prop_score in available_one_model, f"Missing peptide property {prop_score} with one model"
-            assert prop_score in available_both_models, f"Missing peptide property {prop_score} with both models"
+        for prop_score in sequence_prop_scores:
+            assert prop_score in available_no_models, f"Missing sequence property {prop_score} with no models"
+            assert prop_score in available_one_model, f"Missing sequence property {prop_score} with one model"
+            assert prop_score in available_both_models, f"Missing sequence property {prop_score} with both models"
 
     def test_get_available_scores_special_scores(self):
         """Test availability of special scores like inter_model_rmsd"""
@@ -303,7 +303,7 @@ class TestScorer:
             # Test WITHOUT binding site parameters
             available_no_bs = scorer.get_available_scores(processed_dir=temp_dir)
             
-            # n_contacts should be available (counts any peptide-protein contacts)
+            # n_contacts should be available (counts any sequence-protein contacts)
             assert 'alphafold_n_contacts' in available_no_bs, "alphafold_n_contacts should be available without binding site params"
             assert 'boltz_n_contacts' in available_no_bs, "boltz_n_contacts should be available without binding site params"
             
@@ -339,30 +339,30 @@ class TestScorer:
             assert 'binding_site_n_contacts' in structure_available_with_bs, "binding_site_n_contacts should be available with binding site params"
 
 
-class TestPeptideProperties:
-    """Test peptide property calculations"""
+class TestSequenceProperties:
+    """Test sequence property calculations"""
 
     def test_init_with_sequence(self):
-        """Test initialization with peptide sequence"""
-        props = PeptideProperties(peptide_sequence="ACDEFGHIKLMNPQRSTVWY")
-        assert props.peptide_sequence == "ACDEFGHIKLMNPQRSTVWY"
+        """Test initialization with sequence sequence"""
+        props = SequenceProperties(sequence="ACDEFGHIKLMNPQRSTVWY")
+        assert props.sequence == "ACDEFGHIKLMNPQRSTVWY"
         assert props.pa is not None
 
     def test_init_with_structure_file(self, sample_pdb_file):
         """Test initialization with structure file"""
         # Test with chain A (protein)
-        props_a = PeptideProperties(structure_file=sample_pdb_file, chain_id="A")
-        assert props_a.peptide_sequence is not None
-        assert len(props_a.peptide_sequence) > 0
+        props_a = SequenceProperties(structure_file=sample_pdb_file, chain_id="A")
+        assert props_a.sequence is not None
+        assert len(props_a.sequence) > 0
         
         # Test with chain B (second protein copy)
-        props_b = PeptideProperties(structure_file=sample_pdb_file, chain_id="B")
-        assert props_b.peptide_sequence is not None
-        assert len(props_b.peptide_sequence) > 0
+        props_b = SequenceProperties(structure_file=sample_pdb_file, chain_id="B")
+        assert props_b.sequence is not None
+        assert len(props_b.sequence) > 0
 
     def test_molecular_weight(self):
         """Test molecular weight calculation"""
-        props = PeptideProperties(peptide_sequence="ACDEF")
+        props = SequenceProperties(sequence="ACDEF")
         mw = props.get_molecular_weight()
         assert isinstance(mw, float)
         assert mw > 0
@@ -371,15 +371,15 @@ class TestPeptideProperties:
 
     def test_molecular_weight_with_real_data(self, sample_pdb_file):
         """Test molecular weight with real protein data"""
-        props = PeptideProperties(structure_file=sample_pdb_file, chain_id="A")
+        props = SequenceProperties(structure_file=sample_pdb_file, chain_id="A")
         mw = props.get_molecular_weight()
         assert isinstance(mw, float)
         assert mw > 1000  # Should be substantial for a real protein
 
     def test_aromaticity(self):
         """Test aromaticity calculation"""
-        props_aromatic = PeptideProperties(peptide_sequence="FFFWWWYYY")
-        props_aliphatic = PeptideProperties(peptide_sequence="ALAGLY")
+        props_aromatic = SequenceProperties(sequence="FFFWWWYYY")
+        props_aliphatic = SequenceProperties(sequence="ALAGLY")
         
         aromatic_score = props_aromatic.get_aromaticity()
         aliphatic_score = props_aliphatic.get_aromaticity()
@@ -392,22 +392,22 @@ class TestPeptideProperties:
 
     def test_instability_index(self):
         """Test instability index calculation"""
-        props = PeptideProperties(peptide_sequence="ACDEFGHIKLMNPQRSTVWY")
+        props = SequenceProperties(sequence="ACDEFGHIKLMNPQRSTVWY")
         ii = props.get_instability_index()
         assert isinstance(ii, float)
         assert ii >= 0
 
     def test_isoelectric_point(self):
         """Test isoelectric point calculation"""
-        props = PeptideProperties(peptide_sequence="ACDEFGHIKLMNPQRSTVWY")
+        props = SequenceProperties(sequence="ACDEFGHIKLMNPQRSTVWY")
         pi = props.get_isoelectric_point()
         assert isinstance(pi, float)
         assert 0 < pi < 14  # pH range
 
     def test_gravy(self):
         """Test GRAVY calculation"""
-        props_hydrophobic = PeptideProperties(peptide_sequence="ILVMAF")
-        props_hydrophilic = PeptideProperties(peptide_sequence="KRHNED")
+        props_hydrophobic = SequenceProperties(sequence="ILVMAF")
+        props_hydrophilic = SequenceProperties(sequence="KRHNED")
         
         hydrophobic_gravy = props_hydrophobic.get_gravy()
         hydrophilic_gravy = props_hydrophilic.get_gravy()
@@ -418,7 +418,7 @@ class TestPeptideProperties:
 
     def test_secondary_structure_fractions(self):
         """Test secondary structure fraction calculations"""
-        props = PeptideProperties(peptide_sequence="ACDEFGHIKLMNPQRSTVWY")
+        props = SequenceProperties(sequence="ACDEFGHIKLMNPQRSTVWY")
         
         helix_frac = props.get_helix_fraction()
         turn_frac = props.get_loop_fraction()
@@ -439,7 +439,7 @@ class TestPeptideProperties:
 
     def test_amino_acid_percentages(self):
         """Test amino acid percentage calculations"""
-        props = PeptideProperties(peptide_sequence="KKKRRREEE")  # Mixed charged residues
+        props = SequenceProperties(sequence="KKKRRREEE")  # Mixed charged residues
         
         pos_charged = props.get_positively_charged_aa_percent()
         neg_charged = props.get_negatively_charged_aa_percent()
@@ -461,9 +461,9 @@ class TestPeptideProperties:
 
     def test_delta_net_charge_frac(self):
         """Test delta net charge fraction calculation"""
-        props_pos = PeptideProperties(peptide_sequence="KKKRRR")
-        props_neg = PeptideProperties(peptide_sequence="EEEDDD")
-        props_neutral = PeptideProperties(peptide_sequence="ALAGLY")
+        props_pos = SequenceProperties(sequence="KKKRRR")
+        props_neg = SequenceProperties(sequence="EEEDDD")
+        props_neutral = SequenceProperties(sequence="ALAGLY")
         
         pos_charge = props_pos.get_delta_net_charge_frac()
         neg_charge = props_neg.get_delta_net_charge_frac()
@@ -475,7 +475,7 @@ class TestPeptideProperties:
 
     def test_get_all_properties(self):
         """Test getting all properties at once"""
-        props = PeptideProperties(peptide_sequence="ACDEFGHIKLMNPQRSTVWY")
+        props = SequenceProperties(sequence="ACDEFGHIKLMNPQRSTVWY")
         all_props = props.get_all_properties()
         
         assert isinstance(all_props, dict)
@@ -494,14 +494,14 @@ class TestPeptideProperties:
     def test_invalid_sequence(self):
         """Test handling of invalid amino acid sequences"""
         with pytest.raises(ValueError):
-            PeptideProperties(peptide_sequence="XYZ123")
+            SequenceProperties(sequence="XYZ123")
         with pytest.raises(ValueError):
-            PeptideProperties(peptide_sequence="ACDEFGHIKLMNPQRSTVWYXYZ")
+            SequenceProperties(sequence="ACDEFGHIKLMNPQRSTVWYXYZ")
 
     def test_no_input_error(self):
         """Test that providing no input raises an error"""
         with pytest.raises(ValueError):
-            PeptideProperties()
+            SequenceProperties()
 
 
 class TestDSSPAnalysis:
@@ -513,9 +513,9 @@ class TestDSSPAnalysis:
         
         assert analyzer.structure_file == sample_pdb_file
         assert analyzer.chain_id == "B"
-        assert analyzer.peptide_sequence is not None
-        assert len(analyzer.peptide_sequence) > 0
-        assert isinstance(analyzer.peptide_sequence, str)
+        assert analyzer.sequence is not None
+        assert len(analyzer.sequence) > 0
+        assert isinstance(analyzer.sequence, str)
 
     def test_dssp_helix_fraction(self, sample_pdb_file):
         """Test DSSP helix fraction calculation"""
@@ -622,8 +622,8 @@ class TestDSSPAnalysis:
         analyzer = DSSPAnalyzer(sample_pdb_file, chain_id="B")
         dssp_fractions = analyzer.get_all_dssp_fractions()
         
-        # Get BioPython-based fractions from PeptideProperties
-        props = PeptideProperties(structure_file=sample_pdb_file, chain_id="B")
+        # Get BioPython-based fractions from SequenceProperties
+        props = SequenceProperties(structure_file=sample_pdb_file, chain_id="B")
         biopython_helix = props.get_helix_fraction()
         biopython_sheet = props.get_sheet_fraction()
         
@@ -663,16 +663,16 @@ class TestDSSPAnalysis:
             structure_file=sample_pdb_file
         )
         
-        assert len(scores) == 1  # Should return one peptide
-        peptide_seq, peptide_scores = next(iter(scores.items()))
+        assert len(scores) == 1  # Should return one sequence
+        sequence_seq, sequence_scores = next(iter(scores.items()))
         
-        assert isinstance(peptide_seq, str)
-        assert len(peptide_seq) > 0
+        assert isinstance(sequence_seq, str)
+        assert len(sequence_seq) > 0
         
         for score_name in dssp_score_names:
-            assert score_name in peptide_scores
-            assert isinstance(peptide_scores[score_name], float)
-            assert 0.0 <= peptide_scores[score_name] <= 1.0
+            assert score_name in sequence_scores
+            assert isinstance(sequence_scores[score_name], float)
+            assert 0.0 <= sequence_scores[score_name] <= 1.0
 
     def test_dssp_scorer_error_handling(self):
         """Test that Scorer throws appropriate errors for DSSP scores without structure"""
@@ -682,19 +682,19 @@ class TestDSSPAnalysis:
         with pytest.raises(ValueError, match="requires a structure file"):
             scorer.score(
                 scores_to_include=["dssp_helix_fraction"],
-                peptide_sequence="ACDEFG"  # Only sequence, no structure
+                sequence="ACDEFG"  # Only sequence, no structure
             )
         
         with pytest.raises(ValueError, match="requires a structure file"):
             scorer.score(
                 scores_to_include=["dssp_sheet_fraction"],
-                peptide_sequence="ACDEFG"
+                sequence="ACDEFG"
             )
         
         with pytest.raises(ValueError, match="requires a structure file"):
             scorer.score(
                 scores_to_include=["dssp_loop_fraction"],
-                peptide_sequence="ACDEFG"
+                sequence="ACDEFG"
             )
 
 
@@ -706,7 +706,7 @@ class TestStructuralScoring:
         score = distance_score_from_structure(
             sample_pdb_file, 
             receptor_chain="A", 
-            peptide_chain="B"
+            sequence_chain="B"
         )
         
         assert isinstance(score, float)
@@ -718,14 +718,14 @@ class TestStructuralScoring:
         score_8 = distance_score_from_structure(
             sample_pdb_file, 
             receptor_chain="A", 
-            peptide_chain="B",
+            sequence_chain="B",
             threshold=8.0
         )
         
         score_12 = distance_score_from_structure(
             sample_pdb_file, 
             receptor_chain="A", 
-            peptide_chain="B", 
+            sequence_chain="B", 
             threshold=12.0
         )
         
@@ -740,20 +740,20 @@ class TestStructuralScoring:
         score = distance_score_from_structure(
             sample_pdb_file,
             receptor_chain="X",  # Non-existent chain
-            peptide_chain="Y"    # Non-existent chain
+            sequence_chain="Y"    # Non-existent chain
         )
         
         assert score == 0.0  # Should return 0 for missing chains
 
     def test_binding_site_detection(self, sample_pdb_file):
-        """Test peptide binding site detection"""
+        """Test sequence binding site detection"""
         # This may require specific binding site residue indices
         # Let's test the basic function call
         try:
-            result = is_peptide_in_binding_site_pdb_file(
+            result = is_sequence_in_binding_site_pdb_file(
                 sample_pdb_file,
                 binding_site_residues=[10, 20, 30, 40, 50],  # Example residues
-                peptide_chain="B"
+                sequence_chain="B"
             )
             assert isinstance(result, bool)
         except Exception as e:
@@ -790,12 +790,12 @@ class TestScoresToObjective:
 class TestPerformanceAndTiming:
     """Test execution times for scoring operations"""
 
-    def test_peptide_properties_timing(self):
-        """Test timing for peptide property calculations"""
+    def test_sequence_properties_timing(self):
+        """Test timing for sequence property calculations"""
         sequence = "ACDEFGHIKLMNPQRSTVWYACDEFGHIKLMNPQRSTVWY"  # 40 amino acids
         
         start_time = time.time()
-        props = PeptideProperties(peptide_sequence=sequence)
+        props = SequenceProperties(sequence=sequence)
         all_props = props.get_all_properties()
         end_time = time.time()
         
@@ -804,7 +804,7 @@ class TestPerformanceAndTiming:
         assert execution_time < 1.0  # Should complete within 1 second
         assert len(all_props) >= 10  # Should calculate multiple properties
         
-        print(f"Peptide properties calculation time: {execution_time:.4f} seconds")
+        print(f"Sequence properties calculation time: {execution_time:.4f} seconds")
 
     def test_distance_score_timing(self, sample_pdb_file):
         """Test timing for distance score calculation"""
@@ -812,7 +812,7 @@ class TestPerformanceAndTiming:
         score = distance_score_from_structure(
             sample_pdb_file,
             receptor_chain="A",
-            peptide_chain="B"
+            sequence_chain="B"
         )
         end_time = time.time()
         
@@ -837,9 +837,9 @@ class TestPerformanceAndTiming:
         
         print(f"Scorer initialization time: {execution_time:.4f} seconds")
 
-    def test_multiple_peptide_properties_timing(self):
-        """Test timing for calculating properties of multiple peptides"""
-        peptides = [
+    def test_multiple_sequence_properties_timing(self):
+        """Test timing for calculating properties of multiple sequences"""
+        sequences = [
             "ACDEFGHIKLMNPQRSTVWY",
             "KKKRRREEE",
             "FFFWWWYYY",
@@ -849,17 +849,17 @@ class TestPerformanceAndTiming:
         
         start_time = time.time()
         results = []
-        for peptide in peptides:
-            props = PeptideProperties(peptide_sequence=peptide)
+        for sequence in sequences:
+            props = SequenceProperties(sequence=sequence)
             results.append(props.get_all_properties())
         end_time = time.time()
         
         execution_time = end_time - start_time
         
-        assert execution_time < 2.0  # Should process 5 peptides within 2 seconds
-        assert len(results) == len(peptides)
+        assert execution_time < 2.0  # Should process 5 sequences within 2 seconds
+        assert len(results) == len(sequences)
         
-        print(f"Multiple peptides calculation time: {execution_time:.4f} seconds")
+        print(f"Multiple sequences calculation time: {execution_time:.4f} seconds")
 
     def test_large_sequence_timing(self):
         """Test timing for large protein sequence"""
@@ -867,7 +867,7 @@ class TestPerformanceAndTiming:
         large_sequence = "ACDEFGHIKLMNPQRSTVWY" * 10
         
         start_time = time.time()
-        props = PeptideProperties(peptide_sequence=large_sequence)
+        props = SequenceProperties(sequence=large_sequence)
         all_props = props.get_all_properties()
         end_time = time.time()
         
@@ -882,21 +882,21 @@ class TestPerformanceAndTiming:
 class TestRealDataIntegration:
     """Integration tests using real 1ssc.pdb data"""
 
-    def test_full_scoring_pipeline_1ssc(self, sample_pdb_file, peptide_sequence_from_1ssc):
+    def test_full_scoring_pipeline_1ssc(self, sample_pdb_file, sequence_from_1ssc):
         """Test complete scoring pipeline with 1ssc.pdb data"""
-        # Test peptide properties from extracted sequence
-        props = PeptideProperties(peptide_sequence=peptide_sequence_from_1ssc)
-        peptide_props = props.get_all_properties()
+        # Test sequence properties from extracted sequence
+        props = SequenceProperties(sequence=sequence_from_1ssc)
+        sequence_props = props.get_all_properties()
         
-        assert isinstance(peptide_props, dict)
-        assert peptide_props['length'] > 0
-        assert 'molecular_weight' in peptide_props
+        assert isinstance(sequence_props, dict)
+        assert sequence_props['length'] > 0
+        assert 'molecular_weight' in sequence_props
         
         # Test distance scoring
         distance_score = distance_score_from_structure(
             sample_pdb_file,
             receptor_chain="A",
-            peptide_chain="B"
+            sequence_chain="B"
         )
         
         assert isinstance(distance_score, float)
@@ -905,15 +905,15 @@ class TestRealDataIntegration:
         # Combine results
         combined_scores = {
             'distance_score': distance_score,
-            **peptide_props
+            **sequence_props
         }
         
         assert len(combined_scores) > 10  # Should have many scores
         assert all(isinstance(v, (int, float)) for v in combined_scores.values())
 
-    def test_1ssc_peptide_properties_realistic(self, peptide_sequence_from_1ssc):
-        """Test that 1ssc peptide properties are realistic"""
-        props = PeptideProperties(peptide_sequence=peptide_sequence_from_1ssc)
+    def test_1ssc_sequence_properties_realistic(self, sequence_from_1ssc):
+        """Test that 1ssc sequence properties are realistic"""
+        props = SequenceProperties(sequence=sequence_from_1ssc)
         
         # Test specific properties for realism
         mw = props.get_molecular_weight()
@@ -926,7 +926,7 @@ class TestRealDataIntegration:
         assert 0 <= aromaticity <= 1  # Valid fraction
         
         print(f"1ssc chain B properties:")
-        print(f"  Sequence length: {len(peptide_sequence_from_1ssc)}")
+        print(f"  Sequence length: {len(sequence_from_1ssc)}")
         print(f"  Molecular weight: {mw:.2f}")
         print(f"  Isoelectric point: {pi:.2f}")
         print(f"  Aromaticity: {aromaticity:.3f}")

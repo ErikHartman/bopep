@@ -11,7 +11,7 @@ import random
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from bopep.genetic_algorithm.mutate import PeptideMutator
+from bopep.genetic_algorithm.mutate import Mutator
 from bopep.embedding.embedder import Embedder
 import umap
 
@@ -101,7 +101,7 @@ class MutationPathExplorer:
         top_sequences = [seq for seq, _ in scored_sequences[:top_fraction]]
         return random.choices(top_sequences, k=n_select)
     
-    def run_single_phase(self, phase: dict, mutator: 'PeptideMutator') -> dict:
+    def run_single_phase(self, phase: dict, mutator: 'Mutator') -> dict:
         """Run a single mutation phase until convergence or max iterations."""
         print(f"\n=== Phase: {phase['name']} ===")
         print(f"Mode: {phase['mode']}, Selection: {phase['selection_strategy']}")
@@ -207,7 +207,7 @@ class MutationPathExplorer:
         self.sequences_data.append((self.target_sequence, 'target', 0, None, target_score))
         
         # Initialize mutator
-        mutator = PeptideMutator(
+        mutator = Mutator(
             min_sequence_length=max(6, min(len(self.start_sequence), len(self.target_sequence)) - 3),
             max_sequence_length=max(len(self.start_sequence), len(self.target_sequence)) + 3,
             mutation_rate=0.08,
