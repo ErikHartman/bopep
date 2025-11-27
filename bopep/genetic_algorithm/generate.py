@@ -15,98 +15,153 @@ from bopep.search.utils import _validate_surrogate_model_kwargs
 from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.logging.logger import Logger
 from bopep.genetic_algorithm.mutate import PeptideMutator
+from bopep.config import Config
 import torch
 
 
 class BoGA:
     """
-    Genetic algorithm for protein discovery using surrogate modeling.
-    
-    Supports three modes:
-    - 'binding': Optimize peptides for binding to a target protein (requires target_structure_path)
-    - 'unconditional': Generate proteins with desired intrinsic properties (folds sequences, no target)
-    - 'sequence': Fast sequence-only scoring without folding (no structure prediction)
-    
-    Use surrogate_model_kwargs to configure the surrogate model, including:
-    - model_type, network_type, multi_model (separate models per objective), etc.
+    Evoluationary algorithm for protein discovery using surrogate modeling.
     """
     def __init__(
         self,
         initial_sequences: Union[str, List[str]],
-        mode: str = 'binding',
+        mode: str,
+        objective_function: Callable = None,
+        objective_function_kwargs: Optional[Dict[str, Any]] = None,
         target_structure_path: Optional[str] = None,
 
-        n_init : int = 130,
+        n_init: Optional[int] = None,
 
-        min_sequence_length: int = 6,
-        max_sequence_length: int = 40,
+        min_sequence_length: Optional[int] = None,
+        max_sequence_length: Optional[int] = None,
         
         surrogate_model_kwargs: Optional[Dict[str, Any]] = None,
-        objective_function: Optional[Callable] = None,
-        objective_function_kwargs: Optional[Dict[str, Any]] = None,
+
         scoring_kwargs: Optional[Dict[str, Any]] = None,
         docker_kwargs: Optional[Dict[str, Any]] = None,
-        mutation_rate: float = 0.01,
+        mutation_rate: Optional[float] = None,
         # Embedding options
-        embed_method: str = 'esm',               # 'esm' or 'aaindex'
+        embed_method: Optional[str] = None,
         embed_model_path: Optional[str] = None,
-        embed_batch_size: int = 128,
+        embed_batch_size: Optional[int] = None,
         embed_device: Optional[str] = None,
         # PCA reduction
-        pca_n_components: int = 128,
+        pca_n_components: Optional[int] = None,
         # Validation options
-        n_validate: Optional[Union[float, int]] = 0.2,  # Number (int) or fraction (float<1) for validation. None=no validation
-        min_validation_samples: int = 20,
-        min_training_samples: int = 100,
+        n_validate: Optional[Union[float, int]] = None,
+        min_validation_samples: Optional[int] = None,
+        min_training_samples: Optional[int] = None,
+        # Selection options
+        m_select: Optional[int] = None,
+        k_propose: Optional[int] = None,
+        selection_method: Optional[str] = None,
+        top_n_or_frac: Optional[float] = None,
+        beta: Optional[float] = None,
+        adalead_k: Optional[float] = None,
+        selection_pool: Optional[str] = None,
         # Logging options
         log_dir: Optional[str] = None,
         # Continuation options
         continue_from_logs: Optional[str] = None,
+        # Config object 
+        config: Optional[Config] = None,
     ):
+        # Initialize or load config
+        if config is None:
+            config = Config(script="BoGA")  # Load defaults
+        self.config = config
+        
+        # Get flattened config for easy parameter access
+        cfg = self.config.flatten()
+        
+        # Helper function to get parameter value (user override > config)
+        def get_param(user_val, config_key):
+            return user_val if user_val is not None else cfg.get(config_key)
+        
         self.initial_sequences = initial_sequences
         
-        # Validate mode
+        # Get mode (now REQUIRED parameter, not from config)
+        if mode is None:
+            raise ValueError("'mode' is a required parameter. Must be 'binding', 'unconditional', or 'sequence'.")
         self.mode = mode.lower()
         if self.mode not in ['binding', 'unconditional', 'sequence']:
-            raise ValueError(f"mode must be 'binding', 'unconditional', or 'sequence', got '{mode}'")
+            raise ValueError(f"mode must be 'binding', 'unconditional', or 'sequence', got '{self.mode}'")
         
         # Validate mode-specific requirements
-        if self.mode == 'binding' and target_structure_path is None:
+        self.target_structure_path = target_structure_path
+        if self.mode == 'binding' and self.target_structure_path is None:
             raise ValueError("target_structure_path is required for mode='binding'")
         
-        # Validate surrogate model config
-        self.surrogate_model_kwargs = surrogate_model_kwargs
+        # Get GA parameters from config or user overrides
+        self.n_init = get_param(n_init, 'n_init')
+        self.min_sequence_length = get_param(min_sequence_length, 'min_sequence_length')
+        self.max_sequence_length = get_param(max_sequence_length, 'max_sequence_length')
+        self.mutation_rate = get_param(mutation_rate, 'mutation_rate')
+        
+        # Get surrogate model kwargs
+        if surrogate_model_kwargs is not None:
+            self.surrogate_model_kwargs = surrogate_model_kwargs
+        else:
+            # Extract from flattened config
+            self.surrogate_model_kwargs = {
+                'model_type': cfg.get('surrogate_model.model_type'),
+                'network_type': cfg.get('surrogate_model.network_type'),
+                'n_trials': cfg.get('surrogate_model.n_trials'),
+                'n_splits': cfg.get('surrogate_model.n_splits'),
+                'hpo_interval': cfg.get('surrogate_model.hpo_interval'),
+            }
         _validate_surrogate_model_kwargs(self.surrogate_model_kwargs)
-
-        # Store GA parameters
-        self.target_structure_path = target_structure_path
-        self.max_sequence_length = max_sequence_length
-        self.min_sequence_length = min_sequence_length
-        self.n_init = n_init
+        
+        # Get scoring kwargs
+        if scoring_kwargs is not None:
+            self.scoring_kwargs = scoring_kwargs
+        else:
+            # Extract all scoring.* keys from flattened config
+            self.scoring_kwargs = {
+                k.replace('scoring.', ''): v 
+                for k, v in cfg.items() 
+                if k.startswith('scoring.')
+            }
+        
+        # Objective function (must be provided by user, not in config)
         self.objective_function = objective_function
         self.objective_function_kwargs = objective_function_kwargs or {}
-        self.scoring_kwargs = scoring_kwargs
-        self.mutation_rate = mutation_rate
-        self.n_validate = n_validate
-        self.min_validation_samples = min_validation_samples
-        self.min_training_samples = min_training_samples
-        self.continue_from_logs = continue_from_logs
+        
+        # Get validation parameters
+        self.n_validate = get_param(n_validate, 'validation.n_validate')
+        self.min_validation_samples = get_param(min_validation_samples, 'validation.min_validation_samples')
+        self.min_training_samples = get_param(min_training_samples, 'validation.min_training_samples')
+        
+        # Get selection parameters from config or user overrides
+        self.m_select = get_param(m_select, 'selection.m_select')
+        self.k_propose = get_param(k_propose, 'selection.k_propose')
+        self.selection_method = get_param(selection_method, 'selection.method')
+        self.top_n_or_frac = get_param(top_n_or_frac, 'selection.top_n_or_frac')
+        self.beta = get_param(beta, 'selection.beta')
+        self.adalead_k = get_param(adalead_k, 'selection.adalead_k')
+        self.selection_pool = get_param(selection_pool, 'selection.selection_pool')
+        
+        # Logging options
+        self.continue_from_logs = get_param(continue_from_logs, 'logging.continue_from_logs')
+        log_dir = get_param(log_dir, 'logging.log_dir')
 
         # Device configuration
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        # Embedding configuration
-        self.embed_method = embed_method.lower()
+        # Get embedding configuration
+        self.embed_method = get_param(embed_method, 'embedding.method').lower()
+        self.embed_model_path = get_param(embed_model_path, 'embedding.model_path')
+        self.embed_batch_size = get_param(embed_batch_size, 'embedding.batch_size')
+        self.embed_device = get_param(embed_device, 'embedding.device')
+        self.pca_n_components = get_param(pca_n_components, 'embedding.pca_n_components')
+        
         # Auto-detect embedding averaging based on network type
         network_type = self.surrogate_model_kwargs.get('network_type', 'mlp').lower()
         if network_type == "mlp":
             self.embed_average = True
         else:
             self.embed_average = False
-        self.embed_model_path = embed_model_path
-        self.embed_batch_size = embed_batch_size
-        self.embed_device = embed_device
-        self.pca_n_components = pca_n_components
         
         # Enforce fixed PCA dimensions for consistent neural network training
         if self.pca_n_components is None:
@@ -115,27 +170,44 @@ class BoGA:
                 "Use a fixed value (e.g., pca_n_components=20) for stable neural network training."
             )
         
+        # Get docker/folding kwargs from config or user overrides
+        if docker_kwargs is not None:
+            final_docker_kwargs = docker_kwargs
+        else:
+            if self.mode == 'binding':
+                # Extract all docker.* keys from flattened config
+                final_docker_kwargs = {
+                    k.replace('docker.', ''): v 
+                    for k, v in cfg.items() 
+                    if k.startswith('docker.')
+                }
+            else:  # unconditional mode uses folding kwargs
+                # Extract all folding.* keys from flattened config
+                final_docker_kwargs = {
+                    k.replace('folding.', ''): v 
+                    for k, v in cfg.items() 
+                    if k.startswith('folding.')
+                }
+        print("Using docker/folding kwargs:")
+        print(final_docker_kwargs)
+        
         # Initialize components based on mode
         if self.mode == 'binding':
-            # Binding mode: use Docker and ComplexScorer
-            self.docker = Docker(docker_kwargs)
+            self.docker = Docker(final_docker_kwargs)
             self.docker.set_target_structure(self.target_structure_path)
             self.folder = None
             self.scorer = ComplexScorer()
         elif self.mode == 'unconditional':
-            # Unconditional mode: use AlphaFoldMonomer and MonomerScorer
             self.docker = None
-            folding_kwargs = docker_kwargs or {}  # Reuse docker_kwargs structure for folding params
             self.folder = AlphaFoldMonomer(
-                output_dir=folding_kwargs.get('output_dir', 'folding_output'),
-                num_models=folding_kwargs.get('num_models', 5),
-                num_recycles=folding_kwargs.get('num_recycles', 3),
-                save_raw=folding_kwargs.get('save_raw', False),
-                force=folding_kwargs.get('force', False),
+                output_dir=final_docker_kwargs['output_dir'],
+                num_models=final_docker_kwargs.get('num_models', 5),
+                num_recycles=final_docker_kwargs.get('num_recycles', 3),
+                save_raw=final_docker_kwargs.get('save_raw', False),
+                force=final_docker_kwargs.get('force', False),
             )
             self.scorer = MonomerScorer()
         else:  # mode == 'sequence'
-            # Sequence mode: no folding/docking, just sequence-based scoring
             self.docker = None
             self.folder = None
             self.scorer = MonomerScorer()
@@ -172,7 +244,7 @@ class BoGA:
 
         self._evaluated_sequences  = set()
 
-    def _print_leaderboard(self, objectives: Dict[str, Any], generation: int, top_n: int = 5, objective_directions: Dict[str, str] = None):
+    def _print_leaderboard(self, objectives: Dict[str, Any], generation: int, print_n: int = 5, objective_directions: Dict[str, str] = None):
         """Print leaderboard for both single and multi-objective cases."""
         if not objectives:
             return
@@ -183,7 +255,7 @@ class BoGA:
         if isinstance(sample_obj, dict):
             # Multi-objective case: show top performers for each objective (like optimization.py)
             obj_names = list(sample_obj.keys())
-            print(f"Top {top_n} peptides (multiobjective):")
+            print(f"Top {print_n} peptides (multiobjective):")
             
             for obj_name in obj_names:
                 print(f"\n--- {obj_name} ---")
@@ -196,14 +268,14 @@ class BoGA:
                 
                 sorted_peptides = sorted(objectives.items(), 
                                        key=lambda x: x[1][obj_name], 
-                                       reverse=reverse_sort)[:top_n]
+                                       reverse=reverse_sort)[:print_n]
                 print(f"{'Peptide':<20} | {obj_name:<15}")
                 print("-" * 40)
                 for peptide, obj_dict in sorted_peptides:
                     print(f"{peptide:<20} | {obj_dict[obj_name]:<15.4f}")
         else:
             # Single objective case: original behavior
-            sorted_leaderboard = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            sorted_leaderboard = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:print_n]
             print(f"{'Peptide':<20} | {'Objective':<10} ")
             print("-" * 60)
             for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
@@ -370,11 +442,12 @@ class BoGA:
         objectives: Dict[str, Any], 
         m_pool: int, 
         objective_directions: Dict[str, str] = None, 
-        top_fraction: float = 0.3,
+        top_n_or_frac: float = 0.3,
         selection_method: str = "uniform",
         beta: float = 1.0,
         adalead_k: float = 0.05,
-        last_batch_objectives: Optional[Dict[str, Any]] = None
+        last_batch_objectives: Optional[Dict[str, Any]] = None,
+        selection_pool: str = "full_history"
     ) -> List[str]:
         """
         Select top m_pool sequences based on objectives, with support for sampling from top contenders.
@@ -382,13 +455,22 @@ class BoGA:
         if not objectives:
             return []
         
+        # Determine which objectives to select from based on selection_pool
+        if selection_pool == "last_batch" and last_batch_objectives:
+            selection_objectives = last_batch_objectives
+        elif selection_pool == "full_history":
+            selection_objectives = objectives
+        else:
+            # Invalid selection_pool or last_batch not available, default to full history
+            selection_objectives = objectives
+        
         # Check if single or multi-objective
-        sample_obj = next(iter(objectives.values()))
+        sample_obj = next(iter(selection_objectives.values()))
         
         if isinstance(sample_obj, dict):
             # Multi-objective case: matrix-based sampling approach
             obj_names = list(sample_obj.keys())
-            peptides = list(objectives.keys())
+            peptides = list(selection_objectives.keys())
             
             # Create ranking matrix: each column is a different objective, sorted by rank
             rankings = {}  # {objective_name: [peptide_list_sorted_by_that_objective]}
@@ -401,7 +483,7 @@ class BoGA:
                     reverse_sort = True  # Default to maximization
                 
                 sorted_peptides = sorted(peptides, 
-                                       key=lambda p: objectives[p][obj_name], 
+                                       key=lambda p: selection_objectives[p][obj_name], 
                                        reverse=reverse_sort)
                 rankings[obj_name] = sorted_peptides
             
@@ -409,21 +491,23 @@ class BoGA:
             top_candidates = set()
             
             # Handle both fraction and integer specifications
-            if isinstance(top_fraction, float) and top_fraction < 1.0:
+            if isinstance(top_n_or_frac, float) and top_n_or_frac < 1.0:
                 # Fraction mode: take top fraction of sequences
-                n_top_per_objective = max(1, int(len(peptides) * top_fraction))
-            elif isinstance(top_fraction, int) or (isinstance(top_fraction, float) and top_fraction >= 1.0):
+                n_top_per_objective = max(1, int(len(peptides) * top_n_or_frac))
+            elif isinstance(top_n_or_frac, int) or (isinstance(top_n_or_frac, float) and top_n_or_frac >= 1.0):
                 # Integer mode: take exact number of top sequences
-                n_top_per_objective = int(top_fraction)
+                n_top_per_objective = int(top_n_or_frac)
             else:
-                raise ValueError(f"top_fraction must be a positive number, got {top_fraction}")
+                raise ValueError(f"top_n_or_frac must be a positive number, got {top_n_or_frac}")
             
             for obj_name, ranked_peptides in rankings.items():
                 # Take top performers for this objective
                 top_for_this_obj = ranked_peptides[:n_top_per_objective]
                 top_candidates.update(top_for_this_obj)
             
-            # Sample m_pool sequences from the combined top candidates
+            if selection_method == "adalead":
+                raise ValueError("AdaLead selection is only supported for single-objective optimization")
+            
             top_candidates = list(top_candidates)
             if len(top_candidates) <= m_pool:
                 return top_candidates
@@ -432,27 +516,21 @@ class BoGA:
                 return random.sample(top_candidates, m_pool)
             elif selection_method == "exponential":
                 # For multi-objective, use aggregated normalized objectives
-                return self._exponential_selection(top_candidates, objectives, m_pool, beta, objective_directions)
-            elif selection_method == "adalead":
-                # AdaLead: not supported for multi-objective
-                raise ValueError("AdaLead selection is only supported for single-objective optimization")
+                return self._exponential_selection(top_candidates, selection_objectives, m_pool, beta, objective_directions)
             else:
                 raise ValueError(f"Unknown selection_method: {selection_method}")
         else:
-            # Single objective case
-            sorted_sequences = sorted(objectives.items(), key=lambda x: x[1], reverse=True)
+            sorted_sequences = sorted(selection_objectives.items(), key=lambda x: x[1], reverse=True)
             
             # Handle both fraction and integer specifications
-            if isinstance(top_fraction, float) and top_fraction < 1.0:
-                # Fraction mode
-                n_top = max(1, int(len(sorted_sequences) * top_fraction))
-            elif isinstance(top_fraction, int) or (isinstance(top_fraction, float) and top_fraction >= 1.0):
-                # Integer mode
-                n_top = int(top_fraction)
+            if isinstance(top_n_or_frac, float) and top_n_or_frac < 1.0:
+                n_top = max(1, int(len(sorted_sequences) * top_n_or_frac))
+            elif isinstance(top_n_or_frac, int) or (isinstance(top_n_or_frac, float) and top_n_or_frac >= 1.0):
+                n_top = int(top_n_or_frac)
             else:
-                raise ValueError(f"top_fraction must be a positive number, got {top_fraction}")
+                raise ValueError(f"top_n_or_frac must be a positive number, got {top_n_or_frac}")
             
-            n_top = max(n_top, m_pool)  # Ensure we have at least m_pool candidates
+            n_top = max(n_top, m_pool)
             top_candidates = [seq for seq, _ in sorted_sequences[:n_top]]
             
             if len(top_candidates) <= m_pool:
@@ -461,149 +539,18 @@ class BoGA:
             if selection_method == "uniform":
                 return random.sample(top_candidates, m_pool)
             elif selection_method == "exponential":
-                # Create objectives dict for top candidates only
                 top_objectives = {seq: obj for seq, obj in sorted_sequences[:n_top]}
                 return self._exponential_selection(top_candidates, top_objectives, m_pool, beta)
             elif selection_method == "adalead":
-                # AdaLead: adaptive threshold-based selection
-                return self._adalead_selection(objectives, adalead_k, last_batch_objectives)
+                return self._adalead_selection(selection_objectives, adalead_k)
             else:
                 raise ValueError(f"Unknown selection_method: {selection_method}")
-
-    def _exponential_selection(
-        self, 
-        candidates: List[str], 
-        objectives: Dict[str, Any], 
-        m_pool: int, 
-        beta: float,
-        objective_directions: Dict[str, str] = None
-    ) -> List[str]:
-        """
-        Select sequences using exponential weighting based on normalized objectives.
-        
-        Args:
-            candidates: List of candidate sequences to select from
-            objectives: Dictionary mapping sequences to objectives
-            m_pool: Number of sequences to select
-            beta: Selection intensity (higher = stronger preference for top performers)
-            objective_directions: Optional dict for multi-objective direction handling
-        """
-        sample_obj = objectives[candidates[0]]
-        
-        if isinstance(sample_obj, dict):
-            # Multi-objective: aggregate normalized objectives
-            obj_names = list(sample_obj.keys())
-            
-            # Normalize each objective to [0, 1]
-            normalized_objs = {}
-            for obj_name in obj_names:
-                values = [objectives[seq][obj_name] for seq in candidates]
-                min_val, max_val = min(values), max(values)
-                
-                # Handle direction
-                if objective_directions and obj_name in objective_directions:
-                    reverse = objective_directions[obj_name] == "max"
-                else:
-                    reverse = True
-                
-                for seq in candidates:
-                    if seq not in normalized_objs:
-                        normalized_objs[seq] = 0.0
-                    
-                    if max_val > min_val:
-                        norm_val = (objectives[seq][obj_name] - min_val) / (max_val - min_val)
-                        if not reverse:  # For minimization, invert
-                            norm_val = 1.0 - norm_val
-                    else:
-                        norm_val = 0.5  # All equal
-                    
-                    normalized_objs[seq] += norm_val / len(obj_names)  # Average across objectives
-            
-            fitness_values = normalized_objs
-        else:
-            # Single objective: normalize to [0, 1]
-            values = [objectives[seq] for seq in candidates]
-            min_val, max_val = min(values), max(values)
-            
-            fitness_values = {}
-            for seq in candidates:
-                if max_val > min_val:
-                    fitness_values[seq] = (objectives[seq] - min_val) / (max_val - min_val)
-                else:
-                    fitness_values[seq] = 0.5  # All equal
-        
-        # Apply exponential weighting
-        weights = np.array([np.exp(beta * fitness_values[seq]) for seq in candidates])
-        
-        # Handle potential overflow/underflow
-        if np.any(np.isinf(weights)) or np.any(np.isnan(weights)):
-            # Fallback to uniform if numerical issues
-            return random.sample(candidates, m_pool)
-        
-        # Normalize to probabilities
-        probs = weights / weights.sum()
-        
-        # Sample without replacement
-        selected_indices = np.random.choice(len(candidates), size=m_pool, replace=False, p=probs)
-        return [candidates[i] for i in selected_indices]
-
-    def _adalead_selection(
-        self,
-        objectives: Dict[str, Any],
-        adalead_k: float,
-        last_batch_objectives: Optional[Dict[str, Any]] = None
-    ) -> List[str]:
-        """
-        AdaLead selection: adaptive threshold-based resampling (single-objective only).
-        
-        Defines threshold y_t = (1-k) * max(y_last_batch) and returns ALL sequences with y >= y_t.
-        Does not limit to m_pool - returns all sequences above the adaptive threshold.
-        - Flat landscapes: smaller differences mean more sequences pass threshold (exploration)
-        - Steep landscapes: larger differences mean fewer sequences pass threshold (exploitation)
-
-        """
-        if not objectives:
-            return []
-        
-        # Validate k is in [0, 1]
-        if not (0 <= adalead_k <= 1):
-            raise ValueError(f"adalead_k must be in [0, 1], got {adalead_k}")
-        
-        # Check if single or multi-objective
-        sample_obj = next(iter(objectives.values()))
-        if isinstance(sample_obj, dict):
-            raise ValueError("AdaLead selection is only supported for single-objective optimization")
-        
-        # Use last batch for threshold computation if provided, otherwise use all
-        threshold_objs = last_batch_objectives if last_batch_objectives else objectives
-        
-        # Find best value from threshold objectives and compute threshold
-        best_value = max(threshold_objs.values())
-        threshold = (1 - adalead_k) * best_value
-        
-        # Select ALL sequences from objectives that meet threshold
-        candidates = [seq for seq, val in objectives.items() if val >= threshold]
-        
-        print(f"AdaLead: Selected {len(candidates)} sequences above threshold (threshold={threshold:.4f}, max={best_value:.4f}, k={adalead_k})")
-        return candidates
-
-    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
-        if acquisition_kwargs is None:
-            acquisition_kwargs = {}
-        acquisition_values = self.acquisition_function_obj.compute_acquisition(
-            predictions, 
-            acquisition_function, 
-            **acquisition_kwargs
-        )
-        return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
-
 
     def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set, int]:
         """
         Load scores and evaluated sequences from existing log files.
         Returns scores, evaluated_sequences, and last_iteration.
         """
-
         log_path = Path(log_dir)
         scores_file = log_path / "scores.csv"
         
@@ -631,6 +578,36 @@ class BoGA:
         return scores, evaluated_sequences, last_iteration
 
     def run(self, schedule: List[Dict[str, Any]]) -> Dict[str, float]:
+        # Update config with actually-used values and save to output directory
+        if self.logger and hasattr(self.logger, 'log_dir') and isinstance(self.logger.log_dir, (str, Path)):
+            # Update config with all instance values that may have been user-overridden
+            self.config.update_from_used_values(
+                mode=self.mode,
+                n_init=self.n_init,
+                min_sequence_length=self.min_sequence_length,
+                max_sequence_length=self.max_sequence_length,
+                mutation_rate=self.mutation_rate,
+                **{'selection.m_select': self.m_select},
+                **{'selection.k_propose': self.k_propose},
+                **{'selection.selection_method': self.selection_method},
+                **{'selection.top_n_or_frac': self.top_n_or_frac},
+                **{'selection.beta': self.beta},
+                **{'selection.adalead_k': self.adalead_k},
+                **{'selection.selection_pool': self.selection_pool},
+                **{'embedding.method': self.embed_method},
+                **{'embedding.model_path': self.embed_model_path},
+                **{'embedding.batch_size': self.embed_batch_size},
+                **{'embedding.device': self.embed_device},
+                **{'embedding.pca_n_components': self.pca_n_components},
+                **{'validation.n_validate': self.n_validate},
+                **{'validation.min_validation_samples': self.min_validation_samples},
+                **{'validation.min_training_samples': self.min_training_samples},
+            )
+            
+            output_dir = self.logger.log_dir
+            config_path = self.config.save(output_dir)
+            print(f"Saved configuration to {config_path}")
+        
         if self.continue_from_logs:
             print(f"Loading previous results from {self.continue_from_logs}")
             scores, self._evaluated_sequences, last_iteration = self._load_from_logs(self.continue_from_logs)
@@ -650,7 +627,8 @@ class BoGA:
         # Convert initial scores to objectives
         objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
-        first_phase_kwargs = schedule[0].get("acquisition_kwargs", {}) if schedule else {}
+        # Get objective directions for leaderboard display (from scoring_kwargs if available)
+        objective_directions = self.scoring_kwargs.get("objective_directions", {}) if self.scoring_kwargs else {}
 
         if not self.continue_from_logs:
             print("Initial objectives:")
@@ -663,7 +641,7 @@ class BoGA:
 
             # Show initial population leaderboard
             print("Initial population results:")
-            self._print_leaderboard(objectives, 0, objective_directions=first_phase_kwargs.get("objective_directions", {}))
+            self._print_leaderboard(objectives, 0, objective_directions=objective_directions)
 
             # Initial hyperparameter tuning for fresh runs
             init_reduced = self._embed_peptides(list(scores.keys()))
@@ -681,7 +659,7 @@ class BoGA:
             print("Loaded objectives:")
             print(f"Total sequences: {len(objectives)}")
             print("Best existing performers:")
-            self._print_leaderboard(objectives, last_iteration, objective_directions=first_phase_kwargs.get("objective_directions", {}))
+            self._print_leaderboard(objectives, last_iteration, objective_directions=objective_directions)
             
             # For continued runs, optimize hyperparameters on existing data
             existing_reduced = self._embed_peptides(list(scores.keys()))
@@ -690,17 +668,14 @@ class BoGA:
 
         # Run through schedule phases
         global_generation = last_iteration  # Continue from last iteration when resuming
-        objective_directions = {}  # Default value in case schedule is empty
         last_batch_objectives = None  # Track last batch for AdaLead
         
         for phase_index, phase in enumerate(schedule, start=1):
             acquisition_function = phase['acquisition']
             generations = phase['generations']
-            m_select = phase['m_select']
-            k_pool = phase['k_pool']
             
             print(f"\n=== Phase {phase_index}: {acquisition_function} for {generations} generations ===")
-            print(f"Selection: {m_select}, Pool: {k_pool}")
+            print(f"Selection: {self.m_select}, Pool: {self.k_propose}")
 
             for gen in range(1, generations + 1):
                 global_generation += 1
@@ -709,23 +684,26 @@ class BoGA:
                 # Convert scores to objectives FIRST to ensure mutation uses current data
                 objectives = self.scores_to_objective.create_objective(scores, self.objective_function, **self.objective_function_kwargs)
 
-                # Generate new pool via mutation of top M
-                # For parent selection, always use objectives (exploitation)
+                # Get acquisition_kwargs from phase for acquisition-specific parameters
                 acquisition_kwargs = phase.get("acquisition_kwargs", {})
-                objective_directions = acquisition_kwargs.get("objective_directions", {})
+                
+                # For objective_directions, check scoring_kwargs first (multi-objective case)
+                objective_directions = self.scoring_kwargs.get("objective_directions", {})
+                
                 parents = self._select_top_objectives(
                     objectives, 
-                    m_select, 
+                    self.m_select, 
                     objective_directions=objective_directions,
-                    top_fraction=acquisition_kwargs.get("top_fraction", 0.3),
-                    selection_method=acquisition_kwargs.get("selection_method", "uniform"),
-                    beta=acquisition_kwargs.get("beta", 1.0),
-                    adalead_k=acquisition_kwargs.get("adalead_k", 0.05),
-                    last_batch_objectives=last_batch_objectives
+                    top_n_or_frac=self.top_n_or_frac,
+                    selection_method=self.selection_method,
+                    beta=self.beta,
+                    adalead_k=self.adalead_k,
+                    last_batch_objectives=last_batch_objectives,
+                    selection_pool=self.selection_pool
                 )
                 print(f"Selected top {len(parents)} parents for mutation")
                 
-                pool = self.mutator.mutate_pool(parents, k_pool, self._evaluated_sequences, objectives)
+                pool = self.mutator.mutate_pool(parents, self.k_propose, self._evaluated_sequences, objectives)
                 print(f"Generated candidate pool of {len(pool)} sequences")
 
                 # Embed scored peptides + candidates together with fresh scaling/PCA
@@ -751,7 +729,7 @@ class BoGA:
 
                 # Select candidates using acquisition function
                 acquisition_kwargs = phase.get("acquisition_kwargs", {})
-                candidates = self._select_top_predictions(preds, m_select, acquisition_function, acquisition_kwargs)
+                candidates = self._select_top_predictions(preds, self.m_select, acquisition_function, acquisition_kwargs)
 
                 print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
 
@@ -787,3 +765,102 @@ class BoGA:
         self._print_leaderboard(final_objectives, global_generation, objective_directions=objective_directions)
         
         return final_objectives
+    
+    def _exponential_selection(
+        self, 
+        candidates: List[str], 
+        objectives: Dict[str, Any], 
+        m_pool: int, 
+        beta: float,
+        objective_directions: Dict[str, str] = None
+    ) -> List[str]:
+        """
+        Select sequences using exponential weighting based on normalized objectives.
+        """
+        sample_obj = objectives[candidates[0]]
+        
+        if isinstance(sample_obj, dict):
+            obj_names = list(sample_obj.keys())
+            normalized_objs = {}
+            for obj_name in obj_names:
+                values = [objectives[seq][obj_name] for seq in candidates]
+                min_val, max_val = min(values), max(values)
+
+                if objective_directions and obj_name in objective_directions:
+                    reverse = objective_directions[obj_name] == "max"
+                else:
+                    reverse = True
+                
+                for seq in candidates:
+                    if seq not in normalized_objs:
+                        normalized_objs[seq] = 0.0
+                    
+                    if max_val > min_val:
+                        norm_val = (objectives[seq][obj_name] - min_val) / (max_val - min_val)
+                        if not reverse:  # For minimization, invert
+                            norm_val = 1.0 - norm_val
+                    else:
+                        norm_val = 0.5  # All equal
+                    
+                    normalized_objs[seq] += norm_val / len(obj_names)  # Average across objectives
+            
+            fitness_values = normalized_objs
+        else:
+            values = [objectives[seq] for seq in candidates]
+            min_val, max_val = min(values), max(values)
+            
+            fitness_values = {}
+            for seq in candidates:
+                if max_val > min_val:
+                    fitness_values[seq] = (objectives[seq] - min_val) / (max_val - min_val)
+                else:
+                    fitness_values[seq] = 0.5  # All equal
+        weights = np.array([np.exp(beta * fitness_values[seq]) for seq in candidates])
+        if np.any(np.isinf(weights)) or np.any(np.isnan(weights)):
+            return random.sample(candidates, m_pool)
+        probs = weights / weights.sum()
+        selected_indices = np.random.choice(len(candidates), size=m_pool, replace=False, p=probs)
+        return [candidates[i] for i in selected_indices]
+
+    def _adalead_selection(
+        self,
+        objectives: Dict[str, Any],
+        adalead_k: float,
+        last_batch_objectives: Optional[Dict[str, Any]] = None
+    ) -> List[str]:
+        """
+        AdaLead selection: adaptive threshold-based resampling (single-objective only).
+        """
+        if not objectives:
+            return []
+        
+        if not (0 <= adalead_k <= 1):
+            raise ValueError(f"adalead_k must be in [0, 1], got {adalead_k}")
+        
+        # Check for multi-objective (reject early)
+        sample_obj = next(iter(objectives.values()))
+        if isinstance(sample_obj, dict):
+            raise ValueError("AdaLead selection is only supported for single-objective optimization")
+        
+        # Determine which objectives to use for threshold calculation
+        threshold_objectives = last_batch_objectives if last_batch_objectives else objectives
+        
+        # Find best value and compute threshold
+        best_value = max(threshold_objectives.values())
+        threshold = (1 - adalead_k) * best_value
+        
+        # Select ALL sequences from full objectives that meet threshold
+        candidates = [seq for seq, val in objectives.items() if val >= threshold]
+        
+        print(f"AdaLead: Selected {len(candidates)} sequences above threshold (threshold={threshold:.4f}, max={best_value:.4f}, k={adalead_k})")
+        return candidates
+
+    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
+        if acquisition_kwargs is None:
+            acquisition_kwargs = {}
+        acquisition_values = self.acquisition_function_obj.compute_acquisition(
+            predictions, 
+            acquisition_function, 
+            **acquisition_kwargs
+        )
+        return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]

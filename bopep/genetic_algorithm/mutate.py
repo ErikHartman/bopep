@@ -36,14 +36,6 @@ class PeptideMutator:
     def mutate_sequence(self, seq: str, evaluated_sequences: Set[str], objectives: Dict[str, float] = None) -> str:
         """
         Mutate a sequence using uniform random substitutions, insertions, and deletions.
-        
-        Args:
-            seq: Parent sequence to mutate
-            evaluated_sequences: Set of already evaluated sequences to avoid
-            objectives: (Unused, kept for API compatibility)
-            
-        Returns:
-            Mutated child sequence, guaranteed to be novel
         """
         max_attempts = 10_000
         ops_space = np.array(["sub", "del", "ins"], dtype=object)
@@ -91,15 +83,6 @@ class PeptideMutator:
     def mutate_pool(self, parents: List[str], k_pool: int, evaluated_sequences: Set[str], objectives: Dict[str, float] = None) -> List[str]:
         """
         Generate a pool of mutated offspring from parent sequences.
-        
-        Args:
-            parents: List of parent sequences to mutate
-            k_pool: Desired size of the mutated pool
-            evaluated_sequences: Set of already evaluated sequences to avoid
-            objectives: (Unused, kept for API compatibility)
-            
-        Returns:
-            List of unique mutated sequences
         """
         pool = set()
         attempts = 0
@@ -128,14 +111,3 @@ if __name__ == "__main__":
         child = mutator.mutate_sequence(parent1, evaluated)
         evaluated.add(child)
         print(f"Mutant {i+1}: {child}")
-    
-    print("\n=== Crossover Examples ===")
-    print("Single-point crossover:")
-    for i in range(3):
-        child = mutator.crossover(parent1, parent2, method="single")
-        print(f"Child {i+1}: {child}")
-    
-    print("\nTwo-point crossover:")
-    for i in range(3):
-        child = mutator.crossover(parent1, parent2, method="two")
-        print(f"Child {i+1}: {child}")

@@ -5,8 +5,7 @@ import pytest
 import numpy as np
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
-from typing import Dict, Any, List
+from unittest.mock import Mock, patch
 
 from bopep.genetic_algorithm.mutate import PeptideMutator
 from bopep.genetic_algorithm.generate import BoGA
@@ -108,12 +107,12 @@ class TestPeptideMutator:
         )
         
         parents = ["AAAAA", "CCCCC", "GGGGG"]
-        k_pool = 5
+        k_propose = 5
         evaluated = set()
         
-        pool = mutator.mutate_pool(parents, k_pool, evaluated)
+        pool = mutator.mutate_pool(parents, k_propose, evaluated)
         
-        assert len(pool) <= k_pool  # May be less if can't generate enough unique sequences
+        assert len(pool) <= k_propose  # May be less if can't generate enough unique sequences
         assert all(isinstance(seq, str) for seq in pool)
         assert all(seq not in evaluated for seq in pool)
         assert all(seq not in parents for seq in pool)
@@ -127,11 +126,11 @@ class TestPeptideMutator:
         )
         
         parents = ["AAAAA"]
-        k_pool = 3
+        k_propose = 3
         # Create a large evaluated set to make it harder to find new sequences
         evaluated = {f"AAAA{aa}" for aa in "BCDEFGH"}
         
-        pool = mutator.mutate_pool(parents, k_pool, evaluated)
+        pool = mutator.mutate_pool(parents, k_propose, evaluated)
         
         assert all(seq not in evaluated for seq in pool)
 
@@ -145,6 +144,23 @@ class TestBoGA:
         return {
             'network_type': 'mlp',
             'model_type': 'nn_ensemble'
+        }
+
+    @pytest.fixture
+    def basic_docker_kwargs(self):
+        """Basic docker kwargs for testing"""
+        return {
+            'output_dir': '/fake/output',
+            'gpu_ids': ['0'],
+            'models': ['boltz']
+        }
+    
+    @pytest.fixture
+    def basic_scoring_kwargs(self):
+        """Basic scoring kwargs for testing"""
+        return {
+            'scores_to_include': ['interface_dG', 'iptm'],
+            'n_jobs': 4
         }
 
     @pytest.fixture
@@ -204,37 +220,41 @@ class TestBoGA:
                 'surr_mgr': mock_surr_mgr_instance,
             }
 
-    def test_init_basic(self, mock_dependencies, basic_surrogate_kwargs):
+    def test_init_basic(self, mock_dependencies, basic_surrogate_kwargs, basic_docker_kwargs, basic_scoring_kwargs):
         """Test basic BoGA initialization"""
         schedule = [
             {
                 'acquisition': 'ei',
                 'generations': 5,
                 'm_select': 10,
-                'k_pool': 20,
+                'k_propose': 20,
                 
             }
         ]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
-            surrogate_model_kwargs=basic_surrogate_kwargs
+            surrogate_model_kwargs=basic_surrogate_kwargs,
+            docker_kwargs=basic_docker_kwargs,
+            scoring_kwargs=basic_scoring_kwargs
         )
         
         assert boga.target_structure_path == "/fake/path.pdb"
         assert boga.initial_sequences == "ACDEFG"
-        assert boga.min_sequence_length == 6
-        assert boga.max_sequence_length == 40
-        assert boga.n_init == 130
+        assert boga.min_sequence_length == 8  # From config defaults
+        assert boga.max_sequence_length == 25  # From config defaults
+        assert boga.n_init == 100  # From config defaults
         assert boga.pca_n_components == 10
 
-    def test_init_custom_params(self, mock_dependencies, basic_surrogate_kwargs):
+    def test_init_custom_params(self, mock_dependencies, basic_surrogate_kwargs, basic_docker_kwargs, basic_scoring_kwargs):
         """Test BoGA initialization with custom parameters"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences=["ACDEFG", "HIJKLM"],
             n_init=50,
@@ -243,7 +263,9 @@ class TestBoGA:
             mutation_rate=0.05,
             embed_method='aaindex',
             pca_n_components=5,
-            surrogate_model_kwargs=basic_surrogate_kwargs
+            surrogate_model_kwargs=basic_surrogate_kwargs,
+            docker_kwargs=basic_docker_kwargs,
+            scoring_kwargs=basic_scoring_kwargs
         )
         
         assert boga.n_init == 50
@@ -253,27 +275,34 @@ class TestBoGA:
         assert boga.embed_method == 'aaindex'
         assert boga.pca_n_components == 5
 
-    def test_init_no_pca_components_error(self, mock_dependencies, basic_surrogate_kwargs):
-        """Test that initialization fails without PCA components"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+    def test_init_no_pca_components_error(self, mock_dependencies, basic_surrogate_kwargs, basic_docker_kwargs, basic_scoring_kwargs):
+        """Test that initialization uses config default when pca_n_components not provided"""
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
-        with pytest.raises(ValueError, match="pca_n_components must be specified"):
-            BoGA(
-                target_structure_path="/fake/path.pdb",
-                initial_sequences="ACDEFG",
-                pca_n_components=None,
-                surrogate_model_kwargs=basic_surrogate_kwargs
-            )
+        # Now pca_n_components=None uses config default (100) instead of raising error
+        boga = BoGA(
+            mode='binding',
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=None,
+            surrogate_model_kwargs=basic_surrogate_kwargs,
+            docker_kwargs=basic_docker_kwargs,
+            scoring_kwargs=basic_scoring_kwargs
+        )
+        assert boga.pca_n_components == 100  # Config default
 
-    def test_init_none_initial_sequences_error(self, mock_dependencies, basic_surrogate_kwargs):
+    def test_init_none_initial_sequences_error(self, mock_dependencies, basic_surrogate_kwargs, basic_docker_kwargs, basic_scoring_kwargs):
         """Test that initialization fails with None initial sequences during preparation"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences=None,
             pca_n_components=10,
-            surrogate_model_kwargs=basic_surrogate_kwargs
+            surrogate_model_kwargs=basic_surrogate_kwargs,
+            docker_kwargs=basic_docker_kwargs,
+            scoring_kwargs=basic_scoring_kwargs
         )
         
         # Error should happen when preparing population, not during init
@@ -282,9 +311,10 @@ class TestBoGA:
 
     def test_random_sequence(self, mock_dependencies, basic_surrogate_kwargs):
         """Test random sequence generation"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -298,9 +328,10 @@ class TestBoGA:
 
     def test_generate_initial_sequences(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial sequence generation"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             n_init=20,
@@ -314,9 +345,10 @@ class TestBoGA:
 
     def test_prepare_initial_population_single_sequence(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial population preparation from single sequence"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             n_init=5,
@@ -331,10 +363,11 @@ class TestBoGA:
 
     def test_prepare_initial_population_list_sequences(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial population preparation from list of sequences"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         initial_seqs = ["ACDEFG", "HIKLMN", "NPQRSV"]  # Changed J to I and O to V to avoid invalid amino acids
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences=initial_seqs,
             n_init=5,
@@ -349,10 +382,11 @@ class TestBoGA:
 
     def test_prepare_initial_population_many_sequences(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial population when we have more sequences than needed"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         initial_seqs = [f"ACDEFG{i:02d}A" for i in range(20)]  # 20 sequences
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences=initial_seqs,
             n_init=10,
@@ -365,9 +399,10 @@ class TestBoGA:
 
     def test_embed_peptides(self, mock_dependencies, basic_surrogate_kwargs):
         """Test that embedding peptides works properly (no longer uses caching)"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -405,6 +440,7 @@ class TestBoGA:
     def test_select_top_objectives(self, mock_dependencies, basic_surrogate_kwargs):
         """Test selection of top objectives"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -428,6 +464,7 @@ class TestBoGA:
     def test_select_top_objectives_exponential(self, mock_dependencies, basic_surrogate_kwargs):
         """Test exponential selection with beta parameter"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -457,6 +494,7 @@ class TestBoGA:
     def test_select_top_objectives_integer_top_fraction(self, mock_dependencies, basic_surrogate_kwargs):
         """Test selection with integer top_fraction"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -465,20 +503,20 @@ class TestBoGA:
         
         objectives = {f"SEQ{i}": float(i) / 10.0 for i in range(1, 11)}
         
-        # Test with integer top_fraction (absolute number)
+        # Test with integer top_n_or_frac (absolute number)
         top_seqs = boga._select_top_objectives(
-            objectives, 
+            objectives,
             m_pool=3,
-            top_fraction=5  # Take top 5 sequences
+            top_n_or_frac=5  # Take top 5 sequences
         )
-        
         assert len(top_seqs) == 3
 
     def test_select_top_predictions(self, mock_dependencies, basic_surrogate_kwargs):
         """Test selection of top predictions using acquisition function"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -506,7 +544,7 @@ class TestBoGA:
 
     def test_load_from_logs(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test loading previous results from log files"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         # Create mock log file
         log_dir = Path(temp_dir)
@@ -518,6 +556,7 @@ HIKLMN,-8.2,0.6,1,phase1,2024-01-01
         scores_file.write_text(scores_content)
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -536,9 +575,10 @@ HIKLMN,-8.2,0.6,1,phase1,2024-01-01
 
     def test_load_from_logs_missing_file(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test loading from logs when file doesn't exist"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -550,7 +590,7 @@ HIKLMN,-8.2,0.6,1,phase1,2024-01-01
 
     def test_iteration_continuation(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test that iterations continue from last iteration when resuming from logs"""
-        schedule = [{'acquisition': 'ei', 'generations': 2, 'm_select': 2, 'k_pool': 3}]
+        schedule = [{'acquisition': 'ei', 'generations': 2, 'm_select': 2, 'k_propose': 3}]
         
         # Create mock log file with iteration 5 as the last iteration
         log_dir = Path(temp_dir)
@@ -562,6 +602,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         scores_file.write_text(scores_content)
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=3,
@@ -606,11 +647,12 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
 
     def test_logger_initialization_with_continue_from_logs(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test that logger doesn't overwrite logs when continuing from logs"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         # Test case 1: continue_from_logs only (should not overwrite)
         with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
             boga1 = BoGA(
+                mode='binding',
                 target_structure_path="/fake/path.pdb",
                 initial_sequences="ACDEFG",
                 pca_n_components=10,
@@ -623,6 +665,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         # Test case 2: both log_dir and continue_from_logs (should prioritize continue_from_logs)
         with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
             boga2 = BoGA(
+                mode='binding',
                 target_structure_path="/fake/path.pdb",
                 initial_sequences="ACDEFG",
                 pca_n_components=10,
@@ -636,6 +679,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
         # Test case 3: log_dir only (should overwrite)
         with patch('bopep.genetic_algorithm.generate.Logger') as mock_logger:
             boga3 = BoGA(
+                mode='binding',
                 target_structure_path="/fake/path.pdb",
                 initial_sequences="ACDEFG",
                 pca_n_components=10,
@@ -653,12 +697,13 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
                 'acquisition': 'ei',
                 'generations': 1,
                 'm_select': 2,
-                'k_pool': 3,
+                'k_propose': 3,
                 
             }
         ]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences=["ACDEFG", "HIJKLM"],
             n_init=2,
@@ -716,9 +761,10 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
 
     def test_invalid_initial_sequences_type(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initialization with invalid initial sequences type"""
-        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_pool': 10}]
+        schedule = [{'acquisition': 'ei', 'generations': 1, 'm_select': 5, 'k_propose': 10}]
         
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences=123,  # Invalid type
             pca_n_components=10,
@@ -733,6 +779,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_selection_basic(self, mock_dependencies, basic_surrogate_kwargs):
         """Test basic AdaLead selection with default k"""
         boga = BoGA(
+            mode= 'binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -758,6 +805,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_selection_with_last_batch(self, mock_dependencies, basic_surrogate_kwargs):
         """Test AdaLead selection using last batch objectives for threshold"""
         boga = BoGA(
+            mode= 'binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -790,6 +838,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_selection_larger_k(self, mock_dependencies, basic_surrogate_kwargs):
         """Test AdaLead with larger k (more exploitation)"""
         boga = BoGA(
+            mode= 'binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -820,6 +869,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_selection_smaller_k(self, mock_dependencies, basic_surrogate_kwargs):
         """Test AdaLead with smaller k (more exploration)"""
         boga = BoGA(
+            mode= 'binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -845,6 +895,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_selection_k_validation(self, mock_dependencies, basic_surrogate_kwargs):
         """Test that AdaLead validates k is in [0, 1]"""
         boga = BoGA(
+            mode= 'binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -872,6 +923,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_selection_rejects_multi_objective(self, mock_dependencies, basic_surrogate_kwargs):
         """Test that AdaLead rejects multi-objective problems"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -890,6 +942,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_selection_empty_objectives(self, mock_dependencies, basic_surrogate_kwargs):
         """Test AdaLead with empty objectives"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -902,6 +955,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_integration_with_select_top_objectives(self, mock_dependencies, basic_surrogate_kwargs):
         """Test AdaLead integration through _select_top_objectives"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -933,6 +987,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_rejects_multi_objective_through_select_top(self, mock_dependencies, basic_surrogate_kwargs):
         """Test that AdaLead rejects multi-objective when called through _select_top_objectives"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -955,6 +1010,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_default_k_value(self, mock_dependencies, basic_surrogate_kwargs):
         """Test that default adalead_k is 0.05"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -983,6 +1039,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_flat_landscape(self, mock_dependencies, basic_surrogate_kwargs):
         """Test AdaLead behavior on flat landscape (all similar values)"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
@@ -1008,6 +1065,7 @@ HIKLMN,-8.2,0.6,5,phase1,2024-01-01
     def test_adalead_steep_landscape(self, mock_dependencies, basic_surrogate_kwargs):
         """Test AdaLead behavior on steep landscape (one clear winner)"""
         boga = BoGA(
+            mode='binding',
             target_structure_path="/fake/path.pdb",
             initial_sequences="ACDEFG",
             pca_n_components=10,
