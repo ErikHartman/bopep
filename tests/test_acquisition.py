@@ -1,10 +1,3 @@
-"""
-Tests for ParEGO-based acquisition functions.
-
-Tests the new acquisition.py module which provides ParEGO multi-objective optimization
-with proper single-objective acquisition functions.
-"""
-
 import pytest
 import numpy as np
 from bopep.bayes.acquisition import AcquisitionFunction

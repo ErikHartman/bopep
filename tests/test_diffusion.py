@@ -1,12 +1,12 @@
 """
-Tests for the design module (BoRF pipeline).
+Tests for the diffusion module (BoRF pipeline).
 """
 import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 import pandas as pd
 
-from bopep.design.borf import Borf
+from bopep.diffusion.borf import BoRF
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def mock_mpnn_env(temp_dir):
 @pytest.fixture
 def sample_csv_path():
     """Path to the sample CSV file in the data directory."""
-    return "./data/peptide_samples.csv"
+    return "./data/sequence_samples.csv"
 
 
 @pytest.fixture
@@ -85,12 +85,12 @@ def borf_config(temp_dir, mock_rfdiffusion_path, mock_protein_mpnn_path, mock_pd
     }
 
 
-class TestBorf:
-    """Test the main Borf class."""
+class TestBoRF:
+    """Test the main BoRF class."""
 
     def test_init_valid_config(self, borf_config):
         """Test successful initialization with valid configuration."""
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         
         assert borf.output_dir == Path(borf_config['output_dir'])
         assert borf.config['rfdiffusion_path'] == borf_config['rfdiffusion_path']
@@ -101,7 +101,7 @@ class TestBorf:
     def test_init_missing_pdb_path(self, temp_dir, mock_rfdiffusion_path, mock_protein_mpnn_path, mock_mpnn_env):
         """Test initialization fails without pdb_path."""
         with pytest.raises(ValueError, match="pdb_path is a mandatory argument"):
-            Borf(
+            BoRF(
                 output_dir=temp_dir,
                 rfdiffusion_path=mock_rfdiffusion_path,
                 protein_mpnn_path=mock_protein_mpnn_path,
@@ -112,7 +112,7 @@ class TestBorf:
     def test_init_invalid_rfdiffusion_path(self, temp_dir, mock_protein_mpnn_path, mock_pdb_file, mock_mpnn_env):
         """Test initialization fails with invalid RFDiffusion path."""
         with pytest.raises(ValueError, match="RFDiffusion path does not exist"):
-            Borf(
+            BoRF(
                 output_dir=temp_dir,
                 rfdiffusion_path="/nonexistent/path",
                 protein_mpnn_path=mock_protein_mpnn_path,
@@ -123,7 +123,7 @@ class TestBorf:
     def test_init_invalid_mpnn_env(self, temp_dir, mock_rfdiffusion_path, mock_protein_mpnn_path, mock_pdb_file):
         """Test initialization fails with invalid MPNN environment."""
         with pytest.raises(ValueError, match="MPNN environment path does not exist"):
-            Borf(
+            BoRF(
                 output_dir=temp_dir,
                 rfdiffusion_path=mock_rfdiffusion_path,
                 protein_mpnn_path=mock_protein_mpnn_path,
@@ -133,7 +133,7 @@ class TestBorf:
 
     def test__validate_configuration_valid(self, borf_config):
         """Test configuration validation with valid setup."""
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         validation = borf._validate_configuration()
         
         assert validation['rfdiffusion_configured'] is True
@@ -147,7 +147,7 @@ class TestBorf:
 
     def test__validate_configuration_missing_components(self, temp_dir, mock_pdb_file, mock_mpnn_env):
         """Test configuration validation with missing components."""
-        borf = Borf(
+        borf = BoRF(
             output_dir=temp_dir,
             rfdiffusion_path="",
             protein_mpnn_path="", 
@@ -161,13 +161,13 @@ class TestBorf:
         assert validation['rfdiffusion_exists'] is False
         assert validation['protein_mpnn_exists'] is False
 
-    @patch('bopep.design.borf.RFDiffusion')
+    @patch('bopep.diffusion.borf.RFDiffusion')
     def test_rfdiffusion_property_lazy_initialization(self, mock_rfdiffusion_class, borf_config):
         """Test that RFDiffusion is lazily initialized."""
         mock_instance = Mock()
         mock_rfdiffusion_class.return_value = mock_instance
         
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         
         # Should not be initialized yet
         assert borf._rfdiffusion is None
@@ -180,13 +180,13 @@ class TestBorf:
         assert rf_instance is mock_instance
         mock_rfdiffusion_class.assert_called_once()
 
-    @patch('bopep.design.borf.MPNNFastRelax')
+    @patch('bopep.diffusion.borf.MPNNFastRelax')
     def test_mpnn_fastrelax_property_lazy_initialization(self, mock_mpnn_class, borf_config):
         """Test that MPNNFastRelax is lazily initialized."""
         mock_instance = Mock()
         mock_mpnn_class.return_value = mock_instance
         
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         
         # Should not be initialized yet
         assert borf._mpnn_fastrelax is None
@@ -200,7 +200,7 @@ class TestBorf:
         mock_mpnn_class.assert_called_once()
 
 
-    @patch('bopep.design.borf.RFDiffusion')
+    @patch('bopep.diffusion.borf.RFDiffusion')
     def test_run_rfdiffusion_only(self, mock_rfdiffusion_class, borf_config, sample_csv_path):
         """Test running only the RFDiffusion step."""
         # Setup mocks
@@ -211,7 +211,7 @@ class TestBorf:
         }
         mock_rfdiffusion_class.return_value = mock_rf_instance
         
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         
         # Test with provided samples CSV
         results = borf._run_rfdiffusion_only(
@@ -228,7 +228,7 @@ class TestBorf:
             skip_existing=False
         )
 
-    @patch('bopep.design.borf.MPNNFastRelax')
+    @patch('bopep.diffusion.borf.MPNNFastRelax')
     def test_run_mpnn_fastrelax_only(self, mock_mpnn_class, borf_config):
         """Test running only the MPNN + FastRelax step."""
         # Setup mocks
@@ -239,10 +239,10 @@ class TestBorf:
         }
         mock_mpnn_class.return_value = mock_mpnn_instance
         
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         
         results = borf._run_mpnn_fastrelax_only(
-            designs_dir="test_designs",
+            designs_dir="test_diffusions",
             temperature=0.2,
             relax_cycles=2,
             threads=8,
@@ -252,7 +252,7 @@ class TestBorf:
         
         assert results['processed_pdbs'] == 10
         mock_mpnn_instance.run.assert_called_once_with(
-            designs_dir="test_designs",
+            designs_dir="test_diffusions",
             temperature=0.2,
             relax_cycles=2,
             threads=8,
@@ -260,8 +260,8 @@ class TestBorf:
             output_csv="custom_output.csv"
         )
 
-    @patch('bopep.design.borf.RFDiffusion')
-    @patch('bopep.design.borf.MPNNFastRelax')
+    @patch('bopep.diffusion.borf.RFDiffusion')
+    @patch('bopep.diffusion.borf.MPNNFastRelax')
     def test_run_complete_pipeline(self, mock_mpnn_class, mock_rf_class, borf_config, sample_csv_path):
         """Test running the complete pipeline."""
         # Setup mocks
@@ -280,7 +280,7 @@ class TestBorf:
         }
         mock_mpnn_class.return_value = mock_mpnn_instance
         
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         
         results = borf.run(
             samples_csv=sample_csv_path,
@@ -298,12 +298,12 @@ class TestBorf:
         assert 'rfdiffusion_results' in results
         assert 'mpnn_fastrelax_results' in results
 
-    @patch('bopep.design.borf.RFDiffusion')
-    @patch('bopep.design.borf.MPNNFastRelax')
+    @patch('bopep.diffusion.borf.RFDiffusion')
+    @patch('bopep.diffusion.borf.MPNNFastRelax')
     def test_run_pipeline_validation_failure(self, mock_mpnn_class, mock_rf_class, temp_dir, mock_pdb_file, mock_mpnn_env):
         """Test pipeline fails with invalid configuration."""
-        # Create Borf with incomplete configuration
-        borf = Borf(
+        # Create BoRF with incomplete configuration
+        borf = BoRF(
             output_dir=temp_dir,
             rfdiffusion_path="",  # Invalid path
             protein_mpnn_path="",  # Invalid path
@@ -314,7 +314,7 @@ class TestBorf:
         with pytest.raises(ValueError, match="Pipeline not properly configured"):
             borf.run()
 
-    @patch('bopep.design.borf.RFDiffusion')
+    @patch('bopep.diffusion.borf.RFDiffusion')
     def test_run_rfdiffusion_with_custom_samples(self, mock_rf_class, borf_config, temp_dir):
         """Test RFDiffusion step with custom samples CSV."""
         mock_rf_instance = Mock()
@@ -323,7 +323,7 @@ class TestBorf:
         
         custom_csv = str(Path(temp_dir) / "custom_samples.csv")
         
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         results = borf._run_rfdiffusion_only(samples_csv=custom_csv)
         
         mock_rf_instance.run.assert_called_once_with(
@@ -334,7 +334,7 @@ class TestBorf:
 
     def test_rfdiffusion_property_no_path(self, temp_dir, mock_pdb_file, mock_mpnn_env):
         """Test RFDiffusion property raises error when path not configured."""
-        borf = Borf(
+        borf = BoRF(
             output_dir=temp_dir,
             rfdiffusion_path="",  # Empty path
             protein_mpnn_path="/some/path",
@@ -346,7 +346,7 @@ class TestBorf:
             _ = borf.rfdiffusion
 
 
-class TestBorfIntegration:
+class TestBoRFIntegration:
     """Integration tests for BoRF that test component interactions."""
 
     @patch('subprocess.run')
@@ -355,14 +355,14 @@ class TestBorfIntegration:
         # Mock subprocess calls to succeed
         mock_subprocess.return_value = Mock(returncode=0)
         temp_dir = Path(temp_dir)
-        # Create designs directory and sample PDB files
-        designs_dir = temp_dir / "designs"
+        # Create diffusions directory and sample PDB files
+        designs_dir = temp_dir / "diffusions"
         designs_dir.mkdir()
         for i in range(2):
-            (designs_dir / f"design_{i}.pdb").touch()
+            (designs_dir / f"diffusion_{i}.pdb").touch()
         
-        with patch('bopep.design.diffusion.RFDiffusion.run') as mock_rf_run, \
-             patch('bopep.design.mpnn_fastrelax.MPNNFastRelax.run') as mock_mpnn_run:
+        with patch('bopep.diffusion.diffusion.RFDiffusion.run') as mock_rf_run, \
+             patch('bopep.diffusion.mpnn_fastrelax.MPNNFastRelax.run') as mock_mpnn_run:
             
             mock_rf_run.return_value = {'successful_runs': 2, 'failed_runs': 0}
             mock_mpnn_run.return_value = {
@@ -371,7 +371,7 @@ class TestBorfIntegration:
                 'interface_dg_scores': 3
             }
             
-            borf = Borf(**borf_config)
+            borf = BoRF(**borf_config)
             results = borf.run(samples_csv=sample_csv_path, rf_dry_run=True)
             
             assert results['pipeline_success'] is True
@@ -400,7 +400,7 @@ class TestBorfIntegration:
         for hotspot in df['hotspots']:
             assert ',' in str(hotspot) or len(str(hotspot).strip()) > 0
 
-    @patch('bopep.design.borf.RFDiffusion')
+    @patch('bopep.diffusion.borf.RFDiffusion')
     def test_rfdiffusion_with_real_csv_data(self, mock_rfdiffusion_class, borf_config, sample_csv_path):
         """Test RFDiffusion step with real CSV data from data directory."""
         mock_rf_instance = Mock()
@@ -410,7 +410,7 @@ class TestBorfIntegration:
         }
         mock_rfdiffusion_class.return_value = mock_rf_instance
         
-        borf = Borf(**borf_config)
+        borf = BoRF(**borf_config)
         
         # Test with the real CSV file
         results = borf._run_rfdiffusion_only(samples_csv=sample_csv_path)
@@ -422,14 +422,6 @@ class TestBorfIntegration:
             dry_run=False,
             skip_existing=True
         )
-
-
-# Add test for handling missing create_sample_data method
-def test_rfdiffusion_without_samples_csv_should_fail():
-    """Test that calling _run_rfdiffusion_only without samples_csv fails appropriately when create_sample_data is not implemented."""
-    # This test documents the expected behavior when no samples_csv is provided
-    # Since create_sample_data is not implemented, this should raise an AttributeError
-    pass
 
 
 if __name__ == "__main__":

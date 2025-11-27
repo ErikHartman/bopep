@@ -14,7 +14,7 @@ class RFDiffusion:
     A class for running RFdiffusion protein design tasks with GPU parallelization.
     
     This class handles the execution of RFdiffusion inference on multiple GPUs,
-    processes peptide samples, and manages output directories and logging.
+    processes samples, and manages output directories and logging.
     """
     
     def __init__(
@@ -59,7 +59,7 @@ class RFDiffusion:
         self.output_dir = Path(output_dir)
         self.designs_dir = self.output_dir / "designs"
         self.logs_dir = self.output_dir / "logs"
-        self.samples_csv = self.output_dir / "samples" / "peptide_samples.csv"
+        self.samples_csv = self.output_dir / "samples" / "sequence_samples.csv"
 
         # RFdiffusion configuration paths
         self.pdb_path = Path(pdb_path) if pdb_path else None
@@ -101,7 +101,7 @@ class RFDiffusion:
 
     def _load_samples(self, csv_path: Optional[str] = None) -> pd.DataFrame:
         """
-        Load peptide samples from CSV file.
+        Load samples from CSV file.
         
         Parameters
         ----------

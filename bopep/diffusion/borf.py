@@ -14,26 +14,26 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from bopep.design.diffusion import RFDiffusion
-from bopep.design.mpnn_fastrelax import MPNNFastRelax
+from bopep.diffusion.diffusion import RFDiffusion
+from bopep.diffusion.mpnn_fastrelax import MPNNFastRelax
 
 
-class Borf:
+class BoRF:
     """
-    A comprehensive orchestrator for protein-peptide design synthesis.
+    A comprehensive orchestrator for diffusion based design.
     
-    This class coordinates the complete pipeline from initial peptide specifications
+    This class coordinates the complete pipeline from initial specifications
     through RFDiffusion structure generation to ProteinMPNN sequence design and
     PyRosetta FastRelax optimization.
     
     Examples
     --------
     >>> # Basic usage
-    >>> borf = Borf(output_dir="my_synthesis")
-    >>> results = borf.run(samples_csv="peptide_samples.csv")
+    >>> borf = BoRF(output_dir="my_synthesis")
+    >>> results = borf.run(samples_csv="sequence_samples.csv")
 
     >>> # Custom configuration
-    >>> borf = Borf(
+    >>> borf = BoRF(
     ...     output_dir="custom_output",
     ...     rfdiffusion_path="/path/to/RFdiffusion",
     ...     protein_mpnn_path="/path/to/ProteinMPNN",
@@ -55,7 +55,7 @@ class Borf:
         mpnn_env: Optional[str] = None,
     ):
         """
-        Initialize the Borf orchestrator.
+        Initialize the BoRF orchestrator.
         
         Parameters
         ----------
@@ -118,7 +118,7 @@ class Borf:
         # Create base output directory
         self.output_dir.mkdir(exist_ok=True, parents=True)
 
-        logging.info(f"Borf initialized with output directory: {self.output_dir}")
+        logging.info(f"BoRF initialized with output directory: {self.output_dir}")
     
     def run(
         self,
@@ -277,7 +277,7 @@ class Borf:
     
     def _print_configuration(self):
         """Print the current configuration and validation status."""
-        print("=== Borf Configuration ===")
+        print("=== BoRF Configuration ===")
         for key, value in self.config.items():
             if value is None:
                 value = "Not set"
@@ -340,11 +340,11 @@ class Borf:
     
 
 def main():
-    """Command-line interface for Borf."""
+    """Command-line interface for BoRF."""
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="Run complete protein-peptide synthesis pipeline",
+        description="Run complete design pipeline",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
@@ -373,8 +373,8 @@ def main():
     args = parser.parse_args()
     
     try:
-        # Initialize Borf
-        borf = Borf(
+        # Initialize BoRF
+        borf = BoRF(
             output_dir=args.output_dir,
             rfdiffusion_path=args.rfdiffusion_path,
             protein_mpnn_path=args.protein_mpnn_path,

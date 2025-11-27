@@ -1,13 +1,5 @@
-"""
-Tests for AlphaFold monomer folding (unconditional generation).
-
-This module tests the AlphaFoldMonomer class which handles folding of
-single-chain proteins using ColabFold.
-"""
-
 import pytest
 import tempfile
-import os
 import json
 from pathlib import Path
 from unittest.mock import Mock, patch

@@ -122,9 +122,9 @@ class MPNNFastRelax:
         
         return sorted(pdbs)
     
-    def _extract_peptide_from_structure(self, structure_file: str) -> Optional[Dict[str, Any]]:
+    def _extract_sequence_from_structure(self, structure_file: str) -> Optional[Dict[str, Any]]:
         """
-        Extract peptide information from structure file (PDB/CIF).
+        Extract sequence information from structure file (PDB/CIF).
         
         Parameters
         ----------
@@ -134,7 +134,7 @@ class MPNNFastRelax:
         Returns
         -------
         Optional[Dict[str, Any]]
-            Dictionary containing peptide information or None if failed.
+            Dictionary containing sequence information or None if failed.
         """
         try:
             structure = parse_structure(structure_file, structure_id="structure")
@@ -555,7 +555,7 @@ class MPNNFastRelax:
             dg_df = pd.DataFrame()
         
         # Load sample data
-        sample_csv_path = self.output_dir / "samples" / "peptide_samples.csv"
+        sample_csv_path = self.output_dir / "samples" / "sequence_samples.csv"
         if sample_csv_path.exists():
             sample_df = pd.read_csv(sample_csv_path)
         else:
@@ -583,7 +583,7 @@ class MPNNFastRelax:
                         cycle = ""
                     fasta_cycle_name = fa.name
                 
-                score, global_score, seq_recovery = self.extract_fasta_metrics(fa)
+                score, global_score, seq_recovery = self._extract_fasta_metrics(fa)
                 
                 # Find corresponding PDB path
                 pdb_path = None
@@ -667,7 +667,7 @@ class MPNNFastRelax:
             pdb_files = self.find_design_pdbs(designs_dir)
             
             # Extract sequences and sample info
-            seq_dicts = [self.extract_peptide_from_pdb(pdb) for pdb in pdb_files]
+            seq_dicts = [self.extract_sequence_from_pdb(pdb) for pdb in pdb_files]
             seq_df = pd.DataFrame([d for d in seq_dicts if d])
             seq_df = seq_df.sort_values("sample_id")
             

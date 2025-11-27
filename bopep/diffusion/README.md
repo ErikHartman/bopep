@@ -2,7 +2,7 @@
 
 ## Features
 
-- **RFDiffusion**: Designs peptide backbones
+- **RFDiffusion**: Designs backbones
 - **ProteinMPNN & FastRelax**: Run sequence design on structural scaffolds and repeatedly relax and redesign 
 
 ## Installation Requirements

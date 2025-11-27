@@ -12,27 +12,22 @@ This repository contains the code for `BoPep`, a method suite for identifying an
 
 > NOTE: We are currently working on updating the documentation for BoPep with instructive examples and API references.
 
-## Search datasets (BoPep)
-The core of the BoPep framework lies in searching large datasets for binders. It does so by training a surrogate model to predict whether a seqeuence will bind or not to a given target, based on embeddings and previous docking experiments. During the search, the sequence dataset is navigated with the help of surrogate models. 
+### TODO
+Add examples on how to run:
+- [ ] Embeddings
+- [ ] Search
+- [ ] BoGA
+- [ ] BoRF
 
-<p align="center">
-  <img src="assets/bopep.png" width="1000", alt="BoPep">
-</p>
+Add documentation including "how-to" for:
+- [ ] Search
+- [ ] BoGA
+- [ ] BoRF
 
-## Generation with diffusion (BoRF)
-We also provide a way to generate large candidate datasets using an RFdiffusion + ProteinMPNN + FastRelax pipeline. By sampling lengths and hotspots we generate a large diverse dataset of candidate sequences. We can then apply the BoPep search on the datasets, leading to less computationally expensive design of binders.
-<p align="center">
-  <img src="assets/borf.png" width="1000", alt="BoPep">
-</p>
-
-## Generation with evolutionary algorithm (BoGA)
-The surrogate models can also be leveraged from design. The BoGA algorithm uses the surrogate models in an evolutionary algorithm to generate a binder from a biological prior. The prior can be either a single sequence or a set of sequences.
-
-*_preprint coming soon_
 
 ## Installation
 
-To run `bopep` locally, you will need to clone this repository, install **LocalColabFold** and **PyRosetta** as well as other dependencies using pip. Follow the steps below to set up your environment:
+To run `bopep` locally, you will need to clone this repository, as well as dependencies which vary based on what you want to optimize for. If you wish to use AlphaFold and/or Boltz, you will need to install **LocalColabFold** and/or **Boltz**. **PyRosetta** is always needed as well as other dependencies included in `requirements.txt`. Follow the steps below to set up your environment:
 
 ### Step 1: Clone the Repository
 
@@ -54,7 +49,7 @@ source bopep_env/bin/activate
 
 ### Step 3: Install Dependencies
 
-1. (a) If you would like to dock with AlphaFold: **Install LocalColabFold**: LocalColabFold is a fantastic package that allows you to run ColabFold locally. Follow the installation procedure [here](https://github.com/YoshitakaMo/localcolabfold) to install it.
+1. (a) If you would like to dock/fold with AlphaFold: **Install LocalColabFold**: LocalColabFold is a fantastic package that allows you to run ColabFold locally. Follow the installation procedure [here](https://github.com/YoshitakaMo/localcolabfold) to install it.
 
 Remember to export the `PATH` variable and make sure `colabfold_batch` is callable by running:
 
@@ -112,6 +107,24 @@ Scoring of complexes defines the fitness/reward which is maximized during search
 Embedding serves to create a navigatable space of seqeunce representations. We support embedding through AAindex and ESM-2. You can also create your own embeddings and pass to the BO search function.
 
 
+## Search datasets (BoPep)
+The core of the BoPep framework lies in searching large datasets for binders. It does so by training a surrogate model to predict whether a seqeuence will bind or not to a given target, based on embeddings and previous docking experiments. During the search, the sequence dataset is navigated with the help of surrogate models. 
+
+<p align="center">
+  <img src="assets/bopep.png" width="1000", alt="BoPep">
+</p>
+
+## Generation with diffusion (BoRF)
+We also provide a way to generate large candidate datasets using an RFdiffusion + ProteinMPNN + FastRelax pipeline. By sampling lengths and hotspots we generate a large diverse dataset of candidate sequences. We can then apply the BoPep search on the datasets, leading to less computationally expensive design of binders.
+<p align="center">
+  <img src="assets/borf.png" width="1000", alt="BoPep">
+</p>
+
+## Generation with evolutionary algorithm (BoGA)
+The surrogate models can also be leveraged from design. The BoGA algorithm uses the surrogate models in an evolutionary algorithm to generate a binder from a biological prior. The prior can be either a single sequence or a set of sequences.
+
+*_preprint coming soon_
+
 ## Versions
 
 ### 27 Nov 2025 $\rightarrow$ current
@@ -119,7 +132,7 @@ I consider this **version 1** due to major changes in the workflow. Here, the pa
 
 
 ### Beginning $\rightarrow$ 27 Nov 2025
-I consider this **version 0**. The main experiments were run to showcase BoPep and BoGA. This version focused on peptide binder searching and design.
+I consider this **version 0**. The main experiments were run to showcase BoPep and BoGA. This version focused on *peptide* binder searching and design (hence the name BoPep).
 
 
 ## Cite
