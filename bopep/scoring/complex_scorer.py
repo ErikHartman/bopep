@@ -1036,7 +1036,7 @@ class ComplexScorer(BaseScorer):
         peptide_chain: str = "B",
     ) -> dict:
         """
-        Score multiple peptides in parallel.
+        Score multiple structures in parallel.
 
         Parameters
         ----------

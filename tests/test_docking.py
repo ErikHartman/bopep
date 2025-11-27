@@ -49,13 +49,13 @@ class TestDocker:
         with pytest.raises(FileNotFoundError):
             docker.set_target_structure("nonexistent.pdb")
 
-    def test_dock_peptides_empty_list(self):
+    def test_dock_sequences_empty_list(self):
         """Test docking with empty peptide list but no target set"""
         docker_kwargs = {"output_dir": "/tmp", "models": ["alphafold"]}
         docker = Docker(docker_kwargs)
         
         with pytest.raises(ValueError, match="Target structure not set"):
-            docker.dock_peptides([])
+            docker.dock_sequences([])
 
 
 class TestDockingUtils:
@@ -117,7 +117,7 @@ class MockDockingModel(BaseDockingModel):
         return {"mock_param": "test_value"}
     
     @staticmethod
-    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
+    def _dock_sequences_for_gpu(sequences: List[str], gpu_id: str, target_structure: str,
                               target_sequence: str, target_name: str, raw_output_dir: str,
                               method_params: dict) -> List[Tuple[str, str]]:
         """Mock GPU docking that returns (peptide, raw_dir) tuples."""
@@ -130,7 +130,7 @@ class MockDockingModel(BaseDockingModel):
         )
         
         docked_results = []
-        for peptide in peptides:
+        for peptide in sequences:
             raw_dir = temp_docker._dock_single_peptide(
                 peptide, target_structure, target_sequence, target_name, gpu_id
             )
@@ -147,12 +147,12 @@ class TestParallelProcessing:
         """
         Test that parallel processing maintains correct peptide-to-directory mapping.
         
-        This is a regression test for a bug where peptides distributed across multiple GPUs
+        This is a regression test for a bug where sequences distributed across multiple GPUs
         would get their results mixed up due to incorrect ordering when results are collected.
         """
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Test peptides - use a mix that would expose ordering bugs
-            peptides = ["PEPTIDE_A", "PEPTIDE_B", "PEPTIDE_C", "PEPTIDE_D", "PEPTIDE_E", "PEPTIDE_F"]
+            # Test sequences - use a mix that would expose ordering bugs
+            sequences = ["PEPTIDE_A", "PEPTIDE_B", "PEPTIDE_C", "PEPTIDE_D", "PEPTIDE_E", "PEPTIDE_F"]
             target_name = "test_target"
             
             # Create mock docker with multiple GPUs to trigger parallel processing
@@ -170,10 +170,10 @@ class TestParallelProcessing:
             mock_sequence = "MOCKSEQUENCE"
             
             # Run the docking simulation
-            processed_dirs = docker.dock(peptides, mock_target, mock_sequence, target_name)
+            processed_dirs = docker.dock(sequences, mock_target, mock_sequence, target_name)
             
-            # Verify we got results for all peptides
-            assert len(processed_dirs) == len(peptides)
+            # Verify we got results for all sequences
+            assert len(processed_dirs) == len(sequences)
             
             # Verify each processed directory contains the correct peptide's data
             for processed_dir in processed_dirs:
@@ -196,7 +196,7 @@ class TestParallelProcessing:
     def test_sequential_peptide_mapping(self):
         """Test that sequential processing (single GPU) still works correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            peptides = ["SEQ_A", "SEQ_B", "SEQ_C"]
+            sequences = ["SEQ_A", "SEQ_B", "SEQ_C"]
             target_name = "test_target"
             
             # Create mock docker with single GPU (sequential processing)
@@ -213,10 +213,10 @@ class TestParallelProcessing:
             mock_sequence = "MOCKSEQUENCE"
             
             # Run the docking simulation
-            processed_dirs = docker.dock(peptides, mock_target, mock_sequence, target_name)
+            processed_dirs = docker.dock(sequences, mock_target, mock_sequence, target_name)
             
-            # Verify we got results for all peptides
-            assert len(processed_dirs) == len(peptides)
+            # Verify we got results for all sequences
+            assert len(processed_dirs) == len(sequences)
             
             # Verify mapping is correct (should work the same as parallel)
             for processed_dir in processed_dirs:

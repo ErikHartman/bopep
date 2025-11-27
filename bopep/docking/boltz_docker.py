@@ -19,7 +19,7 @@ class BoltzDocker(BaseDockingModel):
     """
     Boltz-based docking for biomolecular interactions.
     
-    This class handles docking peptides to target structures using Boltz
+    This class handles docking sequences to target structures using Boltz
     and processes the output into a standardized format.
     """
     
@@ -52,7 +52,7 @@ class BoltzDocker(BaseDockingModel):
     def dock(self, peptide_sequences: List[str], target_structure: str, 
              target_sequence: str, target_name: str) -> List[str]:
         """
-        Dock peptides using Boltz.
+        Dock sequences using Boltz.
         
         Returns list of processed output directories.
         """
@@ -95,11 +95,11 @@ class BoltzDocker(BaseDockingModel):
         return params
     
     @staticmethod
-    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
+    def _dock_sequences_for_gpu(sequences: List[str], gpu_id: str, target_structure: str,
                               target_sequence: str, target_name: str, raw_output_dir: str,
                               method_params: dict) -> List[tuple]:
         """
-        Process a batch of peptides on a specific GPU using Boltz.
+        Process a batch of sequences on a specific GPU using Boltz.
         
         Returns:
             List of (peptide_sequence, raw_dir_path) tuples
@@ -115,8 +115,8 @@ class BoltzDocker(BaseDockingModel):
         )
         
         docked_results = []
-        for i, peptide in enumerate(peptides, 1):
-            print(f"GPU {gpu_id} progress: {i}/{len(peptides)} - docking {peptide}")
+        for i, peptide in enumerate(sequences, 1):
+            print(f"GPU {gpu_id} progress: {i}/{len(sequences)} - docking {peptide}")
             dir_path = temp_docker._dock_single_peptide(
                 peptide, target_structure, target_sequence, target_name, gpu_id
             )

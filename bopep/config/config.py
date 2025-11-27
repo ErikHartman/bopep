@@ -1,12 +1,3 @@
-"""
-Configuration management for BoGA.
-
-Provides a Config class that:
-1. Loads default parameters from YAML
-2. Allows user overrides via dict or another YAML file
-3. Saves the final configuration to output directory for reproducibility
-"""
-
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
@@ -26,12 +17,9 @@ class Config:
         """
         Initialize configuration with defaults and optional user overrides.
         """
-        # Load defaults
         if script == "BoGA":
-            # Use built-in defaults from bopep/config/boga_defaults.yaml
             defaults_path = Path(__file__).parent / "boga_defaults.yaml"
         elif script == "BoPep":
-            # Use built-in defaults from bopep/config/bopep_defaults.yaml
             defaults_path = Path(__file__).parent / "bopep_defaults.yaml"
         else:
             raise ValueError(f"Unknown script type: {script}. Must be 'BoGA' or 'BoPep'")
@@ -39,10 +27,8 @@ class Config:
         self.defaults_path = Path(defaults_path)
         self.config = self._load_yaml(self.defaults_path)
         
-        # Apply user overrides
         if user_overrides is not None:
             if isinstance(user_overrides, (str, Path)):
-                # Load from YAML file
                 override_dict = self._load_yaml(user_overrides)
             elif isinstance(user_overrides, dict):
                 override_dict = user_overrides
@@ -65,15 +51,11 @@ class Config:
     def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> None:
         """
         Deep merge override dict into base dict (in-place).
-        
-        For nested dicts, recursively merge. For other types, override replaces base.
         """
         for key, value in override.items():
             if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                # Recursively merge nested dicts
                 self._deep_merge(base[key], value)
             else:
-                # Override value
                 base[key] = deepcopy(value)
     
     def get(self, key: str) -> Any:
@@ -99,13 +81,11 @@ class Config:
         keys = key.split('.')
         target = self.config
         
-        # Navigate to the parent dict
         for k in keys[:-1]:
             if k not in target:
                 target[k] = {}
             target = target[k]
         
-        # Set the final value
         target[keys[-1]] = value
     
     def update_from_used_values(self, **kwargs) -> None:
@@ -114,7 +94,7 @@ class Config:
         Useful for updating config after BoGA initialization to capture user overrides.
         """
         for key, value in kwargs.items():
-            if value is not None:  # Only update if value was actually set
+            if value is not None:
                 self.set(key, value)
     
     def save(self, output_dir: Union[str, Path], filename: str = "boga_config_used.yaml") -> Path:

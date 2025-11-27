@@ -1,10 +1,3 @@
-"""
-AlphaFold monomer folding for unconditional protein generation.
-
-This module provides functionality to fold single-chain proteins using
-ColabFold's AlphaFold implementation, without requiring a target structure.
-"""
-
 import os
 import shutil
 import subprocess
@@ -44,32 +37,6 @@ class AlphaFoldMonomer:
     ):
         """
         Initialize AlphaFold monomer folder.
-        
-        Parameters
-        ----------
-        output_dir : str
-            Directory for output files (default: "folding_output")
-        num_models : int
-            Number of models to generate (default: 5)
-        num_recycles : int
-            Number of recycling steps (default: 3, faster for monomers)
-        recycle_early_stop_tolerance : float
-            Early stopping tolerance (default: 0.5)
-        amber : bool
-            Whether to use AMBER relaxation (default: True)
-        num_relax : int
-            Number of top models to relax (default: 1)
-        save_raw : bool
-            Whether to keep raw ColabFold output (default: False)
-        force : bool
-            Whether to overwrite existing results (default: False)
-        msa_mode : str
-            MSA mode for ColabFold. Options:
-            - "mmseqs2_uniref_env" (default): full MSA search
-            - "single_sequence": use single sequence without MSA
-            - "mmseqs2_uniref": MMseqs2 with UniRef only
-        colabfold_batch_path : str, optional
-            Path to colabfold_batch executable (auto-detected if None)
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -99,16 +66,6 @@ class AlphaFoldMonomer:
     def fold(self, sequences: List[str]) -> List[str]:
         """
         Fold protein sequences using AlphaFold monomer.
-        
-        Parameters
-        ----------
-        sequences : list of str
-            Protein sequences to fold
-            
-        Returns
-        -------
-        list of str
-            List of paths to processed output directories for each sequence
         """
         if not sequences:
             raise ValueError("No sequences provided for folding")
@@ -125,16 +82,6 @@ class AlphaFoldMonomer:
     def _fold_single_sequence(self, sequence: str) -> str:
         """
         Fold a single protein sequence.
-        
-        Parameters
-        ----------
-        sequence : str
-            Protein sequence to fold
-            
-        Returns
-        -------
-        str
-            Path to processed output directory
         """
         # Create sequence-specific directories
         seq_id = f"{sequence}"
@@ -175,13 +122,6 @@ class AlphaFoldMonomer:
     def _run_colabfold(self, fasta_file: Path, output_dir: Path):
         """
         Execute ColabFold batch prediction.
-        
-        Parameters
-        ----------
-        fasta_file : Path
-            Path to input FASTA file
-        output_dir : Path
-            Directory for ColabFold output
         """
         cmd = [
             self.colabfold_batch_path,
@@ -224,20 +164,6 @@ class AlphaFoldMonomer:
     ) -> Path:
         """
         Process ColabFold raw output into standardized format.
-        
-        Parameters
-        ----------
-        raw_dir : Path
-            Directory containing raw ColabFold output
-        sequence : str
-            Input protein sequence
-        seq_id : str
-            Sequence identifier
-            
-        Returns
-        -------
-        Path
-            Path to processed output directory
         """
         processed_dir = self.output_dir / "processed" / seq_id
         processed_dir.mkdir(parents=True, exist_ok=True)

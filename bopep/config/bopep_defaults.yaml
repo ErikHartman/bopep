@@ -55,4 +55,4 @@ logging:
 
 # Checkpointing configuration
 checkpointing:
-  checkpoint_interval: 5  # Save checkpoint every N iterations
+  checkpoint_interval: 20  # Save checkpoint every N iterations
