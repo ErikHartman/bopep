@@ -4,7 +4,7 @@
 
 ## *BoPep: Navigating the binder landscape*
 
-This repository contains the code for `BoPep`, a method suite for identifying and generating proteins and peptides using Bayesian Optimization (BO). We have currently implemented three different methods in the BoPep framework:
+This repository contains the code for `BoPep`, a method suite for identifying and generating proteins and peptides using Bayesian Optimization (BO). While it started as a method specialized for peptide-binder optimization (the Pep in BoPep), it has now expanded to include proteins and different objectives (not necessarily related to binding). We have currently implemented three different methods in the BoPep framework:
 
 - **BoPep search**: This is the core method for BoPep, which uses Bayesian Optimization to navigate through large datasets in search for proteins that optimize some objective.
 - **BoRF**: A design module for generating a large dataset using a diffusion pipeline, which is then searched with BoPep.

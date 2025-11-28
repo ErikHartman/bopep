@@ -349,7 +349,7 @@ class ComplexScorer(BaseScorer):
                     if os.path.exists(method_file):
                         with open(method_file, 'r') as f:
                             data = json.load(f)
-                            sequence = data.get("sequence")
+                            sequence = data.get("sequence") or data.get("peptide_sequence")
                             if sequence:
                                 break
             elif structure_file:
@@ -1153,7 +1153,8 @@ class ComplexScorer(BaseScorer):
                         path = os.path.join(input_value, mf)
                         if os.path.exists(path):
                             with open(path, "r") as f:
-                                sequence = json.load(f).get("sequence")
+                                data = json.load(f)
+                                sequence = data.get("sequence") or data.get("peptide_sequence")
                             if sequence:
                                 break
                 elif input_type == "structure_file":
