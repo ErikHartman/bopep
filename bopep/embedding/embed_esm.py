@@ -5,7 +5,7 @@ from typing import Optional
 
 
 def embed_esm(
-    peptide_sequences,
+    sequences,
     model :torch.nn.Module,
     alphabet: esm.Alphabet,
     average: bool = True,
@@ -16,7 +16,7 @@ def embed_esm(
     model.eval()  # Set the model to evaluation mode
 
     embeddings = {}
-    sequence_data = [(f"seq_{i}", seq) for i, seq in enumerate(peptide_sequences)]
+    sequence_data = [(f"seq_{i}", seq) for i, seq in enumerate(sequences)]
 
     for i in tqdm(
         range(0, len(sequence_data), batch_size), desc="Generating ESM embeddings"

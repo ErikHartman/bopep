@@ -48,6 +48,8 @@ class SurrogateModelManager(ObjectiveMixin):
         if self.previous_study is not None:
             logging.info(f"Using previous study with {len(self.previous_study.trials)} trials")
         
+        max_seq_len = self.surrogate_model_kwargs.get('max_seq_len', 150)
+        
         self.best_hyperparams, self.previous_study = tune_hyperparams(
             model_type=model_type,
             embedding_dict=embeddings,
@@ -57,7 +59,8 @@ class SurrogateModelManager(ObjectiveMixin):
             n_splits=n_splits,
             random_state=random_state,
             previous_study=self.previous_study,
-            device=self.device
+            device=self.device,
+            max_seq_len=max_seq_len
         )
         
         if iteration is not None:
@@ -134,7 +137,8 @@ class SurrogateModelManager(ObjectiveMixin):
             'hidden_dim': hidden_dim,
             'num_layers': num_layers,
             'network_type': network_type,
-            'n_objectives': n_objectives
+            'n_objectives': n_objectives,
+            'max_seq_len': self.surrogate_model_kwargs.get('max_seq_len', 150)
         }
         
         # Add model-specific parameters
@@ -452,18 +456,18 @@ class SurrogateModelManager(ObjectiveMixin):
         self, embeddings: dict, objectives: dict, num_validate: int
     ) -> Tuple[dict, dict, dict, dict]:
         """Split the available data into training and validation sets."""
-        peptides = list(objectives.keys())
-        val_indices = np.random.choice(len(peptides), num_validate, replace=False)
-        val_peptides = [peptides[i] for i in val_indices]
-        train_peptides = [p for p in peptides if p not in val_peptides]
+        sequences = list(objectives.keys())
+        val_indices = np.random.choice(len(sequences), num_validate, replace=False)
+        val_sequences = [sequences[i] for i in val_indices]
+        train_sequences = [p for p in sequences if p not in val_sequences]
         
-        train_embeddings = {p: embeddings[p] for p in train_peptides}
-        train_objectives = {p: objectives[p] for p in train_peptides}
-        val_embeddings = {p: embeddings[p] for p in val_peptides}
-        val_objectives = {p: objectives[p] for p in val_peptides}
+        train_embeddings = {p: embeddings[p] for p in train_sequences}
+        train_objectives = {p: objectives[p] for p in train_sequences}
+        val_embeddings = {p: embeddings[p] for p in val_sequences}
+        val_objectives = {p: objectives[p] for p in val_sequences}
 
         logging.info(
-            f"Split data into {len(train_peptides)} training and {len(val_peptides)} validation samples"
+            f"Split data into {len(train_sequences)} training and {len(val_sequences)} validation samples"
         )
 
         return train_embeddings, train_objectives, val_embeddings, val_objectives
@@ -479,13 +483,13 @@ class SurrogateModelManager(ObjectiveMixin):
         if is_named_multi_objective:
             # Named multi-objective: check all have same objective names
             expected_names = set(sample_obj.keys())
-            for peptide, obj_dict in objectives.items():
+            for sequence, obj_dict in objectives.items():
                 if not isinstance(obj_dict, dict):
-                    raise ValueError(f"Expected dict of named objectives for peptide '{peptide}', got {type(obj_dict)}")
+                    raise ValueError(f"Expected dict of named objectives for sequence '{sequence}', got {type(obj_dict)}")
                 if set(obj_dict.keys()) != expected_names:
-                    raise ValueError(f"Inconsistent objective names for peptide '{peptide}'")
+                    raise ValueError(f"Inconsistent objective names for sequence '{sequence}'")
         else:
             # Single objective: check all are single values or tuples
-            for peptide, obj in objectives.items():
+            for sequence, obj in objectives.items():
                 if not isinstance(obj, (int, float, tuple)):
-                    raise ValueError(f"Expected single objective (float or tuple) for peptide '{peptide}', got {type(obj)}")
+                    raise ValueError(f"Expected single objective (float or tuple) for sequence '{sequence}', got {type(obj)}")

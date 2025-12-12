@@ -2,16 +2,16 @@ import numpy as np
 from sklearn.cluster import MiniBatchKMeans
 
 
-class PeptideSelector:
+class SequenceSelector:
     """
-    Class to select the initial and subsequent peptides for Bayesian optimization.
+    Class to select the initial and subsequent sequences for Bayesian optimization.
     Will reduce the dimensionality of the embeddings if they are 2D.
     """
 
     def __init__(self):
         pass
 
-    def select_initial_peptides(
+    def select_initial_sequences(
         self,
         embeddings: dict,
         num_initial: int,
@@ -19,28 +19,28 @@ class PeptideSelector:
         method: str = "kmeans",
     ):
         """
-        Select initial peptides via one of three methods:
+        Select initial sequences via one of three methods:
           - "kmeans": MiniBatchKMeans + nearest-to-centroid
           - "kmeans++": k-means++ seeding only
           - "random": random selection
 
         Parameters:
-        - embeddings: dict {peptide: ndarray}
-        - num_initial: int, how many peptides to pick
+        - embeddings: dict {sequence: ndarray}
+        - num_initial: int, how many sequences to pick
         - random_state: int, seed
         - method: str, either "kmeans", "kmeans++", or "random"
 
         Returns:
-        - List of peptide sequences
+        - List of sequence sequences
         """
-        peptides = list(embeddings.keys())
+        sequences = list(embeddings.keys())
 
         # flatten 2D embeddings if needed
         first = next(iter(embeddings.values()))
         if first.ndim == 1:
-            X = np.vstack([embeddings[p] for p in peptides])
+            X = np.vstack([embeddings[p] for p in sequences])
         else:
-            X = np.vstack([embeddings[p].mean(axis=0) for p in peptides])
+            X = np.vstack([embeddings[p].mean(axis=0) for p in sequences])
 
         if method == "kmeans":
             # --- original MiniBatchKMeans + nearest-to-centroid ---
@@ -60,15 +60,15 @@ class PeptideSelector:
                 cluster_pts = X[idxs]
                 dists = np.linalg.norm(cluster_pts - centers[cid], axis=1)
                 best = idxs[np.argmin(dists)]
-                initial.append(peptides[best])
+                initial.append(sequences[best])
 
             # If we have fewer than num_initial due to empty clusters,
             # fill the remaining with random selection
             if len(initial) < num_initial:
-                remaining_peptides = [p for p in peptides if p not in initial]
+                remaining_sequences = [p for p in sequences if p not in initial]
                 rng = np.random.RandomState(random_state)
-                additional = rng.choice(remaining_peptides, 
-                                     size=min(num_initial - len(initial), len(remaining_peptides)), 
+                additional = rng.choice(remaining_sequences, 
+                                     size=min(num_initial - len(initial), len(remaining_sequences)), 
                                      replace=False)
                 initial.extend(additional)
 
@@ -93,50 +93,50 @@ class PeptideSelector:
                 di = np.sum((X - X[centers_idx[i]])**2, axis=1)
                 closest_sq = np.minimum(closest_sq, di)
 
-            return [peptides[i] for i in centers_idx]
+            return [sequences[i] for i in centers_idx]
 
         elif method == "random":
             # --- pure random selection ---
             rng = np.random.RandomState(random_state)
             selected_indices = rng.choice(
-                len(peptides), 
-                size=min(num_initial, len(peptides)), 
+                len(sequences), 
+                size=min(num_initial, len(sequences)), 
                 replace=False
             )
-            return [peptides[i] for i in selected_indices]
+            return [sequences[i] for i in selected_indices]
 
         else:
             raise ValueError(f"Unknown method '{method}', choose 'kmeans', 'kmeans++', or 'random'")
 
-    def select_next_peptides(self, peptides, acquisition_values, n_select, embeddings):
+    def select_next_sequences(self, sequences, acquisition_values, n_select, embeddings):
         """
-        Select the next batch of peptides using a "k-center greedy" approach
-        weighted by each peptide's acquisition value.
+        Select the next batch of sequences using a "k-center greedy" approach
+        weighted by each sequence's acquisition value.
 
         Algorithm:
-        1) Pick the peptide with the highest acquisition value.
+        1) Pick the sequence with the highest acquisition value.
         2) For each subsequent selection, compute:
            score(c) = acquisition[c] * min_{s in selected} dist(E(c), E(s))
-           Pick the peptide with the highest 'score'.
-        3) Repeat until we have 'n_select' peptides or run out of candidates.
+           Pick the sequence with the highest 'score'.
+        3) Repeat until we have 'n_select' sequences or run out of candidates.
 
         Parameters:
-        - peptides: an iterable (e.g., set) of candidate peptide sequences
-        - acquisition_values: dict {peptide: float} with the AF for each peptide
-        - n_select: how many peptides to select
-        - embeddings: dict {peptide: np.ndarray} with each peptide's embedding
+        - sequences: an iterable (e.g., set) of candidate sequence sequences
+        - acquisition_values: dict {sequence: float} with the AF for each sequence
+        - n_select: how many sequences to select
+        - embeddings: dict {sequence: np.ndarray} with each sequence's embedding
 
         Returns:
-        - selected_peptides: a list of length 'n_select' or fewer if fewer remain.
+        - selected_sequences: a list of length 'n_select' or fewer if fewer remain.
         """
 
         if len(list(embeddings.values())[0].shape) > 1:
-            print("Select next peptides: embedding values are 2D, averaging over the second dimension...")
+            print("Select next sequences: embedding values are 2D, averaging over the second dimension...")
             embeddings = {
                 emb: embeddings[emb].mean(axis=0) for emb in embeddings.keys()
             }
 
-        candidate_list = list(peptides)
+        candidate_list = list(sequences)
         candidate_list.sort(key=lambda p: acquisition_values[p], reverse=True)
 
         selected = [candidate_list[0]]
@@ -166,17 +166,17 @@ class PeptideSelector:
 
 def __main__():
     # Example usage
-    selector = PeptideSelector()
+    selector = SequenceSelector()
     embeddings = {f"pep{i}": np.random.rand(200) for i in range(30000)}
-    print(len(embeddings), "peptides loaded.")
-    initial_peptides = selector.select_initial_peptides(embeddings, num_initial=500, method="kmeans")
-    print("Initial peptides:", initial_peptides)
+    print(len(embeddings), "sequences loaded.")
+    initial_sequences = selector.select_initial_sequences(embeddings, num_initial=500, method="kmeans")
+    print("Initial sequences:", initial_sequences)
 
-    initial_peptides = selector.select_initial_peptides(embeddings, num_initial=500, method="kmeans++")
-    print("Initial peptides (kmeans++):", initial_peptides)
+    initial_sequences = selector.select_initial_sequences(embeddings, num_initial=500, method="kmeans++")
+    print("Initial sequences (kmeans++):", initial_sequences)
 
-    initial_peptides = selector.select_initial_peptides(embeddings, num_initial=500, method="random")
-    print("Initial peptides (random):", initial_peptides)
+    initial_sequences = selector.select_initial_sequences(embeddings, num_initial=500, method="random")
+    print("Initial sequences (random):", initial_sequences)
 
 if __name__ == "__main__":
     __main__()

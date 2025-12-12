@@ -13,7 +13,7 @@ from bopep.structure.parser import extract_sequence_from_structure
 
 
 class TestDocker:
-    """Test the Docker class for peptide docking"""
+    """Test the Docker class for sequence docking"""
 
     def test_init_default(self):
         """Test Docker initialization with default parameters"""
@@ -49,13 +49,13 @@ class TestDocker:
         with pytest.raises(FileNotFoundError):
             docker.set_target_structure("nonexistent.pdb")
 
-    def test_dock_peptides_empty_list(self):
-        """Test docking with empty peptide list but no target set"""
+    def test_dock_sequences_empty_list(self):
+        """Test docking with empty sequence list but no target set"""
         docker_kwargs = {"output_dir": "/tmp", "models": ["alphafold"]}
         docker = Docker(docker_kwargs)
         
         with pytest.raises(ValueError, match="Target structure not set"):
-            docker.dock_peptides([])
+            docker.dock_sequences([])
 
 
 class TestDockingUtils:
@@ -74,40 +74,40 @@ class MockDockingModel(BaseDockingModel):
         self.method_name = "mock"
         super().__init__(**kwargs)
     
-    def dock(self, peptide_sequences: List[str], target_structure: str, 
+    def dock(self, sequences: List[str], target_structure: str, 
              target_sequence: str, target_name: str) -> List[str]:
-        return self._dock_with_common_logic(peptide_sequences, target_structure, 
+        return self._dock_with_common_logic(sequences, target_structure, 
                                           target_sequence, target_name)
     
-    def _dock_single_peptide(self, peptide_sequence: str, target_structure: str,
+    def _dock_single_sequence(self, sequence_sequence: str, target_structure: str,
                            target_sequence: str, target_name: str, gpu_id: str = "0") -> str:
-        """Mock single peptide docking - creates a fake raw directory."""
-        raw_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
+        """Mock single sequence docking - creates a fake raw directory."""
+        raw_dir = self._create_raw_sequence_dir(target_name, sequence_sequence)
         # Create a fake output file to indicate successful "docking"
-        with open(os.path.join(raw_dir, f"mock_output_{peptide_sequence}.txt"), "w") as f:
-            f.write(f"Mock docking output for {peptide_sequence} on GPU {gpu_id}")
+        with open(os.path.join(raw_dir, f"mock_output_{sequence_sequence}.txt"), "w") as f:
+            f.write(f"Mock docking output for {sequence_sequence} on GPU {gpu_id}")
         return raw_dir
     
-    def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
+    def process_raw_output(self, raw_sequence_dir: str, sequence_sequence: str, 
                           target_name: str) -> str:
         """Mock raw output processing."""
-        processed_dir = self._create_processed_peptide_dir(target_name, peptide_sequence)
+        processed_dir = self._create_processed_sequence_dir(target_name, sequence_sequence)
         
-        # Verify the raw directory contains the expected peptide's data
-        expected_file = os.path.join(raw_peptide_dir, f"mock_output_{peptide_sequence}.txt")
+        # Verify the raw directory contains the expected sequence's data
+        expected_file = os.path.join(raw_sequence_dir, f"mock_output_{sequence_sequence}.txt")
         if not os.path.exists(expected_file):
-            raise ValueError(f"MAPPING ERROR: Raw directory {raw_peptide_dir} does not contain "
-                           f"expected output for peptide {peptide_sequence}!")
+            raise ValueError(f"MAPPING ERROR: Raw directory {raw_sequence_dir} does not contain "
+                           f"expected output for sequence {sequence_sequence}!")
         
         # Copy mock data to processed directory
-        shutil.copy2(expected_file, os.path.join(processed_dir, f"processed_{peptide_sequence}.txt"))
+        shutil.copy2(expected_file, os.path.join(processed_dir, f"processed_{sequence_sequence}.txt"))
         
         # Create metrics file
         metrics = {
-            "peptide_sequence": peptide_sequence,
+            "sequence_sequence": sequence_sequence,
             "target_name": target_name,
             "docking_method": "mock",
-            "test_metric": f"value_for_{peptide_sequence}"
+            "test_metric": f"value_for_{sequence_sequence}"
         }
         self._save_metrics_json(metrics, processed_dir, prefix="mock_metrics")
         
@@ -117,10 +117,10 @@ class MockDockingModel(BaseDockingModel):
         return {"mock_param": "test_value"}
     
     @staticmethod
-    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
+    def _dock_sequences_for_gpu(sequences: List[str], gpu_id: str, target_structure: str,
                               target_sequence: str, target_name: str, raw_output_dir: str,
                               method_params: dict) -> List[Tuple[str, str]]:
-        """Mock GPU docking that returns (peptide, raw_dir) tuples."""
+        """Mock GPU docking that returns (sequence, raw_dir) tuples."""
         output_dir = os.path.dirname(os.path.dirname(raw_output_dir))
         
         temp_docker = MockDockingModel(
@@ -130,29 +130,29 @@ class MockDockingModel(BaseDockingModel):
         )
         
         docked_results = []
-        for peptide in peptides:
-            raw_dir = temp_docker._dock_single_peptide(
-                peptide, target_structure, target_sequence, target_name, gpu_id
+        for sequence in sequences:
+            raw_dir = temp_docker._dock_single_sequence(
+                sequence, target_structure, target_sequence, target_name, gpu_id
             )
             if raw_dir:
-                docked_results.append((peptide, raw_dir))
+                docked_results.append((sequence, raw_dir))
         
         return docked_results
 
 
 class TestParallelProcessing:
-    """Test parallel processing peptide-to-directory mapping."""
+    """Test parallel processing sequence-to-directory mapping."""
     
-    def test_parallel_peptide_mapping(self):
+    def test_parallel_sequence_mapping(self):
         """
-        Test that parallel processing maintains correct peptide-to-directory mapping.
+        Test that parallel processing maintains correct sequence-to-directory mapping.
         
-        This is a regression test for a bug where peptides distributed across multiple GPUs
+        This is a regression test for a bug where sequences distributed across multiple GPUs
         would get their results mixed up due to incorrect ordering when results are collected.
         """
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Test peptides - use a mix that would expose ordering bugs
-            peptides = ["PEPTIDE_A", "PEPTIDE_B", "PEPTIDE_C", "PEPTIDE_D", "PEPTIDE_E", "PEPTIDE_F"]
+            # Test sequences - use a mix that would expose ordering bugs
+            sequences = ["PEPTIDE_A", "PEPTIDE_B", "PEPTIDE_C", "PEPTIDE_D", "PEPTIDE_E", "PEPTIDE_F"]
             target_name = "test_target"
             
             # Create mock docker with multiple GPUs to trigger parallel processing
@@ -170,33 +170,33 @@ class TestParallelProcessing:
             mock_sequence = "MOCKSEQUENCE"
             
             # Run the docking simulation
-            processed_dirs = docker.dock(peptides, mock_target, mock_sequence, target_name)
+            processed_dirs = docker.dock(sequences, mock_target, mock_sequence, target_name)
             
-            # Verify we got results for all peptides
-            assert len(processed_dirs) == len(peptides)
+            # Verify we got results for all sequences
+            assert len(processed_dirs) == len(sequences)
             
-            # Verify each processed directory contains the correct peptide's data
+            # Verify each processed directory contains the correct sequence's data
             for processed_dir in processed_dirs:
                 dir_name = os.path.basename(processed_dir)
-                expected_peptide = dir_name.replace(f"{target_name}_", "")
+                expected_sequence = dir_name.replace(f"{target_name}_", "")
                 
-                # Check that the processed file exists and contains the right peptide
-                processed_file = os.path.join(processed_dir, f"processed_{expected_peptide}.txt")
-                assert os.path.exists(processed_file), f"Directory {dir_name} missing file for {expected_peptide}"
+                # Check that the processed file exists and contains the right sequence
+                processed_file = os.path.join(processed_dir, f"processed_{expected_sequence}.txt")
+                assert os.path.exists(processed_file), f"Directory {dir_name} missing file for {expected_sequence}"
                 
-                # Check metrics file contains correct peptide
+                # Check metrics file contains correct sequence
                 metrics_file = os.path.join(processed_dir, "mock_metrics.json")
                 assert os.path.exists(metrics_file), f"Metrics file missing in {dir_name}"
                 
                 with open(metrics_file) as f:
                     metrics = json.load(f)
-                assert metrics["peptide_sequence"] == expected_peptide, \
-                    f"Metrics in {dir_name} for wrong peptide: expected {expected_peptide}, got {metrics['peptide_sequence']}"
+                assert metrics["sequence_sequence"] == expected_sequence, \
+                    f"Metrics in {dir_name} for wrong sequence: expected {expected_sequence}, got {metrics['sequence_sequence']}"
     
-    def test_sequential_peptide_mapping(self):
+    def test_sequential_sequence_mapping(self):
         """Test that sequential processing (single GPU) still works correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            peptides = ["SEQ_A", "SEQ_B", "SEQ_C"]
+            sequences = ["SEQ_A", "SEQ_B", "SEQ_C"]
             target_name = "test_target"
             
             # Create mock docker with single GPU (sequential processing)
@@ -213,21 +213,21 @@ class TestParallelProcessing:
             mock_sequence = "MOCKSEQUENCE"
             
             # Run the docking simulation
-            processed_dirs = docker.dock(peptides, mock_target, mock_sequence, target_name)
+            processed_dirs = docker.dock(sequences, mock_target, mock_sequence, target_name)
             
-            # Verify we got results for all peptides
-            assert len(processed_dirs) == len(peptides)
+            # Verify we got results for all sequences
+            assert len(processed_dirs) == len(sequences)
             
             # Verify mapping is correct (should work the same as parallel)
             for processed_dir in processed_dirs:
                 dir_name = os.path.basename(processed_dir)
-                expected_peptide = dir_name.replace(f"{target_name}_", "")
+                expected_sequence = dir_name.replace(f"{target_name}_", "")
                 
-                processed_file = os.path.join(processed_dir, f"processed_{expected_peptide}.txt")
-                assert os.path.exists(processed_file), f"Directory {dir_name} missing file for {expected_peptide}"
+                processed_file = os.path.join(processed_dir, f"processed_{expected_sequence}.txt")
+                assert os.path.exists(processed_file), f"Directory {dir_name} missing file for {expected_sequence}"
     
-    def test_empty_peptide_list_parallel(self):
-        """Test parallel processing with empty peptide list."""
+    def test_empty_sequence_list_parallel(self):
+        """Test parallel processing with empty sequence list."""
         with tempfile.TemporaryDirectory() as temp_dir:
             docker = MockDockingModel(
                 output_dir=temp_dir,
@@ -317,7 +317,7 @@ class TestBoltzDocker:
             cif_path = os.path.join("data", "5CR6.cif")
             if os.path.exists(cif_path):
                 yaml_path = boltz._create_yaml_config(
-                    peptide_sequence="ARNPIYDGLCVFY",
+                    sequence_sequence="ARNPIYDGLCVFY",
                     target_sequence="",  # Empty to test auto-detection
                     target_name="5CR6",
                     output_dir=temp_dir,
@@ -343,7 +343,7 @@ class TestBoltzDocker:
                 assert len(protein_a["sequence"]) == 467  # 5CR6 protein length
                 assert protein_a["sequence"].startswith("MANKAVNDFILAMNYDKKKLLTHQGESIENRFIK")
                 
-                # Check protein B (peptide)
+                # Check protein B (sequence)
                 protein_b = config["sequences"][1]["protein"]
                 assert protein_b["id"] == "B"
                 assert protein_b["sequence"] == "ARNPIYDGLCVFY"
@@ -367,7 +367,7 @@ class TestBoltzDocker:
                 custom_sequence = "TESTSEQUENCE"
                 
                 yaml_path = boltz._create_yaml_config(
-                    peptide_sequence="ARNPIYDGLCVFY",
+                    sequence_sequence="ARNPIYDGLCVFY",
                     target_sequence=custom_sequence,
                     target_name="5CR6",
                     output_dir=temp_dir,

@@ -33,8 +33,8 @@ class AcquisitionFunction:
 
     def compute_acquisition(self, predictions: dict, acquisition_function: str, maximize: bool = True, **kwargs):
         """
-        Single-objective predictions: {peptide: (mean, std)}
-        Multiobjective predictions: {peptide: {obj: (mean, std), ...}}
+        Single-objective predictions: {sequence: (mean, std)}
+        Multiobjective predictions: {sequence: {obj: (mean, std), ...}}
         
         Args:
             maximize: For single-objective, whether to maximize (True) or minimize (False).
@@ -52,24 +52,24 @@ class AcquisitionFunction:
                 raise ValueError(f"Unknown MOO acquisition {acquisition_function}")
 
         # Single-objective path
-        peptides = list(predictions.keys())
-        means = np.array([predictions[p][0] for p in peptides])
-        stds  = np.array([predictions[p][1] for p in peptides])
+        sequences = list(predictions.keys())
+        means = np.array([predictions[p][0] for p in sequences])
+        stds  = np.array([predictions[p][1] for p in sequences])
         
         if acquisition_function == "expected_improvement":
-            return self.expected_improvement(peptides, means, stds, maximize=maximize)
+            return self.expected_improvement(sequences, means, stds, maximize=maximize)
         elif acquisition_function == "upper_confidence_bound":
-            return self.upper_confidence_bound(peptides, means, stds, maximize=maximize, **kwargs)
+            return self.upper_confidence_bound(sequences, means, stds, maximize=maximize, **kwargs)
         elif acquisition_function == "probability_of_improvement":
-            return self.probability_of_improvement(peptides, means, stds, maximize=maximize)
+            return self.probability_of_improvement(sequences, means, stds, maximize=maximize)
         elif acquisition_function == "standard_deviation":
-            return self.standard_deviation(peptides, stds)
+            return self.standard_deviation(sequences, stds)
         elif acquisition_function == "mean":
-            return self.mean(peptides, means, maximize=maximize)
+            return self.mean(sequences, means, maximize=maximize)
         else:
             raise ValueError(f"Acquisition function '{acquisition_function}' not recognized.")
 
-    def expected_improvement(self, peptides: list, means: np.ndarray, stds: np.ndarray, maximize: bool = True):
+    def expected_improvement(self, sequences: list, means: np.ndarray, stds: np.ndarray, maximize: bool = True):
         means = np.array(means, dtype=float)
         stds = np.array(stds, dtype=float)
 
@@ -90,9 +90,9 @@ class AcquisitionFunction:
         ei = improvement * norm.cdf(Z) + stds * norm.pdf(Z)
         ei[stds <= 1e-12] = 0.0
 
-        return {peptide: float(value) for peptide, value in zip(peptides, ei)}
+        return {sequence: float(value) for sequence, value in zip(sequences, ei)}
 
-    def upper_confidence_bound(self, peptides: list, means, stds, kappa=1.96, maximize: bool = True):
+    def upper_confidence_bound(self, sequences: list, means, stds, kappa=1.96, maximize: bool = True):
         means = np.array(means, dtype=float)
         stds = np.array(stds, dtype=float)
         
@@ -103,9 +103,9 @@ class AcquisitionFunction:
             # For minimization: mean - kappa * std (optimistic lower bound)
             ucb = means - kappa * stds
             
-        return {peptide: float(value) for peptide, value in zip(peptides, ucb)}
+        return {sequence: float(value) for sequence, value in zip(sequences, ucb)}
 
-    def probability_of_improvement(self, peptides, means, stds, maximize=True):
+    def probability_of_improvement(self, sequences, means, stds, maximize=True):
         means = np.array(means, dtype=float)
         stds = np.array(stds, dtype=float)
 
@@ -128,32 +128,32 @@ class AcquisitionFunction:
             if current_best_pred < self.best_so_far_pi:
                 self.best_so_far_pi = current_best_pred
 
-        return {peptide: float(value) for peptide, value in zip(peptides, pi)}
+        return {sequence: float(value) for sequence, value in zip(sequences, pi)}
 
-    def standard_deviation(self, peptides, stds):
-        return {peptide: float(std) for peptide, std in zip(peptides, stds)}
+    def standard_deviation(self, sequences, stds):
+        return {sequence: float(std) for sequence, std in zip(sequences, stds)}
 
-    def mean(self, peptides, means, maximize=True):
-        return {peptide: float(mean) for peptide, mean in zip(peptides, means)}
+    def mean(self, sequences, means, maximize=True):
+        return {sequence: float(mean) for sequence, mean in zip(sequences, means)}
 
     def _extract_arrays(self, predictions_moo: dict, objective_order: Union[list, None]):
-        """Return peptides, obj_names, means [N,M], stds [N,M]."""
-        peptides = list(predictions_moo.keys())
+        """Return sequences, obj_names, means [N,M], stds [N,M]."""
+        sequences = list(predictions_moo.keys())
         if objective_order is None:
             obj_names = list(next(iter(predictions_moo.values())).keys())
         else:
             obj_names = list(objective_order)
 
-        N = len(peptides)
+        N = len(sequences)
         M = len(obj_names)
         means = np.zeros((N, M), dtype=float)
         stds  = np.zeros((N, M), dtype=float)
-        for i, p in enumerate(peptides):
+        for i, p in enumerate(sequences):
             for j, o in enumerate(obj_names):
                 m, s = predictions_moo[p][o]
                 means[i, j] = float(m)
                 stds[i, j]  = float(s)
-        return peptides, obj_names, means, stds
+        return sequences, obj_names, means, stds
 
     def _update_ref_points(self, means: np.ndarray, directions: np.ndarray):
         """
@@ -209,7 +209,7 @@ class AcquisitionFunction:
         """
         ParEGO using augmented Tchebycheff scalarization with EI computed by Monte Carlo.
 
-        predictions_moo: {peptide: {obj: (mean, std), ...}, ...}
+        predictions_moo: {sequence: {obj: (mean, std), ...}, ...}
         objective_directions: {obj: "max" or "min"}; default = "max" for all
         weights: optional simplex weights; default = random simplex
         best_scalar_so_far: running best value of the scalarized objective in minimization space.
@@ -217,9 +217,9 @@ class AcquisitionFunction:
         """
         rng = self.rng if rng_seed is None else np.random.default_rng(rng_seed)
 
-        peptides, obj_names, means, stds = self._extract_arrays(predictions_moo, objective_order)
+        sequences, obj_names, means, stds = self._extract_arrays(predictions_moo, objective_order)
         M = len(obj_names)
-        N = len(peptides)
+        N = len(sequences)
 
         # Directions
         if objective_directions is None:
@@ -261,7 +261,7 @@ class AcquisitionFunction:
         improv = np.maximum(0.0, best_scalar_so_far - g_samples)
         ei = np.mean(improv, axis=1)
 
-        return {peptides[i]: float(ei[i]) for i in range(N)}
+        return {sequences[i]: float(ei[i]) for i in range(N)}
 
     def parego_chebyshev_ucb(
         self,
@@ -276,9 +276,9 @@ class AcquisitionFunction:
         Fast surrogate: UCB in Chebyshev space.
         Build an optimistic point per objective, normalize, then Chebyshev scalarize.
         """
-        peptides, obj_names, means, stds = self._extract_arrays(predictions_moo, objective_order)
+        sequences, obj_names, means, stds = self._extract_arrays(predictions_moo, objective_order)
         M = len(obj_names)
-        N = len(peptides)
+        N = len(sequences)
 
         # Directions
         if objective_directions is None:
@@ -305,7 +305,7 @@ class AcquisitionFunction:
         g_ucb = self._aug_tchebycheff(optimistic_norm, lam, rho=rho)
         # We return negative because higher acquisition is better in your API
         scores = -g_ucb
-        return {peptides[i]: float(scores[i]) for i in range(N)}
+        return {sequences[i]: float(scores[i]) for i in range(N)}
 
 
 if __name__ == "__main__":

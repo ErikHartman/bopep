@@ -60,17 +60,17 @@ def main():
     
     # Generate synthetic multi-objective data
     embeddings = {
-        f'peptide_{i}': np.random.randn(64).astype(np.float32)
+        f'sequence_{i}': np.random.randn(64).astype(np.float32)
         for i in range(20)
     }
     
     objectives = {
-        peptide: {
+        sequence: {
             'binding_affinity': np.random.uniform(-10, 0),  # Lower is better
             'stability': np.random.uniform(0, 100),         # Higher is better
             'solubility': np.random.uniform(0, 1)           # Higher is better
         }
-        for peptide in embeddings.keys()
+        for sequence in embeddings.keys()
     }
     
 
@@ -107,9 +107,9 @@ def main():
         predictions = manager.predict(embeddings)
         
         # Show sample prediction
-        sample_peptide = list(predictions.keys())[0]
-        sample_pred = predictions[sample_peptide]
-        print(f"Sample prediction for {sample_peptide}:")
+        sample_sequence = list(predictions.keys())[0]
+        sample_pred = predictions[sample_sequence]
+        print(f"Sample prediction for {sample_sequence}:")
         for obj_name, (mean, std) in sample_pred.items():
             print(f"  {obj_name}: {mean:.3f} ± {std:.3f}")
     

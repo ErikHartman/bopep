@@ -1,19 +1,6 @@
-"""
-Test suite for hyperparameter tuner with single and multi-objective support.
-
-This module tests:
-1. Single-objective hyperparameter tuning
-2. Multi-objective hyperparameter tuning  
-3. Auto-detection of objective count
-4. NLL calculation methods
-5. Cross-validation and model creation
-6. Backward compatibility with existing single-objective usage
-"""
-
 import pytest
 import numpy as np
 import torch
-from typing import Dict, List, Union
 
 from bopep.surrogate_model.hyperparameter_tuner import (
     HyperparameterTuner,

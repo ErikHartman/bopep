@@ -3,20 +3,20 @@ from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import numpy as np
 _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
-class PeptideProperties:
+class SequenceProperties:
 
-    def __init__(self, structure_file: str = None, peptide_sequence :str= None, chain_id: str = "B"):
+    def __init__(self, structure_file: str = None, sequence :str= None, chain_id: str = "B"):
         if structure_file:
-            self.peptide_sequence = extract_sequence_from_structure(structure_file, chain_id=chain_id)
-        elif peptide_sequence:
-            self.peptide_sequence = peptide_sequence
+            self.sequence = extract_sequence_from_structure(structure_file, chain_id=chain_id)
+        elif sequence:
+            self.sequence = sequence
         else:
-            raise ValueError("Either a structure file (PDB/CIF) or a peptide sequence must be provided.")
+            raise ValueError("Either a structure file (PDB/CIF) or a sequence must be provided.")
         
-        if not all(aa in _AMINO_ACIDS for aa in self.peptide_sequence):
-            raise ValueError(f"Invalid amino acids in peptide sequence: {self.peptide_sequence}. Allowed amino acids are: {_AMINO_ACIDS}")
+        if not all(aa in _AMINO_ACIDS for aa in self.sequence):
+            raise ValueError(f"Invalid amino acids in sequence: {self.sequence}. Allowed amino acids are: {_AMINO_ACIDS}")
         
-        self.pa = ProteinAnalysis(self.peptide_sequence)
+        self.pa = ProteinAnalysis(self.sequence)
 
     def get_molecular_weight(self):
         return self.pa.molecular_weight()
@@ -36,7 +36,7 @@ class PeptideProperties:
     def get_helix_fraction(self):
         return self.pa.secondary_structure_fraction()[0]
 
-    def get_turn_fraction(self):
+    def get_loop_fraction(self):
         return self.pa.secondary_structure_fraction()[1]
 
     def get_sheet_fraction(self):
@@ -74,14 +74,14 @@ class PeptideProperties:
 
     def get_all_properties(self):
         return {
-            'length': len(self.peptide_sequence),
+            'length': len(self.sequence),
             'molecular_weight': self.get_molecular_weight(),
             'aromaticity': self.get_aromaticity(),
             'instability_index': self.get_instability_index(),
             'isoelectric_point': self.get_isoelectric_point(),
             'gravy': self.get_gravy(),
             'helix_fraction': self.get_helix_fraction(),
-            'turn_fraction': self.get_turn_fraction(),
+            'loop_fraction': self.get_loop_fraction(),
             'sheet_fraction': self.get_sheet_fraction(),
             'hydrophobic_aa_percent': self.get_hydrophobic_aa_percent(),
             'polar_aa_percent': self.get_polar_aa_percent(),
@@ -93,8 +93,8 @@ class PeptideProperties:
 
     def _compute_uHrel(self):
         """
-        Computes the relative hydrophobic moment (uHrel) of the peptide sequence.
-        The hydrophobic moment is a measure of the amphipathicity of a peptide sequence.
+        Computes the relative hydrophobic moment (uHrel) of the sequence.
+        The hydrophobic moment is a measure of the amphipathicity of a sequence.
         It is calculated as the vector sum of the hydrophobicity values of the amino acids
         in the sequence, with the hydrophobicity values weighted by the angle of the amino
         acid in the sequence. The relative hydrophobic moment is then calculated as the
@@ -133,10 +133,10 @@ class PeptideProperties:
         sum_abs_hydrophobicity = 0
 
         # Calculate hydrophobic moment
-        for i, aa in enumerate(self.peptide_sequence):
+        for i, aa in enumerate(self.sequence):
             hydrophobicity = hydrophobicity_scale.get(aa, None)
             if hydrophobicity is None:
-                raise ValueError(f"Unknown amino acid '{aa}' in peptide sequence.")
+                raise ValueError(f"Unknown amino acid '{aa}' in sequence.")
 
             angle = i * helix_angle
             hydrophobic_moment_x += hydrophobicity * np.cos(angle)
@@ -156,5 +156,5 @@ class PeptideProperties:
 
 if __name__ == "__main__":
     pdb_file = "data/1ssc.pdb"
-    pp = PeptideProperties(pdb_file)
+    pp = SequenceProperties(pdb_file)
     print(pp.get_all_properties())

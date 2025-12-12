@@ -121,7 +121,7 @@ class Logger:
         with open(self._scores_file, "a", newline="") as f:
             wr = csv.writer(f)
             if not self._scores_header_written:
-                wr.writerow(["timestamp","iteration","peptide","phase"] + types)
+                wr.writerow(["timestamp","iteration","sequence","phase"] + types)
                 self._scores_header_written = True
             for pep, sc in scores.items():
                 row = [timestamp, iteration, pep, acquisition_name] + [sc.get(t) for t in types]
@@ -146,7 +146,7 @@ class Logger:
                 all_objective_names = sorted({name for obj_dict in objectives.values() for name in obj_dict.keys()})
                 
                 if not self._objectives_header_written:
-                    wr.writerow(["timestamp", "iteration", "peptide", "phase"] + all_objective_names)
+                    wr.writerow(["timestamp", "iteration", "sequence", "phase"] + all_objective_names)
                     self._objectives_header_written = True
                 
                 for pep, obj_dict in objectives.items():
@@ -155,7 +155,7 @@ class Logger:
             else:
                 # Single objective case: original format
                 if not self._objectives_header_written:
-                    wr.writerow(["timestamp", "iteration", "peptide", "objective_value", "phase"])
+                    wr.writerow(["timestamp", "iteration", "sequence", "objective_value", "phase"])
                     self._objectives_header_written = True
                 
                 for pep, val in objectives.items():
@@ -243,7 +243,7 @@ class Logger:
         with self._open(self._predictions_file, "at") as f:
             wr = csv.writer(f)
             if not self._predictions_header_written:
-                wr.writerow(["timestamp","iteration","peptide","mean","std"])
+                wr.writerow(["timestamp","iteration","sequence","mean","std"])
                 self._predictions_header_written = True
             for pep, (m, s) in predictions.items():
                 wr.writerow([timestamp, iteration, pep, m, s])
@@ -254,7 +254,7 @@ class Logger:
         with self._open(self._acquisition_file, "at") as f:
             wr = csv.writer(f)
             if not self._acquisition_header_written:
-                wr.writerow(["timestamp","iteration","peptide","phase","acquisition_value"])
+                wr.writerow(["timestamp","iteration","sequence","phase","acquisition_value"])
                 self._acquisition_header_written = True
             for pep, val in sorted(acquisition_values.items()):
                 wr.writerow([timestamp, iteration, pep, acquisition_name, val])

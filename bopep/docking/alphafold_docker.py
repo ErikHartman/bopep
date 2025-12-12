@@ -17,7 +17,7 @@ class AlphaFoldDocker(BaseDockingModel):
     """
     AlphaFold2-based docking using ColabFold.
     
-    This class handles docking peptides to target structures using ColabFold's
+    This class handles docking sequences to target structures using ColabFold's
     AlphaFold2 implementation and processes the output into a standardized format.
     """
     
@@ -42,17 +42,17 @@ class AlphaFoldDocker(BaseDockingModel):
         self.amber = kwargs.get("amber", True)
         self.num_relax = kwargs.get("num_relax", 1)
         
-    def dock(self, peptide_sequences: List[str], target_structure: str, 
+    def dock(self, sequencess: List[str], target_structure: str, 
              target_sequence: str, target_name: str) -> List[str]:
         """
-        Dock peptides using AlphaFold2/ColabFold.
+        Dock sequences using AlphaFold2/ColabFold.
         
         Returns list of processed output directories.
         """
-        return self._dock_with_common_logic(peptide_sequences, target_structure, 
+        return self._dock_with_common_logic(sequencess, target_structure, 
                                           target_sequence, target_name)
     
-    def process_raw_output(self, raw_peptide_dir: str, peptide_sequence: str, 
+    def process_raw_output(self, raw_sequence_dir: str, sequences: str, 
                           target_name: str) -> str:
         """
         Process ColabFold raw output into standardized format.
@@ -63,16 +63,16 @@ class AlphaFoldDocker(BaseDockingModel):
         - *_scores_rank_00X_*.json files (metrics)
         - Other files (PAE plots, etc.)
         """
-        logging.info(f"Processing raw output for {peptide_sequence}...")
+        logging.info(f"Processing raw output for {sequences}...")
         
         # Create processed directory
-        processed_dir = self._create_processed_peptide_dir(target_name, peptide_sequence)
+        processed_dir = self._create_processed_sequence_dir(target_name, sequences)
         
         # Find all model files and their corresponding metrics
-        relaxed_pdbs = sorted(glob.glob(os.path.join(raw_peptide_dir, "*_relaxed_rank_*.pdb")))
-        unrelaxed_pdbs = sorted(glob.glob(os.path.join(raw_peptide_dir, "*_unrelaxed_rank_*.pdb")))
-        score_jsons = sorted(glob.glob(os.path.join(raw_peptide_dir, "*_scores_rank_*.json")))
-        pae_json = sorted(glob.glob(os.path.join(raw_peptide_dir, "*_predicted_aligned_error_*.json")))
+        relaxed_pdbs = sorted(glob.glob(os.path.join(raw_sequence_dir, "*_relaxed_rank_*.pdb")))
+        unrelaxed_pdbs = sorted(glob.glob(os.path.join(raw_sequence_dir, "*_unrelaxed_rank_*.pdb")))
+        score_jsons = sorted(glob.glob(os.path.join(raw_sequence_dir, "*_scores_rank_*.json")))
+        pae_json = sorted(glob.glob(os.path.join(raw_sequence_dir, "*_predicted_aligned_error_*.json")))
         
         logging.info(f"Found {len(relaxed_pdbs)} relaxed and {len(unrelaxed_pdbs)} unrelaxed PDB files")
         
@@ -146,7 +146,7 @@ class AlphaFoldDocker(BaseDockingModel):
         
         # Create metrics with only the best model's data
         all_metrics = {
-            "peptide_sequence": peptide_sequence,
+            "sequences": sequences,
             "target_name": target_name,
             "docking_method": "alphafold",
             "model_count": processed_count,
@@ -165,30 +165,30 @@ class AlphaFoldDocker(BaseDockingModel):
         
         return processed_dir
     
-    def _dock_single_peptide(self, peptide_sequence: str, target_structure: str,
+    def _dock_single_sequence(self, sequences: str, target_structure: str,
                            target_sequence: str, target_name: str, gpu_id: str = "0") -> str:
         """
-        Dock a single peptide using ColabFold.
+        Dock a single sequence using ColabFold.
         """
-        logging.info(f"Docking peptide '{peptide_sequence}' on GPU {gpu_id}...")
+        logging.info(f"Docking sequence '{sequences}' on GPU {gpu_id}...")
         
-        peptide_output_dir = self._create_raw_peptide_dir(target_name, peptide_sequence)
+        sequence_output_dir = self._create_raw_sequence_dir(target_name, sequences)
         
         combined_fasta_path = os.path.join(
-            peptide_output_dir, f"input_{peptide_sequence}.fasta"
+            sequence_output_dir, f"input_{sequences}.fasta"
         )
         with open(combined_fasta_path, "w") as f:
-            f.write(f">{target_name}_{peptide_sequence}\n{target_sequence}:{peptide_sequence}\n")
+            f.write(f">{target_name}_{sequences}\n{target_sequence}:{sequences}\n")
         
         target_copy_path = os.path.join(
-            peptide_output_dir, os.path.basename(target_structure)
+            sequence_output_dir, os.path.basename(target_structure)
         )
         shutil.copy2(target_structure, target_copy_path)
         
         command = [
             "colabfold_batch",
             str(combined_fasta_path),
-            str(peptide_output_dir),
+            str(sequence_output_dir),
             "--model-type", "alphafold2_multimer_v3",
             "--msa-mode", "single_sequence",
             "--num-models", str(self.num_models),
@@ -198,7 +198,7 @@ class AlphaFoldDocker(BaseDockingModel):
             "--pair-mode", "unpaired",
             "--pair-strategy", "greedy",
             "--templates",
-            "--custom-template-path", str(peptide_output_dir),
+            "--custom-template-path", str(sequence_output_dir),
             "--rank", "iptm",
         ]
         
@@ -223,21 +223,21 @@ class AlphaFoldDocker(BaseDockingModel):
                     returncode=process.returncode, cmd=command, output=output
                 )
             
-            logging.info(f"Docking completed successfully for {peptide_sequence} on GPU {gpu_id}.")
+            logging.info(f"Docking completed successfully for {sequences} on GPU {gpu_id}.")
             
             # Clean up some unnecessary files but keep all model outputs
-            self._clean_up_colabfold_files(peptide_output_dir, target_copy_path)
+            self._clean_up_colabfold_files(sequence_output_dir, target_copy_path)
             
             # Mark as finished
-            with open(os.path.join(peptide_output_dir, "finished.txt"), "w") as f:
+            with open(os.path.join(sequence_output_dir, "finished.txt"), "w") as f:
                 f.write("Docking finished successfully.")
                 
         except subprocess.CalledProcessError as e:
-            logging.error(f"An error occurred during docking of {peptide_sequence}: {e}")
+            logging.error(f"An error occurred during docking of {sequences}: {e}")
             logging.error(f"ColabFold output:\n{e.output}")
             return None
         
-        return peptide_output_dir
+        return sequence_output_dir
     
     def _get_method_parameters(self) -> dict:
         """
@@ -253,14 +253,14 @@ class AlphaFoldDocker(BaseDockingModel):
         }
     
     @staticmethod
-    def _dock_peptides_for_gpu(peptides: List[str], gpu_id: str, target_structure: str,
+    def _dock_sequences_for_gpu(sequences: List[str], gpu_id: str, target_structure: str,
                               target_sequence: str, target_name: str, raw_output_dir: str,
                               method_params: dict) -> List[tuple]:
         """
-        Process a batch of peptides on a specific GPU using AlphaFold.
+        Process a batch of sequences on a specific GPU using AlphaFold.
         
         Returns:
-            List of (peptide_sequence, raw_dir_path) tuples
+            List of (sequences, raw_dir_path) tuples
         """
         # raw_output_dir is like: /base/raw/alphafold
         # We need to get back to /base (go up 2 levels: remove /alphafold and /raw)
@@ -274,13 +274,13 @@ class AlphaFoldDocker(BaseDockingModel):
         )
         
         docked_results = []
-        for i, peptide in enumerate(peptides, 1):
-            print(f"GPU {gpu_id} progress: {i}/{len(peptides)} - docking {peptide}")
-            dir_path = temp_docker._dock_single_peptide(
-                peptide, target_structure, target_sequence, target_name, gpu_id
+        for i, sequence in enumerate(sequences, 1):
+            print(f"GPU {gpu_id} progress: {i}/{len(sequences)} - docking {sequence}")
+            dir_path = temp_docker._dock_single_sequence(
+                sequence, target_structure, target_sequence, target_name, gpu_id
             )
             if dir_path:
-                docked_results.append((peptide, dir_path))
+                docked_results.append((sequence, dir_path))
 
         
         return docked_results

@@ -3,7 +3,7 @@ import sys
 import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from bopep.design.borf import Borf
+from bopep.diffusion.borf import Borf
 
 # Adjust these paths according to your environment and installation. We recommend separating the environments for RFdiffusion and ProteinMPNN.
 

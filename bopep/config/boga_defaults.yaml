@@ -1,0 +1,79 @@
+# BoGA Default Configuration
+# This file contains default parameters for the Bayesian Optimization Genetic Algorithm (BoGA)
+
+# Mode: 'binding', 'unconditional', or 'sequence'
+mode: null
+
+# Initial population parameters
+n_init: 100
+min_sequence_length: 8
+max_sequence_length: 25
+
+# Genetic algorithm parameters
+mutation_rate: 0.05
+
+# Selection parameters (for evolutionary operations)
+# Can be overriden in schedule (run)
+selection:
+  m_select: 10              # Number of parents to select for mutation
+  k_propose: 1000            # Size of candidate pool to generate
+  method: 'uniform'         # Selection method: 'uniform', 'exponential', or 'adalead'
+  top_n_or_frac: 0.3         # Fraction/number of top performers to sample from
+  beta: 1.0                 # Temperature parameter for exponential selection
+  adalead_k: 0.05           # Adaptive threshold parameter for AdaLead (0-1)
+  selection_pool: 'full_history'  # Pool to select from: 'full_history' or 'last_batch'
+
+# Surrogate model configuration
+surrogate_model:
+  model_type: 'deep_evidential'
+  network_type: 'bigru'
+  n_trials: 100
+  n_splits: 5
+  hpo_interval: 100 
+
+# Embedding configuration
+embedding:
+  method: 'esm'
+  batch_size: 64
+  model_path: null
+  device: null
+  pca_n_components: 100
+
+# Validation parameters
+validation:
+  n_validate: 0.2
+  min_validation_samples: 20
+  min_training_samples: 100
+
+# Scoring configuration
+scoring:
+  scores_to_include: null
+  required_n_contact_residues: 5
+  binding_site_distance_threshold: 5
+  n_jobs: 12
+
+# Docker/Docking configuration (for binding mode)
+docker:
+  models:
+    - 'boltz'
+  output_dir: './docking_outputs'
+  num_models: 3
+  num_recycles: 5
+  diffusion_samples: 3
+  recycling_steps: 5
+  gpu_ids: null
+  save_raw: false
+  force: false
+
+# Folding configuration (for unconditional mode)
+folding:
+  output_dir: './folding_outputs'
+  num_models: 5
+  num_recycles: 3
+  save_raw: false
+  force: false
+
+# Logging configuration
+logging:
+  log_dir: './logs'
+  continue_from_logs: null

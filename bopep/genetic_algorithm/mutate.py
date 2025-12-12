@@ -5,9 +5,9 @@ import numpy as np
 _AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 
-class PeptideMutator:
+class Mutator:
     """
-    Simple peptide mutation and crossover for genetic algorithms.
+    Simple sequence mutation and crossover for genetic algorithms.
     
     Supports:
       - Uniform random substitution mutations
@@ -29,66 +29,13 @@ class PeptideMutator:
         self.p_del = float(p_del)
 
     def generate_random_sequence(self) -> str:
-        """Generate a random peptide sequence within length constraints."""
+        """Generate a random sequence sequence within length constraints."""
         L = random.randint(self.min_sequence_length, self.max_sequence_length)
         return ''.join(random.choice(_AMINO_ACIDS) for _ in range(L))
-
-    def crossover(self, parent1: str, parent2: str, method: str = "single") -> str:
-        """
-        Perform crossover between two parent sequences.
-        
-        Args:
-            parent1: First parent sequence
-            parent2: Second parent sequence
-            method: 'single' for single-point crossover, 'two' for two-point crossover
-            
-        Returns:
-            Offspring sequence created by crossover
-        """
-        if method == "single":
-            # Single-point crossover
-            min_len = min(len(parent1), len(parent2))
-            if min_len <= 1:
-                return random.choice([parent1, parent2])
-            
-            crossover_point = random.randint(1, min_len - 1)
-            child = parent1[:crossover_point] + parent2[crossover_point:]
-            
-        elif method == "two":
-            # Two-point crossover
-            min_len = min(len(parent1), len(parent2))
-            if min_len <= 2:
-                return random.choice([parent1, parent2])
-            
-            point1 = random.randint(1, min_len - 2)
-            point2 = random.randint(point1 + 1, min_len - 1)
-            child = parent1[:point1] + parent2[point1:point2] + parent1[point2:]
-            
-        else:
-            raise ValueError(f"Unknown crossover method: {method}. Use 'single' or 'two'.")
-        
-        # Ensure child respects length constraints
-        if len(child) < self.min_sequence_length:
-            # Pad with random amino acids
-            while len(child) < self.min_sequence_length:
-                child += random.choice(_AMINO_ACIDS)
-        elif len(child) > self.max_sequence_length:
-            # Truncate
-            child = child[:self.max_sequence_length]
-        
-        return child
 
     def mutate_sequence(self, seq: str, evaluated_sequences: Set[str], objectives: Dict[str, float] = None) -> str:
         """
         Mutate a sequence using uniform random substitutions, insertions, and deletions.
-        
-        Args:
-            seq: Parent sequence to mutate
-            evaluated_sequences: Set of already evaluated sequences to avoid
-            objectives: (Unused, kept for API compatibility)
-            
-        Returns:
-            Mutated child sequence, guaranteed to be novel
         """
         max_attempts = 10_000
         ops_space = np.array(["sub", "del", "ins"], dtype=object)
@@ -136,15 +83,6 @@ class PeptideMutator:
     def mutate_pool(self, parents: List[str], k_pool: int, evaluated_sequences: Set[str], objectives: Dict[str, float] = None) -> List[str]:
         """
         Generate a pool of mutated offspring from parent sequences.
-        
-        Args:
-            parents: List of parent sequences to mutate
-            k_pool: Desired size of the mutated pool
-            evaluated_sequences: Set of already evaluated sequences to avoid
-            objectives: (Unused, kept for API compatibility)
-            
-        Returns:
-            List of unique mutated sequences
         """
         pool = set()
         attempts = 0
@@ -160,7 +98,7 @@ class PeptideMutator:
         return list(pool)
 
 if __name__ == "__main__":
-    mutator = PeptideMutator()
+    mutator = Mutator()
     parent1 = "ACDEFGHIKLMNPQRSTVWY"
     parent2 = "WYVSRTQPNMLKIHGFEDCA"
     evaluated = {parent1, parent2}
@@ -173,14 +111,3 @@ if __name__ == "__main__":
         child = mutator.mutate_sequence(parent1, evaluated)
         evaluated.add(child)
         print(f"Mutant {i+1}: {child}")
-    
-    print("\n=== Crossover Examples ===")
-    print("Single-point crossover:")
-    for i in range(3):
-        child = mutator.crossover(parent1, parent2, method="single")
-        print(f"Child {i+1}: {child}")
-    
-    print("\nTwo-point crossover:")
-    for i in range(3):
-        child = mutator.crossover(parent1, parent2, method="two")
-        print(f"Child {i+1}: {child}")

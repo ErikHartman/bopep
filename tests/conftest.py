@@ -9,14 +9,14 @@ import torch
 
 
 @pytest.fixture
-def sample_peptides():
-    """Sample peptide sequences for testing."""
+def sample_sequences():
+    """Sample sequence sequences for testing."""
     return [
         "ACDEFGHIKLMNPQRSTVWY",  # All amino acids
-        "GGGAAA",  # Simple peptide
-        "KKKRRRHHH",  # Charged peptide
-        "FFFWWWYYY",  # Aromatic peptide
-        "ILVMAF",  # Hydrophobic peptide
+        "GGGAAA",  # Simple sequence
+        "KKKRRRHHH",  # Charged sequence
+        "FFFWWWYYY",  # Aromatic sequence
+        "ILVMAF",  # Hydrophobic sequence
     ]
 
 

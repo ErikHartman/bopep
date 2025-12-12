@@ -2,11 +2,11 @@ import math
 from bopep.structure.parser import get_chain_coordinates
 
 """
-Distance-based loss function for protein-peptide interactions.
+Distance-based loss function for protein-sequence interactions.
 """
 
 
-def distance_score_from_structure(structure_file_path : str, receptor_chain : str ="A", peptide_chain : str ="B", threshold : float = 8.0):
+def distance_score_from_structure(structure_file_path : str, receptor_chain : str ="A", sequence_chain : str ="B", threshold : float = 8.0):
     """
     1) Parses the structure file (PDB/CIF) to get coordinates/bfactors
     2) Computes the distance-based score which is the mean distance from each receptor alpha carbon
@@ -14,16 +14,16 @@ def distance_score_from_structure(structure_file_path : str, receptor_chain : st
     receptor_coords = get_chain_coordinates(
         structure_file_path, receptor_chain
     )
-    peptide_coords = get_chain_coordinates(
-        structure_file_path, peptide_chain
+    sequence_coords = get_chain_coordinates(
+        structure_file_path, sequence_chain
     )
-    if not receptor_coords or not peptide_coords:
+    if not receptor_coords or not sequence_coords:
         return 0.0
         
-    # Identify receptor alpha carbons within threshold distance of any peptide alpha carbon
+    # Identify receptor alpha carbons within threshold distance of any sequence alpha carbon
     interface_atoms = []
     for r_atom in receptor_coords:
-        for p_atom in peptide_coords:
+        for p_atom in sequence_coords:
             dist = math.dist(r_atom, p_atom)
             if dist <= threshold:
                 interface_atoms.append(r_atom)
@@ -32,11 +32,11 @@ def distance_score_from_structure(structure_file_path : str, receptor_chain : st
     if not interface_atoms:
         return float('inf')  # No interface atoms found
     
-    # For each interface alpha carbon, find distance to nearest peptide alpha carbon
+    # For each interface alpha carbon, find distance to nearest sequence alpha carbon
     nearest_distances = []
     for r_atom in interface_atoms:
         min_dist = float('inf')
-        for p_atom in peptide_coords:
+        for p_atom in sequence_coords:
             dist = math.dist(r_atom, p_atom)
             if dist < min_dist:
                 min_dist = dist

@@ -1,7 +1,7 @@
 import numpy as np
 
 from bopep.embedding.embedder import Embedder
-from bopep.embedding.utils import filter_peptides
+from bopep.embedding.utils import filter_sequences
 
 
 class TestEmbedder:
@@ -46,39 +46,39 @@ class TestEmbedder:
 class TestUtils:
     """Test embedding utility functions"""
 
-    def test_filter_peptides_valid(self):
-        """Test filtering with valid peptides"""
-        peptides = ["ACDEFGHIKL", "MNPQRSTVWY"]  # Remove AAAAAA as it fails fraction test
+    def test_filter_sequences_valid(self):
+        """Test filtering with valid sequences"""
+        sequences = ["ACDEFGHIKL", "MNPQRSTVWY"]  # Remove AAAAAA as it fails fraction test
         
-        result = filter_peptides(peptides)
+        result = filter_sequences(sequences)
         
         assert len(result) == 2
         assert "ACDEFGHIKL" in result
         assert "MNPQRSTVWY" in result
 
-    def test_filter_peptides_invalid(self):
+    def test_filter_sequences_invalid(self):
         """Test filtering with invalid characters"""
-        peptides = ["ACDEFGHIKL", "XYZ123", "MNPQRSTVWY"]
+        sequences = ["ACDEFGHIKL", "XYZ123", "MNPQRSTVWY"]
         
-        result = filter_peptides(peptides)
+        result = filter_sequences(sequences)
         
         assert "XYZ123" not in result
         assert "ACDEFGHIKL" in result
         assert "MNPQRSTVWY" in result
 
-    def test_filter_peptides_empty(self):
+    def test_filter_sequences_empty(self):
         """Test filtering with empty list"""
-        result = filter_peptides([])
+        result = filter_sequences([])
         assert result == []
 
-    def test_filter_peptides_length_limits(self):
+    def test_filter_sequences_length_limits(self):
         """Test filtering based on length limits"""
-        peptides = ["AA", "ACDEFG", "ACDEFGHIKLMNPQRSTVWY", "A" * 100]
+        sequences = ["AA", "ACDEFG", "ACDEFGHIKLMNPQRSTVWY", "A" * 100]
         
-        result = filter_peptides(peptides, min_length=3, max_length=25)
+        result = filter_sequences(sequences, min_length=3, max_length=25)
         
         # Only ACDEFG and ACDEFGHIKLMNPQRSTVWY should pass
         expected = ["ACDEFG", "ACDEFGHIKLMNPQRSTVWY"]
         assert len(result) == len(expected)
-        for peptide in expected:
-            assert peptide in result
+        for sequence in expected:
+            assert sequence in result

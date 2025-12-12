@@ -55,6 +55,7 @@ class NetworkFactory:
             # Handle BiLSTM specific parameters
             hidden_dim = kwargs.get("hidden_dim", kwargs.get("lstm_hidden_dim", 128))
             num_layers = kwargs.get("num_layers", kwargs.get("lstm_layers", 1))
+            max_seq_len = kwargs.get("max_seq_len", 150)
             network_params["architecture"] = "lstm"
 
             # Ensure hidden_dim is an int
@@ -64,12 +65,14 @@ class NetworkFactory:
 
             network_params["hidden_dim"] = hidden_dim
             network_params["num_layers"] = num_layers
+            network_params["max_seq_len"] = max_seq_len
             model = RNNetwork(**network_params)
 
         elif network_type in ["bigru"]:
             # Handle BiGRU specific parameters
             hidden_dim = kwargs.get("hidden_dim", kwargs.get("gru_hidden_dim", 128))
             num_layers = kwargs.get("num_layers", kwargs.get("gru_layers", 1))
+            max_seq_len = kwargs.get("max_seq_len", 150)
             network_params["architecture"] = "gru"
 
             # Ensure hidden_dim is an int
@@ -79,6 +82,7 @@ class NetworkFactory:
 
             network_params["hidden_dim"] = hidden_dim
             network_params["num_layers"] = num_layers
+            network_params["max_seq_len"] = max_seq_len
             model = RNNetwork(**network_params)
 
         else:

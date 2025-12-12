@@ -55,7 +55,7 @@ def generate_synthetic_data(
     objective_dict = {}
 
     for i in range(n_samples):
-        peptide_id = f"peptide_{i}"
+        sequence_id = f"sequence_{i}"
 
         if variable_length:
             # For variable length, create embeddings with different sequence lengths
@@ -70,8 +70,8 @@ def generate_synthetic_data(
         noise = np.random.normal(0, 0.5)
         score = base_score + noise
 
-        embedding_dict[peptide_id] = embedding
-        objective_dict[peptide_id] = float(score)
+        embedding_dict[sequence_id] = embedding
+        objective_dict[sequence_id] = float(score)
 
     return embedding_dict, objective_dict
 
@@ -88,7 +88,7 @@ def generate_multiobjective_data(
     objective_dict = {}
 
     for i in range(n_samples):
-        peptide_id = f"peptide_{i}"
+        sequence_id = f"sequence_{i}"
 
         if variable_length:
             # For variable length, create embeddings with different sequence lengths
@@ -115,8 +115,8 @@ def generate_multiobjective_data(
             score = float(base_score + noise)
             objectives.append(score)
 
-        embedding_dict[peptide_id] = embedding
-        objective_dict[peptide_id] = objectives
+        embedding_dict[sequence_id] = embedding
+        objective_dict[sequence_id] = objectives
 
     return embedding_dict, objective_dict
 
@@ -145,23 +145,23 @@ def generate_training_data(
     objective_dict = {}
     
     for i, x in enumerate(x_values):
-        peptide_id = f"sample_{i}"
+        sequence_id = f"sample_{i}"
         
         # Create 1D embedding (just x value)
-        embedding_dict[peptide_id] = np.array([x], dtype=np.float32)
+        embedding_dict[sequence_id] = np.array([x], dtype=np.float32)
         
         if multiobjective:
             # Two objectives with named format: x^3 and x^3 + (x^2)^3
             y = x * x  # y = x^2
             obj1 = x ** 3
             obj2 = x ** 3 + y ** 3
-            objective_dict[peptide_id] = {
+            objective_dict[sequence_id] = {
                 "objective_1": float(obj1),
                 "objective_2": float(obj2)
             }
         else:
             # Single objective: x^3
-            objective_dict[peptide_id] = float(x ** 3)
+            objective_dict[sequence_id] = float(x ** 3)
     
     return embedding_dict, objective_dict
 
@@ -269,7 +269,7 @@ class TestMonteCarloDropout:
         assert isinstance(predictions, dict)
         assert len(predictions) == len(embedding_dict)
 
-        for peptide_id, (mean, std) in predictions.items():
+        for sequence_id, (mean, std) in predictions.items():
             assert isinstance(mean, float)
             assert isinstance(std, float)
             assert std >= 0  # Standard deviation should be non-negative
@@ -352,7 +352,7 @@ class TestNeuralNetworkEnsemble:
         )
 
         # Check prediction format and contents
-        for peptide_id, (mean, std) in predictions.items():
+        for sequence_id, (mean, std) in predictions.items():
             assert isinstance(mean, float)
             assert isinstance(std, float)
             assert std >= 0
@@ -418,7 +418,7 @@ class TestDeepEvidentialRegression:
         )
 
         # Check prediction format and uncertainty estimation
-        for peptide_id, (mean, std) in predictions.items():
+        for sequence_id, (mean, std) in predictions.items():
             assert isinstance(mean, float)
             assert isinstance(std, float)
             assert std >= 0  # Standard deviation should be non-negative
@@ -467,7 +467,7 @@ class TestMVE:
         )
         
         # Check prediction format
-        for peptide_id, (mean, std) in predictions.items():
+        for sequence_id, (mean, std) in predictions.items():
             assert isinstance(mean, float)
             assert isinstance(std, float)
             assert std >= 0
@@ -523,7 +523,7 @@ class TestSurrogateModelManager:
         assert len(predictions) == len(embedding_dict)
         
         # Check prediction format for single objective
-        for peptide_id, (mean, std) in predictions.items():
+        for sequence_id, (mean, std) in predictions.items():
             assert isinstance(mean, float)
             assert isinstance(std, float)
             assert std >= 0
@@ -560,7 +560,7 @@ class TestSurrogateModelManager:
             assert len(predictions) == len(embedding_dict)
             
             # Verify prediction format
-            for peptide_id, (mean, std) in predictions.items():
+            for sequence_id, (mean, std) in predictions.items():
                 assert isinstance(mean, float)
                 assert isinstance(std, float)
                 assert std >= 0

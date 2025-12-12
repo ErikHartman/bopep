@@ -9,11 +9,11 @@ def get_aaindex_path():
     return pkg_resources.files("bopep.embedding").joinpath("aaindex1.csv")
 
 
-def embed_aaindex(peptide_sequences, average: bool = True):
+def embed_aaindex(sequences, average: bool = True):
     """
-    Generate peptide embeddings using aaindex properties.
+    Generate sequence embeddings using aaindex properties.
 
-    - When `average=True`: Returns an embedding vector of shape `(num_properties,)` for each peptide.
+    - When `average=True`: Returns an embedding vector of shape `(num_properties,)` for each sequence.
     - When `average=False`: Returns an embedding of shape `(sequence_length, num_properties)`,
       where each amino acid gets its own vector.
     """
@@ -37,21 +37,21 @@ def embed_aaindex(peptide_sequences, average: bool = True):
     num_properties = len(aaindex_properties)  # Number of AAIndex properties
     embeddings = {}
 
-    for peptide in tqdm(peptide_sequences, desc="Generating aaindex embeddings"):
-        seq_length = len(peptide)
+    for sequence in tqdm(sequences, desc="Generating aaindex embeddings"):
+        seq_length = len(sequence)
         embedding_matrix = np.zeros((seq_length, num_properties))
 
         for prop_idx, (description, mapping) in enumerate(aaindex_properties):
-            values = [mapping.get(letter, 0.0) for letter in peptide]
+            values = [mapping.get(letter, 0.0) for letter in sequence]
             embedding_matrix[:, prop_idx] = values  # Assign each AA property to its row
 
         if average:
-            embeddings[peptide] = embedding_matrix.mean(
+            embeddings[sequence] = embedding_matrix.mean(
                 axis=0
             )  # Shape: (num_properties,)
             
         else:
-            embeddings[peptide] = (
+            embeddings[sequence] = (
                 embedding_matrix  # Shape: (sequence_length, num_properties)
             )
 

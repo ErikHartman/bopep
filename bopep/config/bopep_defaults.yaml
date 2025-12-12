@@ -1,0 +1,58 @@
+# BoPep Default Configuration
+# This file contains default parameters for the Bayesian Optimization for Sequences search
+
+# Initial population parameters
+num_initial: 10
+initial_method: 'kmeans'  # Method for selecting initial sequences: 'kmeans' or 'random'
+
+# Batch size for optimization
+batch_size: 10
+
+# Validation parameters
+validation:
+  n_validate: 0.2  # Fraction or absolute number of samples for validation
+  min_validation_samples: 3
+  min_training_samples: 10
+
+# Surrogate model configuration
+surrogate_model:
+  model_type: 'deep_evidential'
+  network_type: 'bigru'
+  
+# Hyperparameter optimization configuration
+hpo:
+  n_trials: 100
+  n_splits: 5
+  random_state: 42
+  hpo_interval: 10  # Run HPO every N iterations
+
+# Scoring configuration
+scoring:
+  scores_to_include: null  # List of scores to compute, must be provided by user
+  required_n_contact_residues: 5
+  binding_site_distance_threshold: 5
+  n_jobs: 12
+  receptor_chain: 'A'
+  sequence_chain: 'B'
+
+# Docker/Docking configuration
+docker:
+  models:
+    - 'boltz'
+  output_dir: './docking_outputs'
+  num_models: 3
+  num_recycles: 5
+  diffusion_samples: 3
+  recycling_steps: 5
+  gpu_ids: null
+  save_raw: false
+  force: false
+
+# Logging configuration
+logging:
+  log_dir: 'logs'
+  overwrite_logs: null
+
+# Checkpointing configuration
+checkpointing:
+  checkpoint_interval: 20  # Save checkpoint every N iterations

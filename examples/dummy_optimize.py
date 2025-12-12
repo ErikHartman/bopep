@@ -191,7 +191,7 @@ def test_bopep_with_precomputed_data(
         return mock_scores
 
     bopep._score_batch = mock_score_batch
-    bopep.docker.dock_peptides = lambda peptides: peptides  # Just return the peptide names
+    bopep.docker.dock_sequences = lambda peptides: peptides  # Just return the peptide names
 
     schedule = [ {"acquisition": "standard_deviation", "iterations": 2},
         {"acquisition": "expected_improvement", "iterations": 10},
@@ -469,7 +469,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
             binding_site_residue_indices=combined_sites,  # List format - same for all
             n_validate=None,  # Skip validation for simple test
             assume_zero_indexed=True,
-            initial_peptides=test_peptides[:3]  # Use first 3 peptides as initial
+            initial_sequences=test_peptides[:3]  # Use first 3 peptides as initial
         )
 
         # Run peptide-specific approach  
@@ -482,7 +482,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
             embeddings=embeddings,
             binding_site_residue_indices=peptide_specific_binding_sites,  # Dict format
             n_validate=None,  # Skip validation for simple test
-            initial_peptides=test_peptides[:3],  # Use first 3 peptides as initial
+            initial_sequences=test_peptides[:3],  # Use first 3 peptides as initial
             assume_zero_indexed = True
         )
 

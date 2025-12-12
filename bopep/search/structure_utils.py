@@ -30,14 +30,14 @@ def _check_binding_site_residue_indices(
     is_dict_format = isinstance(binding_site_residue_indices, dict)
     
     if is_dict_format:
-        print(f"Found peptide-specific binding sites for {len(binding_site_residue_indices)} peptides")
+        print(f"Found sequence-specific binding sites for {len(binding_site_residue_indices)} sequences")
         # Get all unique residue indices for validation and visualization
         all_residues = set()
         for residue_list in binding_site_residue_indices.values():
             all_residues.update(residue_list)
         residues_to_check = sorted(list(all_residues))
     else:
-        print("Using same binding site for all peptides")
+        print("Using same binding site for all sequences")
         residues_to_check = binding_site_residue_indices
 
     if starting_index != 0:
@@ -62,8 +62,8 @@ def _check_binding_site_residue_indices(
             if is_dict_format:
                 # Adjust all residue lists in the dict
                 binding_site_residue_indices = {
-                    peptide: [residue - starting_index for residue in residue_list]
-                    for peptide, residue_list in binding_site_residue_indices.items()
+                    sequence: [residue - starting_index for residue in residue_list]
+                    for sequence, residue_list in binding_site_residue_indices.items()
                 }
                 residues_to_check = [residue - starting_index for residue in residues_to_check]
             else:
@@ -76,9 +76,9 @@ def _check_binding_site_residue_indices(
     print("=" * 60)
     print(f"Full sequence length: {len(protein_sequence)}")
     if isinstance(binding_site_residue_indices, dict):
-        print("Peptide-specific binding sites:")
-        for peptide, residues in binding_site_residue_indices.items():
-            print(f"  {peptide}: {residues}")
+        print("Sequence-specific binding sites:")
+        for sequence, residues in binding_site_residue_indices.items():
+            print(f"  {sequence}: {residues}")
     else:
         print(f"Selected binding site residues: {binding_site_residue_indices}")
     print("-" * 60)
@@ -118,12 +118,12 @@ def _check_binding_site_residue_indices(
     # increment binding site residues by 1 since alphafold pdbs start at 1
     if isinstance(binding_site_residue_indices, dict):
         binding_site_residue_indices = {
-            peptide: [residue + 1 for residue in residue_list]
-            for peptide, residue_list in binding_site_residue_indices.items()
+            sequence: [residue + 1 for residue in residue_list]
+            for sequence, residue_list in binding_site_residue_indices.items()
         }
-        print("The internally stored peptide-specific binding site residues are (1-indexed):")
-        for peptide, residues in binding_site_residue_indices.items():
-            print(f"  {peptide}: {residues}")
+        print("The internally stored sequence-specific binding site residues are (1-indexed):")
+        for sequence, residues in binding_site_residue_indices.items():
+            print(f"  {sequence}: {residues}")
     else:
         binding_site_residue_indices = [
             residue + 1 for residue in binding_site_residue_indices

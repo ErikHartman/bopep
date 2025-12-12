@@ -209,28 +209,14 @@ def compute_ipsae(
 
 def get_ipsae_scores_from_structure_and_pae(
     structure_file: str, 
-    pae_data: np.ndarray, 
+    pae_data: np.ndarray,
+    receptor_chain: str = "A",
+    sequence_chain: str = "B",
     pae_cutoff: float = 10.0,
     residue_selector: Optional[Callable[[Any], bool]] = None
 ) -> Dict[str, float]:
     """
     Compute IPSAE scores from structure file (PDB/CIF) and PAE data.
-    
-    Parameters
-    ----------
-    structure_file : str
-        Path to structure file (PDB/CIF)
-    pae_data : np.ndarray
-        PAE matrix or flat array
-    pae_cutoff : float, default 10.0
-        PAE threshold for counting inter-chain pairs
-    residue_selector : callable, optional
-        Function to filter residues
-        
-    Returns
-    -------
-    dict
-        Dictionary containing 'ipsae_max' and 'ipsae_min' scores
     """
     from bopep.structure.parser import parse_structure
     
@@ -243,12 +229,12 @@ def get_ipsae_scores_from_structure_and_pae(
         residue_selector=residue_selector
     )
     
-    # Extract all max values from chain pairs
-    max_values = []
-    min_values = []
+    # Extract values specifically for the receptor-sequence pair
+    # Create a normalized pair key (alphabetically sorted)
+    pair_key = tuple(sorted([receptor_chain, sequence_chain]))
     
-    for pair_key, pair_data in results.items():
-        max_val = pair_data.get('max', 0.0)
+    if pair_key in results:
+        pair_data = results[pair_key]
         asym_data = pair_data.get('asym', {})
         
         # Get both asymmetric directions
@@ -258,15 +244,36 @@ def get_ipsae_scores_from_structure_and_pae(
                 direction_values.append(value)
         
         if direction_values:
-            max_values.append(max(direction_values))
-            min_values.append(min(direction_values))
+            ipsae_max = max(direction_values)
+            ipsae_min = min(direction_values)
         else:
-            max_values.append(max_val)
-            min_values.append(max_val)
-    
-    # Return overall max and min across all chain pairs
-    ipsae_max = max(max_values) if max_values else 0.0
-    ipsae_min = min(min_values) if min_values else 0.0
+            ipsae_max = pair_data.get('max', 0.0)
+            ipsae_min = pair_data.get('max', 0.0)
+    else:
+        # Fallback to old behavior if specific pair not found
+        max_values = []
+        min_values = []
+        
+        for pair_key, pair_data in results.items():
+            max_val = pair_data.get('max', 0.0)
+            asym_data = pair_data.get('asym', {})
+            
+            # Get both asymmetric directions
+            direction_values = []
+            for key, value in asym_data.items():
+                if not key.endswith('_res') and isinstance(value, (int, float)):
+                    direction_values.append(value)
+            
+            if direction_values:
+                max_values.append(max(direction_values))
+                min_values.append(min(direction_values))
+            else:
+                max_values.append(max_val)
+                min_values.append(max_val)
+        
+        # Return overall max and min across all chain pairs
+        ipsae_max = max(max_values) if max_values else 0.0
+        ipsae_min = min(min_values) if min_values else 0.0
     
     return {
         'ipsae_max': ipsae_max,
@@ -277,7 +284,6 @@ def get_ipsae_scores_from_structure_and_pae(
 if __name__ == "__main__":
     # Example usage
     from bopep.structure.parser import parse_structure
-    import sys
     import json
 
     pdb_file = "/srv/data1/er8813ha/bopep/docked/cd14/4glf_NYLSELSEHV/4glf_NYLSELSEHV_relaxed_rank_001_alphafold2_multimer_v3_model_5_seed_000.pdb"
