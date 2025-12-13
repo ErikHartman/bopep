@@ -13,8 +13,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from bopep.scoring.monomer_scorer import MonomerScorer
-from bopep.scoring.sequence_properties import SequenceProperties
-
 
 class TestMonomerScorer:
     """Test the MonomerScorer class for unconditional protein generation"""

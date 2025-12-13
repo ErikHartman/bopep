@@ -1,4 +1,5 @@
-from bopep.search.optimization import BoPep as BoPep
+from bopep.search.peptidome_search import PeptidomeSearch as PeptidomeSearch
+from bopep.search.proteome_search import ProteomeSearch as ProteomeSearch
 from bopep.scoring.complex_scorer import ComplexScorer as ComplexScorer
 from bopep.scoring.monomer_scorer import MonomerScorer as MonomerScorer
 from bopep.folding.alphafold_monomer import AlphaFoldMonomer as AlphaFoldMonomer

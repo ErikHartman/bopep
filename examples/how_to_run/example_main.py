@@ -1,12 +1,12 @@
 """
-BoPep Example Script
+PeptidomeSearch Example Script
 
-This script demonstrates a complete workflow for peptide optimization using BoPep.
+This script demonstrates a complete workflow for peptide optimization using PeptidomeSearch.
 It includes configuration for all major components and demonstrates advanced features.
 """
 
 import os
-from bopep import BoPep, benchmark_objective, Embedder
+from bopep import PeptidomeSearch, benchmark_objective, Embedder
 
 # ----- Configuration -----
 
@@ -32,7 +32,7 @@ INITIAL_PEPTIDES = []
 # Optional: Path to pre-computed ESM embeddings
 # ESM_PATH = "path/to/esm_model"
 # EMBEDDINGS = "path/to/precomputed_embeddings.pkl"
-EMBEDDINGS = None  # Let BoPep compute embeddings from scratch
+EMBEDDINGS = None  # Let PeptidomeSearch compute embeddings from scratch
 
 # Define binding site residues on target protein
 # These are the residue indices that form the binding site
@@ -95,8 +95,8 @@ if __name__ == "__main__":
     embeddings = embedder.embed_esm(PEPTIDES, average=True, model_path="...", batch_size=128) # Example ESM model path
     reduced_embeddings = embedder.reduce_embeddings_autoencoder(embeddings, latent_dim=128) # Reduce to 128 dimensions using a VAE
 
-    # Initialize BoPep with desired configuration
-    bo = BoPep(
+    # Initialize PeptidomeSearch with desired configuration
+    peptidome_search = PeptidomeSearch(
         surrogate_model_kwargs={
             "model_type": MODEL_TYPE, 
             "network_type": NETWORK_TYPE
@@ -114,7 +114,7 @@ if __name__ == "__main__":
     print(f"Validation set size: {NUM_VALIDATE if NUM_VALIDATE else 'None'}")
     
     # Run the optimization process
-    bo.optimize(
+    peptidome_search.optimize(
         embeddings=reduced_embeddings,
         target_structure_path=TARGET_STRUCTURE_PATH,
         schedule=BO_SCHEDULE,

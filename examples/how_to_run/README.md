@@ -1,26 +1,26 @@
-# How to Run BoPep
+# How to Run PeptidomeSearch
 
-This guide explains how to set up and run the BoPep framework for peptide optimization using Bayesian optimization.
+This guide explains how to set up and run the PeptidomeSearch framework for peptide optimization using Bayesian optimization.
 
 ## Basic Setup
 
-1. Install BoPep and its dependencies (see main project README)
+1. Install bopep and its dependencies (see main project README)
 2. Prepare your target protein structure (PDB format)
 3. Define a list of peptide sequences to optimize (your search space)
 4. Configure your optimization parameters
 
 ## Example Script
 
-To run BoPep, you can use a script similar to this example:
+To run PeptidomeSearch, you can use a script similar to this example:
 
 ```python
-from bopep import BoPep, benchmark_objective
+from bopep import PeptidomeSearch, benchmark_objective
 
 # Define peptides to optimize
 peptides = ["KLLPNLLEQH", "SLLPNLLEQY", "ALLPNLLEQH", "TLLPNLLEQH"]
 
-# Configure BoPep
-bo = BoPep(
+# Configure PeptidomeSearch
+peptidome_search = PeptidomeSearch(
     surrogate_model_kwargs={"model_type": "deep_evidential", "network_type": "bigru"},
     objective_function=benchmark_objective,
     scoring_kwargs={"scores_to_include": ["iptm", "interface_dG", "peptide_pae", "rosetta_score"]},
@@ -30,7 +30,7 @@ bo = BoPep(
 )
 
 # Run optimization
-bo.optimize(
+peptidome_search.optimize(
     peptides=peptides,
     target_structure_path="target_protein.pdb",
     batch_size=4,
@@ -41,7 +41,7 @@ bo.optimize(
 
 ## Key Parameters
 
-### BoPep Initialization
+### PeptidomeSearch Initialization
 
 - **surrogate_model_kwargs**: Configure the surrogate model
   - `model_type`: "nn_ensemble", "mc_dropout", "deep_evidential", or "mve"
@@ -67,7 +67,7 @@ bo.optimize(
 
 ## Validation
 
-When `num_validate` is specified, BoPep will:
+When `num_validate` is specified, PeptidomeSearch will:
 
 1. Split docked peptides into training and validation sets
 2. Train the surrogate model on the training set
@@ -87,7 +87,7 @@ See the example_main.py file for a more comprehensive configuration example incl
 
 ## Outputs
 
-BoPep logs detailed information to the specified `log_dir`, including:
+PeptidomeSearch logs detailed information to the specified `log_dir`, including:
 
 - Training and validation metrics
 - Model predictions

@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 
 
-class BoPep:
+class PeptidomeSearch:
 
     def __init__(
         self,
@@ -42,7 +42,7 @@ class BoPep:
         config: Optional[Config] = None,
     ):
         """
-        Initialize the BoPep optimizer with various configuration options.
+        Initialize the PeptidomeSearch optimizer with various configuration options.
 
         Args:
             surrogate_model_kwargs: Configuration for the surrogate model including:
@@ -58,11 +58,11 @@ class BoPep:
                     returns score dictionaries. If provided, this will be used
                     instead of the default scorer.
             checkpoint_interval: Number of iterations between automatic checkpoints (default: 5)
-            config: Optional Config object for BoPep. If not provided, defaults will be loaded.
+            config: Optional Config object for PeptidomeSearch. If not provided, defaults will be loaded.
         """
         # Initialize or load config
         if config is None:
-            config = Config(script="BoPep")  # Load defaults
+            config = Config(script="PeptidomeSearch")  # Load defaults
         self.config = config
         
         # Get flattened config for easy parameter access
@@ -147,11 +147,11 @@ class BoPep:
         self.checkpoint_interval = get_param(checkpoint_interval, 'checkpointing.checkpoint_interval')
         
         # checkpointing functions
-        self._next_checkpoint_dir = _next_checkpoint_dir.__get__(self, BoPep)
-        self._save_checkpoint = _save_checkpoint.__get__(self, BoPep)
-        self._copy_logs_to_checkpoint = _copy_logs_to_checkpoint.__get__(self, BoPep)
-        self._setup_checkpoint_dir = _setup_checkpoint_dir.__get__(self, BoPep)
-        self._rebuild_logs_from_csvs = _rebuild_logs_from_csvs.__get__(self, BoPep)
+        self._next_checkpoint_dir = _next_checkpoint_dir.__get__(self, PeptidomeSearch)
+        self._save_checkpoint = _save_checkpoint.__get__(self, PeptidomeSearch)
+        self._copy_logs_to_checkpoint = _copy_logs_to_checkpoint.__get__(self, PeptidomeSearch)
+        self._setup_checkpoint_dir = _setup_checkpoint_dir.__get__(self, PeptidomeSearch)
+        self._rebuild_logs_from_csvs = _rebuild_logs_from_csvs.__get__(self, PeptidomeSearch)
 
 
     def run(
@@ -275,7 +275,7 @@ class BoPep:
         assume_zero_indexed: Optional[bool] = None,
     ):
         """
-        Initializes the BoPep optimizer for a fresh search
+        Initializes the PeptidomeSearch optimizer for a fresh search
         """
         sequences = list(self.embeddings.keys())
         for sequence in sequences:

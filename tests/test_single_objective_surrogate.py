@@ -22,7 +22,7 @@ and training functionality.
 import pytest
 import numpy as np
 import torch
-from typing import Dict, Tuple, Union, List
+from typing import Dict, Tuple, Union
 
 from bopep.surrogate_model import (
     MonteCarloDropout,

@@ -19,10 +19,12 @@ class Config:
         """
         if script == "BoGA":
             defaults_path = Path(__file__).parent / "boga_defaults.yaml"
-        elif script == "BoPep":
-            defaults_path = Path(__file__).parent / "bopep_defaults.yaml"
+        elif script == "PeptidomeSearch":
+            defaults_path = Path(__file__).parent / "peptidome_search_defaults.yaml"
+        elif script == "ProteomeSearch":
+            defaults_path = Path(__file__).parent / "proteome_search_defaults.yaml"
         else:
-            raise ValueError(f"Unknown script type: {script}. Must be 'BoGA' or 'BoPep'")
+            raise ValueError(f"Unknown script type: {script}. Must be 'BoGA', 'PeptidomeSearch', or 'ProteomeSearch'")
         
         self.defaults_path = Path(defaults_path)
         self.config = self._load_yaml(self.defaults_path)
