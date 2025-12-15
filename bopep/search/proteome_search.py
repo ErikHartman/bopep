@@ -1,9 +1,4 @@
-"""
-Search the entire proteome for binders.
-"""
-
 import random
-from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Tuple
 import numpy as np
 
@@ -69,6 +64,9 @@ class ProteomeSearch:
         # Logging options
         log_dir: Optional[str] = None,
         
+        # Continuation options
+        continue_from_logs: Optional[str] = None,
+        
         # Config object
         config: Optional[Config] = None,
     ):
@@ -98,6 +96,7 @@ class ProteomeSearch:
             m_select: Number of candidates to select and dock per iteration
             k_propose: Number of candidates to sample from proteome per iteration
             log_dir: Directory for logging
+            continue_from_logs: Path to previous log directory to resume from
             config: Optional Config object. If not provided, defaults will be loaded.
         """
         # Initialize or load config
@@ -115,6 +114,7 @@ class ProteomeSearch:
         # Store proteome
         if not proteome:
             raise ValueError("proteome cannot be empty. Provide a dictionary of protein_id: sequence")
+        
         self.proteome = proteome
         self.protein_ids = list(proteome.keys())
         print(f"Loaded proteome with {len(self.proteome)} proteins")
@@ -187,7 +187,6 @@ class ProteomeSearch:
         if self.pca_n_components is None:
             raise ValueError(
                 "pca_n_components must be specified to ensure dimensional consistency. "
-                "Use a fixed value (e.g., pca_n_components=20) for stable neural network training."
             )
         
         # Get docker kwargs
@@ -218,9 +217,14 @@ class ProteomeSearch:
             device=self.device
         )
         
-        # Logging
-        log_dir = get_param(log_dir, 'logging.log_dir')
-        if log_dir is not None:
+        # Logging and continuation
+        self.continue_from_logs = get_param(continue_from_logs, 'logging.continue_from_logs')
+        
+        if continue_from_logs is not None:
+            # When continuing from logs, never overwrite existing logs
+            self.logger = Logger(log_dir=continue_from_logs, overwrite_logs=False)
+        elif log_dir is not None:
+            # For fresh runs, overwrite logs
             self.logger = Logger(log_dir=log_dir, overwrite_logs=True)
         else:
             self.logger = None
@@ -245,9 +249,6 @@ class ProteomeSearch:
     def _sample_peptide_from_proteome(self) -> Tuple[str, str, int]:
         """
         Sample a single peptide from the proteome.
-        
-        Returns:
-            Tuple of (peptide_sequence, protein_id, position)
         """
         # Pick random protein
         protein_id = random.choice(self.protein_ids)
@@ -280,28 +281,22 @@ class ProteomeSearch:
         
         return peptide, protein_id, start
     
-    def _sample_peptides_from_proteome(self, n: int) -> List[str]:
+    def _sample_peptides_from_proteome(self, n_sample: int) -> List[str]:
         """
         Sample n unique peptides from the proteome.
-        
-        Args:
-            n: Number of peptides to sample
-            
-        Returns:
-            List of unique peptide sequences
         """
         peptides = set()
-        max_attempts = n * 10  # Prevent infinite loop
+        max_attempts = n_sample * 10  # Prevent infinite loop
         attempts = 0
         
-        while len(peptides) < n and attempts < max_attempts:
+        while len(peptides) < n_sample and attempts < max_attempts:
             peptide, _, _ = self._sample_peptide_from_proteome()
             if peptide not in self._evaluated_sequences:
                 peptides.add(peptide)
             attempts += 1
         
-        if len(peptides) < n:
-            print(f"Warning: Only sampled {len(peptides)} unique peptides (requested {n})")
+        if len(peptides) < n_sample:
+            print(f"Warning: Only sampled {len(peptides)} unique peptides (requested {n_sample})")
         
         return list(peptides)
     
@@ -398,104 +393,84 @@ class ProteomeSearch:
         )
         return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
     
-    def _print_leaderboard(self, objectives: Dict[str, Any], iteration: int, print_n: int = 5, objective_directions: Dict[str, str] = None):
-        """Print leaderboard for both single and multi-objective cases."""
-        if not objectives:
-            return
-        
-        print(f"Iteration {iteration} leaderboard:")
-        
-        sample_obj = next(iter(objectives.values()))
-        if isinstance(sample_obj, dict):
-            # Multi-objective case
-            obj_names = list(sample_obj.keys())
-            print(f"Top {print_n} sequences (multiobjective):")
-            
-            for obj_name in obj_names:
-                print(f"\n--- {obj_name} ---")
-                
-                # Sort by direction
-                if objective_directions and obj_name in objective_directions:
-                    reverse_sort = objective_directions[obj_name] == "max"
-                else:
-                    reverse_sort = True  # Default to maximization
-                
-                sorted_sequences = sorted(objectives.items(), 
-                                       key=lambda x: x[1][obj_name], 
-                                       reverse=reverse_sort)[:print_n]
-                print(f"{'Peptide':<20} | {obj_name:<15}")
-                print("-" * 40)
-                for sequence, obj_dict in sorted_sequences:
-                    print(f"{sequence:<20} | {obj_dict[obj_name]:<15.4f}")
-        else:
-            # Single objective case
-            sorted_leaderboard = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:print_n]
-            print(f"{'Peptide':<20} | {'Objective':<10}")
-            print("-" * 60)
-            for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
-                print(f"  {rank}. {seq} - Objective: {obj:.4f}")
-    
     def run(self, schedule: List[Dict[str, Any]]) -> Dict[str, float]:
         """
         Run the proteome search optimization.
-        
-        Args:
-            schedule: List of phase dictionaries, each containing:
-                - 'acquisition': acquisition function name
-                - 'generations': number of iterations for this phase
-                - 'acquisition_kwargs': optional kwargs for acquisition function
-                
-        Returns:
-            Dictionary mapping sequences to final objectives
         """
         print("=== Starting Proteome Search ===")
         print(f"Proteome size: {len(self.proteome)} proteins")
         print(f"Peptide length range: {self.min_peptide_length}-{self.max_peptide_length}")
-        print(f"Initial samples: {self.n_init}")
         print(f"k_propose: {self.k_propose}, m_select: {self.m_select}")
-        
-        # Step 1: Sample and evaluate initial peptides
-        print(f"\n--- Initialization: sampling {self.n_init} peptides ---")
-        initial_peptides = self._sample_peptides_from_proteome(self.n_init)
-        print(f"Sampled {len(initial_peptides)} initial peptides from proteome")
-        
-        print("Docking and scoring initial peptides...")
-        scores = self._dock_and_score(initial_peptides)
-        
-        # Convert to objectives
-        objectives = self.scores_to_objective.create_objective(
-            scores, 
-            self.objective_function, 
-            **self.objective_function_kwargs
-        )
-        
-        print(f"Initial evaluation complete. {len(objectives)} sequences scored.")
         
         # Get objective directions for multi-objective
         objective_directions = self.scoring_kwargs.get("objective_directions", {})
         
-        # Embed initial sequences
-        initial_embeddings = self._embed_sequences(list(scores.keys()))
-        
-        # Optimize hyperparameters on initial data
-        print("Optimizing hyperparameters on initial data...")
-        self._optimize_hyperparameters(initial_embeddings, objectives, iteration=0)
-        
-        if self.logger:
-            self.logger.log_scores(scores, iteration=0, acquisition_name='initial')
-            self.logger.log_objectives(objectives, iteration=0, acquisition_name='initial')
-            if self.surrogate_manager.best_hyperparams:
-                self.logger.log_hyperparameters(
-                    iteration=0,
-                    hyperparams=self.surrogate_manager.best_hyperparams,
-                    model_type=self.surrogate_model_kwargs['model_type'],
-                    network_type=self.surrogate_model_kwargs['network_type']
-                )
-        
-        self._print_leaderboard(objectives, 0, objective_directions=objective_directions)
+        if self.continue_from_logs:
+            print(f"\n--- Loading previous results from {self.continue_from_logs} ---")
+            scores, self._evaluated_sequences, last_iteration = self._load_from_logs(self.continue_from_logs)
+            print("Skipping initial population generation - using loaded sequences")
+            
+            # Convert scores to objectives
+            objectives = self.scores_to_objective.create_objective(
+                scores, 
+                self.objective_function, 
+                **self.objective_function_kwargs
+            )
+            
+            print("Loaded objectives:")
+            print(f"Total sequences: {len(objectives)}")
+            print("Best existing performers:")
+            self._print_leaderboard(objectives, last_iteration, objective_directions=objective_directions)
+            
+            # Load previous hyperparameters if available
+            previous_hyperparams = self._load_hyperparameters_from_logs(self.continue_from_logs)
+            if previous_hyperparams:
+                print("Using previous hyperparameters to initialize surrogate model")
+                self.surrogate_manager.best_hyperparams = previous_hyperparams
+            else:
+                print("No previous hyperparameters found, will optimize on first HPO interval")
+            
+        else:
+            # Fresh start - sample and evaluate initial peptides
+            print(f"\n--- Initialization: sampling {self.n_init} peptides ---")
+            initial_peptides = self._sample_peptides_from_proteome(self.n_init)
+            print(f"Sampled {len(initial_peptides)} initial peptides from proteome")
+            
+            print("Docking and scoring initial peptides...")
+            scores = self._dock_and_score(initial_peptides)
+            
+            # Convert to objectives
+            objectives = self.scores_to_objective.create_objective(
+                scores, 
+                self.objective_function, 
+                **self.objective_function_kwargs
+            )
+            
+            print(f"Initial evaluation complete. {len(objectives)} sequences scored.")
+            
+            # Embed initial sequences
+            initial_embeddings = self._embed_sequences(list(scores.keys()))
+            
+            # Optimize hyperparameters on initial data
+            print("Optimizing hyperparameters on initial data...")
+            self._optimize_hyperparameters(initial_embeddings, objectives, iteration=0)
+            
+            if self.logger:
+                self.logger.log_scores(scores, iteration=0, acquisition_name='initial')
+                self.logger.log_objectives(objectives, iteration=0, acquisition_name='initial')
+                if self.surrogate_manager.best_hyperparams:
+                    self.logger.log_hyperparameters(
+                        iteration=0,
+                        hyperparams=self.surrogate_manager.best_hyperparams,
+                        model_type=self.surrogate_model_kwargs['model_type'],
+                        network_type=self.surrogate_model_kwargs['network_type']
+                    )
+            
+            self._print_leaderboard(objectives, 0, objective_directions=objective_directions)
+            last_iteration = 0
         
         # Run through schedule phases
-        global_iteration = 0
+        global_iteration = last_iteration  # Continue from last iteration when resuming
         
         for phase_index, phase in enumerate(schedule, start=1):
             acquisition_function = phase['acquisition']
@@ -579,3 +554,122 @@ class ProteomeSearch:
         self._print_leaderboard(objectives, global_iteration, objective_directions=objective_directions)
         
         return objectives
+    
+    def _print_leaderboard(self, objectives: Dict[str, Any], iteration: int, print_n: int = 5, objective_directions: Dict[str, str] = None):    
+        """Print leaderboard for both single and multi-objective cases."""
+        if not objectives:
+            return
+        
+        print(f"Iteration {iteration} leaderboard:")
+        
+        sample_obj = next(iter(objectives.values()))
+        if isinstance(sample_obj, dict):
+            # Multi-objective case
+            obj_names = list(sample_obj.keys())
+            print(f"Top {print_n} sequences (multiobjective):")
+            
+            for obj_name in obj_names:
+                print(f"\n--- {obj_name} ---")
+                
+                # Sort by direction
+                if objective_directions and obj_name in objective_directions:
+                    reverse_sort = objective_directions[obj_name] == "max"
+                else:
+                    reverse_sort = True  # Default to maximization
+                
+                sorted_sequences = sorted(objectives.items(), 
+                                       key=lambda x: x[1][obj_name], 
+                                       reverse=reverse_sort)[:print_n]
+                print(f"{'Peptide':<20} | {obj_name:<15}")
+                print("-" * 40)
+                for sequence, obj_dict in sorted_sequences:
+                    print(f"{sequence:<20} | {obj_dict[obj_name]:<15.4f}")
+        else:
+            # Single objective case
+            sorted_leaderboard = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:print_n]
+            print(f"{'Peptide':<20} | {'Objective':<10}")
+            print("-" * 60)
+            for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
+                print(f"  {rank}. {seq} - Objective: {obj:.4f}")
+    
+    def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set, int]:
+        """
+        Load scores and evaluated sequences from existing log files.
+        Returns scores, evaluated_sequences, and last_iteration.
+        """
+        import pandas as pd
+        from pathlib import Path
+        
+        log_path = Path(log_dir)
+        scores_file = log_path / "scores.csv"
+        
+        if not scores_file.exists():
+            raise FileNotFoundError(f"No scores.csv found in {log_dir}")
+        
+        print(f"Loading scores from {scores_file}")
+        df = pd.read_csv(scores_file)
+        
+        scores = {}
+        for _, row in df.iterrows():
+            sequence = row['sequence']
+            score_columns = [col for col in df.columns 
+                           if col not in ['sequence', 'iteration', 'phase', 'timestamp']]
+            scores[sequence] = {col: row[col] for col in score_columns}
+
+        evaluated_sequences = set(scores.keys())
+        
+        # Get the last iteration number to continue from
+        last_iteration = df['iteration'].max() if 'iteration' in df.columns and not df.empty else 0
+        
+        print(f"Loaded {len(scores)} previously evaluated sequences")
+        print(f"Last iteration was: {last_iteration}")
+        
+        return scores, evaluated_sequences, last_iteration
+    
+    def _load_hyperparameters_from_logs(self, log_dir: str) -> Optional[Dict[str, Any]]:
+        """
+        Load the most recent hyperparameters from existing log files.
+        Returns hyperparameters dict or None if not found.
+        """
+        import pandas as pd
+        from pathlib import Path
+        
+        log_path = Path(log_dir)
+        hyper_file = log_path / "hyperparameters.csv"
+        
+        if not hyper_file.exists():
+            print(f"No hyperparameters.csv found in {log_dir}, will optimize from scratch")
+            return None
+        
+        try:
+            df = pd.read_csv(hyper_file)
+            if df.empty:
+                return None
+            
+            # Get the most recent hyperparameters (last row)
+            last_row = df.iloc[-1]
+            
+            # Extract hyperparameters (skip metadata columns)
+            hyperparams = {}
+            skip_cols = ['timestamp', 'iteration', 'model_type', 'network_type']
+            for col in df.columns:
+                if col not in skip_cols:
+                    value = last_row[col]
+                    # Convert back to appropriate types
+                    if pd.notna(value):
+                        # Try to convert to float/int if possible
+                        try:
+                            if '.' in str(value):
+                                hyperparams[col] = float(value)
+                            else:
+                                hyperparams[col] = int(value)
+                        except (ValueError, TypeError):
+                            hyperparams[col] = value
+            
+            print(f"Loaded hyperparameters from iteration {last_row['iteration']}")
+            print(f"Hyperparameters: {hyperparams}")
+            return hyperparams
+            
+        except Exception as e:
+            print(f"Error loading hyperparameters: {e}")
+            return None

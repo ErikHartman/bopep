@@ -87,7 +87,7 @@ def load_benchmark_embeddings(embedding_path, embedding_type="esm1d"):
         return None
 
 
-def test_bopep_with_precomputed_data(
+def test_peptidome_search_with_precomputed_data(
     embeddings_path=None,
     objectives_csv=None,
     output_dir="./test_output",

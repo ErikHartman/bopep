@@ -3,11 +3,11 @@
 
 # Peptide sampling parameters
 min_peptide_length: 8
-max_peptide_length: 25
+max_peptide_length: 35
 length_distribution: 'uniform'  # 'uniform' or 'normal'
 
 # Initial sampling
-n_init: 50  # Number of initial peptides to sample from proteome
+n_init: 500  # Number of initial peptides to sample from proteome
 
 # Selection parameters
 selection:
@@ -20,7 +20,7 @@ surrogate_model:
   network_type: 'bigru'
   n_trials: 100
   n_splits: 5
-  hpo_interval: 10          # Re-optimize hyperparameters every N iterations
+  hpo_interval: 25          # Re-optimize hyperparameters every N iterations
 
 # Embedding configuration
 embedding:
@@ -39,7 +39,7 @@ validation:
 # Scoring configuration
 scoring:
   scores_to_include: null  # List of scores to compute, must be provided by user
-  required_n_contact_residues: 5
+  required_n_contact_residues: 8
   binding_site_distance_threshold: 5
   n_jobs: 12
   receptor_chain: 'A'
@@ -50,10 +50,10 @@ docker:
   models:
     - 'boltz'
   output_dir: './proteome_search_docking'
-  num_models: 3
-  num_recycles: 5
-  diffusion_samples: 3
-  recycling_steps: 5
+  num_models: 5
+  num_recycles: 10
+  diffusion_samples: 5
+  recycling_steps: 10
   gpu_ids: null
   save_raw: false
   force: false
@@ -61,3 +61,4 @@ docker:
 # Logging configuration
 logging:
   log_dir: './proteome_search_logs'
+  continue_from_logs: null  # Path to previous log directory to resume from
