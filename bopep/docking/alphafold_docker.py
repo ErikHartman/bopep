@@ -146,7 +146,7 @@ class AlphaFoldDocker(BaseDockingModel):
         
         # Create metrics with only the best model's data
         all_metrics = {
-            "sequences": sequences,
+            "sequence": sequences,
             "target_name": target_name,
             "docking_method": "alphafold",
             "model_count": processed_count,
