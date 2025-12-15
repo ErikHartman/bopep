@@ -8,7 +8,7 @@ from bopep.scoring.complex_scorer import ComplexScorer
 from bopep.surrogate_model.manager import SurrogateModelManager
 from bopep.logging.logger import Logger
 from bopep.bayes.acquisition import AcquisitionFunction
-from bopep.search.utils import (_validate_args, _validate_surrogate_model_kwargs)
+from bopep.search.utils import (_validate_args, _validate_surrogate_model_kwargs, print_leaderboard)
 from bopep.search.structure_utils import _check_binding_site_residue_indices
 from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
 from bopep.search.selection import SequenceSelector
@@ -693,30 +693,13 @@ class PeptidomeSearch:
                     )
 
     def _print_top_performers(self, objectives: dict, top_n: int = 10):
-        if not objectives:
-            return
-        
-        # Check if multiobjective case
-        sample_obj = next(iter(objectives.values()))
-        if isinstance(sample_obj, dict):
-            # Multi-objective case: show top performers for each objective
-            obj_names = list(sample_obj.keys())
-            logging.info(f"Top {top_n} sequences (multiobjective):")
-            
-            for obj_name in obj_names:
-                logging.info(f"\n--- {obj_name} ---")
-                sorted_sequences = sorted(objectives.items(), 
-                                       key=lambda x: x[1][obj_name], reverse=True)[:top_n]
-                logging.info(f"{'Sequence':<20} | {obj_name:<15}")
-                logging.info("-" * 40)
-                for sequence, obj_dict in sorted_sequences:
-                    logging.info(f"{sequence:<20} | {obj_dict[obj_name]:<15.4f}")
-        else:
-            # Single objective case (original)
-            sorted_sequences = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:top_n]
-            logging.info(f"Top {top_n} sequences:")
-            logging.info(f"{'Sequence':<20} | {'Objective':<10} ")
-            logging.info("-" * 60)
-            for sequence, obj_value in sorted_sequences:
-                logging.info(f"{sequence:<20} | {obj_value:<10.4f} ")
+        """Print top performing sequences."""
+        print_leaderboard(
+            objectives=objectives,
+            iteration=None,
+            print_n=top_n,
+            objective_directions=None,
+            iteration_label="Iteration",
+            use_logging=True
+        )
 

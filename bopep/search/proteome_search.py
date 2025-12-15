@@ -7,7 +7,7 @@ from bopep.embedding.embedder import Embedder
 from bopep.scoring.complex_scorer import ComplexScorer
 from bopep.surrogate_model import SurrogateModelManager
 from bopep.scoring.scores_to_objective import ScoresToObjective
-from bopep.search.utils import _validate_surrogate_model_kwargs
+from bopep.search.utils import _validate_surrogate_model_kwargs, print_leaderboard
 from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.logging.logger import Logger
 from bopep.config import Config
@@ -231,6 +231,9 @@ class ProteomeSearch:
         
         # Track evaluated sequences
         self._evaluated_sequences = set()
+        
+        # Track peptide metadata (source protein and position)
+        self._peptide_metadata = {}  # {peptide_sequence: {"protein_id": str, "start_pos": int}}
     
     def _sample_peptide_length(self) -> int:
         """Sample a peptide length from the configured distribution."""
@@ -290,9 +293,14 @@ class ProteomeSearch:
         attempts = 0
         
         while len(peptides) < n_sample and attempts < max_attempts:
-            peptide, _, _ = self._sample_peptide_from_proteome()
+            peptide, protein_id, start_pos = self._sample_peptide_from_proteome()
             if peptide not in self._evaluated_sequences:
                 peptides.add(peptide)
+                # Store metadata for this peptide
+                self._peptide_metadata[peptide] = {
+                    "protein_id": protein_id,
+                    "start_pos": start_pos
+                }
             attempts += 1
         
         if len(peptides) < n_sample:
@@ -359,6 +367,13 @@ class ProteomeSearch:
             binding_site_distance_threshold=self.scoring_kwargs.get('binding_site_distance_threshold', 5),
             required_n_contact_residues=self.scoring_kwargs.get('required_n_contact_residues', 5),
         )
+        
+        # Add metadata to scores
+        for seq in scores:
+            if seq in self._peptide_metadata:
+                scores[seq]['protein_id'] = self._peptide_metadata[seq]['protein_id']
+                scores[seq]['start_pos'] = self._peptide_metadata[seq]['start_pos']
+        
         self._evaluated_sequences.update(sequences)
         return scores
     
@@ -557,40 +572,14 @@ class ProteomeSearch:
     
     def _print_leaderboard(self, objectives: Dict[str, Any], iteration: int, print_n: int = 5, objective_directions: Dict[str, str] = None):    
         """Print leaderboard for both single and multi-objective cases."""
-        if not objectives:
-            return
-        
-        print(f"Iteration {iteration} leaderboard:")
-        
-        sample_obj = next(iter(objectives.values()))
-        if isinstance(sample_obj, dict):
-            # Multi-objective case
-            obj_names = list(sample_obj.keys())
-            print(f"Top {print_n} sequences (multiobjective):")
-            
-            for obj_name in obj_names:
-                print(f"\n--- {obj_name} ---")
-                
-                # Sort by direction
-                if objective_directions and obj_name in objective_directions:
-                    reverse_sort = objective_directions[obj_name] == "max"
-                else:
-                    reverse_sort = True  # Default to maximization
-                
-                sorted_sequences = sorted(objectives.items(), 
-                                       key=lambda x: x[1][obj_name], 
-                                       reverse=reverse_sort)[:print_n]
-                print(f"{'Peptide':<20} | {obj_name:<15}")
-                print("-" * 40)
-                for sequence, obj_dict in sorted_sequences:
-                    print(f"{sequence:<20} | {obj_dict[obj_name]:<15.4f}")
-        else:
-            # Single objective case
-            sorted_leaderboard = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:print_n]
-            print(f"{'Peptide':<20} | {'Objective':<10}")
-            print("-" * 60)
-            for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
-                print(f"  {rank}. {seq} - Objective: {obj:.4f}")
+        print_leaderboard(
+            objectives=objectives,
+            iteration=iteration,
+            print_n=print_n,
+            objective_directions=objective_directions,
+            iteration_label="Iteration",
+            use_logging=False
+        )
     
     def _load_from_logs(self, log_dir: str) -> Tuple[Dict[str, Dict[str, float]], set, int]:
         """
@@ -615,6 +604,13 @@ class ProteomeSearch:
             score_columns = [col for col in df.columns 
                            if col not in ['sequence', 'iteration', 'phase', 'timestamp']]
             scores[sequence] = {col: row[col] for col in score_columns}
+            
+            # Load peptide metadata if available
+            if 'protein_id' in row and pd.notna(row['protein_id']):
+                self._peptide_metadata[sequence] = {
+                    'protein_id': row['protein_id'],
+                    'start_pos': int(row['start_pos']) if 'start_pos' in row and pd.notna(row['start_pos']) else 0
+                }
 
         evaluated_sequences = set(scores.keys())
         
