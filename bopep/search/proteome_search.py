@@ -1,7 +1,8 @@
 import random
 from typing import List, Dict, Any, Optional, Callable, Tuple
 import numpy as np
-
+import pandas as pd
+from pathlib import Path
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
 from bopep.scoring.complex_scorer import ComplexScorer
@@ -377,11 +378,25 @@ class ProteomeSearch:
         self._evaluated_sequences.update(sequences)
         return scores
     
-    def _optimize_hyperparameters(self, embeddings: Dict[str, Any], objectives: Dict[str, float], iteration: Optional[int] = None) -> None:
-        """Hyperparameter tuning using the surrogate model manager."""
+    def _optimize_hyperparameters(self, embeddings: Dict[str, Any], objectives: Dict[str, float], iteration: Optional[int] = None, max_hpo_samples: int = 200) -> None:
+        """
+        Hyperparameter tuning using the surrogate model manager.
+        """
+        # Downsample if we have too many sequences for efficient HPO
+        n_samples = len(embeddings)
+        if n_samples > max_hpo_samples:
+            print(f"Downsampling from {n_samples} to {max_hpo_samples} sequences for faster HPO")
+            sequences = list(embeddings.keys())
+            sampled_sequences = np.random.choice(sequences, size=max_hpo_samples, replace=False)
+            embeddings_hpo = {seq: embeddings[seq] for seq in sampled_sequences}
+            objectives_hpo = {seq: objectives[seq] for seq in sampled_sequences}
+        else:
+            embeddings_hpo = embeddings
+            objectives_hpo = objectives
+        
         self.surrogate_manager.optimize_hyperparameters(
-            embeddings=embeddings,
-            objectives=objectives,
+            embeddings=embeddings_hpo,
+            objectives=objectives_hpo,
             n_trials=self.surrogate_model_kwargs.get('n_trials', 20),
             n_splits=self.surrogate_model_kwargs.get('n_splits', 3),
             iteration=iteration
@@ -437,13 +452,19 @@ class ProteomeSearch:
             print("Best existing performers:")
             self._print_leaderboard(objectives, last_iteration, objective_directions=objective_directions)
             
-            # Load previous hyperparameters if available
-            previous_hyperparams = self._load_hyperparameters_from_logs(self.continue_from_logs)
-            if previous_hyperparams:
-                print("Using previous hyperparameters to initialize surrogate model")
-                self.surrogate_manager.best_hyperparams = previous_hyperparams
-            else:
-                print("No previous hyperparameters found, will optimize on first HPO interval")
+            # Re-embed all sequences with new scaler/PCA and optimize hyperparameters
+            # This is necessary because the embedding space will be different from the previous run
+            print("\nRe-embedding loaded sequences and optimizing hyperparameters for new embedding space...")
+            loaded_embeddings = self._embed_sequences(list(scores.keys()))
+            self._optimize_hyperparameters(loaded_embeddings, objectives, iteration=last_iteration)
+            
+            if self.logger and self.surrogate_manager.best_hyperparams:
+                self.logger.log_hyperparameters(
+                    iteration=last_iteration,
+                    hyperparams=self.surrogate_manager.best_hyperparams,
+                    model_type=self.surrogate_model_kwargs['model_type'],
+                    network_type=self.surrogate_model_kwargs['network_type']
+                )
             
         else:
             # Fresh start - sample and evaluate initial peptides
@@ -586,8 +607,7 @@ class ProteomeSearch:
         Load scores and evaluated sequences from existing log files.
         Returns scores, evaluated_sequences, and last_iteration.
         """
-        import pandas as pd
-        from pathlib import Path
+
         
         log_path = Path(log_dir)
         scores_file = log_path / "scores.csv"
@@ -627,8 +647,6 @@ class ProteomeSearch:
         Load the most recent hyperparameters from existing log files.
         Returns hyperparameters dict or None if not found.
         """
-        import pandas as pd
-        from pathlib import Path
         
         log_path = Path(log_dir)
         hyper_file = log_path / "hyperparameters.csv"
