@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 from bopep.docking.docker import Docker
 from bopep.embedding.embedder import Embedder
+from bopep.embedding.utils import filter_sequences
 from bopep.scoring.complex_scorer import ComplexScorer
 from bopep.surrogate_model import SurrogateModelManager
 from bopep.scoring.scores_to_objective import ScoresToObjective
@@ -26,48 +27,39 @@ class ProteomeSearch:
         self,
         proteome: Dict[str, str],
         target_structure_path: str,
-        
         # Peptide sampling parameters
         min_peptide_length: Optional[int] = None,
         max_peptide_length: Optional[int] = None,
         length_distribution: Optional[str] = None,
-        
         # Initial sampling
         n_init: Optional[int] = None,
-        
         # Surrogate model parameters
         surrogate_model_kwargs: Optional[Dict[str, Any]] = None,
-        
         # Objective function
         objective_function: Optional[Callable] = None,
         objective_function_kwargs: Optional[Dict[str, Any]] = None,
-        
         # Scoring and docking
         scoring_kwargs: Optional[Dict[str, Any]] = None,
         docker_kwargs: Optional[Dict[str, Any]] = None,
-        
         # Embedding options
         embed_method: Optional[str] = None,
         embed_model_path: Optional[str] = None,
         embed_batch_size: Optional[int] = None,
         embed_device: Optional[str] = None,
+        use_pca: Optional[bool] = None,
         pca_n_components: Optional[int] = None,
-        
+        pca_fit_data: Optional[list] = None,
         # Validation options
         n_validate: Optional[float] = None,
         min_validation_samples: Optional[int] = None,
         min_training_samples: Optional[int] = None,
-        
         # Selection options
         m_select: Optional[int] = None,
         k_propose: Optional[int] = None,
-        
         # Logging options
         log_dir: Optional[str] = None,
-        
         # Continuation options
         continue_from_logs: Optional[str] = None,
-        
         # Config object
         config: Optional[Config] = None,
     ):
@@ -90,7 +82,8 @@ class ProteomeSearch:
             embed_model_path: Path to embedding model
             embed_batch_size: Batch size for embedding
             embed_device: Device for embedding ('cuda' or 'cpu')
-            pca_n_components: Number of PCA components
+            use_pca: Whether to apply PCA dimensionality reduction (default: True)
+            pca_n_components: Number of PCA components (required if use_pca=True)
             n_validate: Fraction or number of samples for validation
             min_validation_samples: Minimum samples for validation
             min_training_samples: Minimum samples for training
@@ -175,20 +168,53 @@ class ProteomeSearch:
         self.embed_model_path = get_param(embed_model_path, 'embedding.model_path')
         self.embed_batch_size = get_param(embed_batch_size, 'embedding.batch_size')
         self.embed_device = get_param(embed_device, 'embedding.device')
+        self.use_pca = get_param(use_pca, 'embedding.use_pca')
+        if self.use_pca is None:
+            self.use_pca = True  # Default to True for backward compatibility
         self.pca_n_components = get_param(pca_n_components, 'embedding.pca_n_components')
-        
+        self.pca_fit_data = pca_fit_data
         # Auto-detect embedding averaging based on network type
         network_type = self.surrogate_model_kwargs.get('network_type', 'mlp').lower()
         if network_type == "mlp":
             self.embed_average = True
         else:
             self.embed_average = False
-        
-        # Enforce fixed PCA dimensions
-        if self.pca_n_components is None:
+        # Enforce fixed PCA dimensions if using PCA
+        if self.use_pca and self.pca_n_components is None:
             raise ValueError(
-                "pca_n_components must be specified to ensure dimensional consistency. "
+                "pca_n_components must be specified when use_pca=True to ensure dimensional consistency. "
             )
+        # Track whether PCA has been fitted
+        self._pca_fitted = False
+        # If pca_fit_data is provided, fit PCA immediately
+        if self.use_pca and self.pca_fit_data is not None:
+            print("Fitting PCA on provided pca_fit_data...")
+            # Embed the fit data
+            if self.embed_method == 'esm':
+                fit_embeddings = self.embedder.embed_esm(
+                    self.pca_fit_data,
+                    average=self.embed_average,
+                    model_path=self.embed_model_path,
+                    batch_size=self.embed_batch_size,
+                    filter=False,
+                    device=self.embed_device
+                )
+            elif self.embed_method == 'aaindex':
+                fit_embeddings = self.embedder.embed_aaindex(
+                    self.pca_fit_data,
+                    average=self.embed_average,
+                    filter=False
+                )
+            else:
+                raise ValueError("embed_method must be 'esm' or 'aaindex'")
+            # Fit PCA on this data
+            _ = self.embedder.reduce_embeddings_pca(
+                fit_embeddings,
+                n_components=self.pca_n_components,
+                fit=True
+            )
+            self._pca_fitted = True
+            print("PCA fitted on pca_fit_data.")
         
         # Get docker kwargs
         if docker_kwargs is not None:
@@ -288,20 +314,30 @@ class ProteomeSearch:
     def _sample_peptides_from_proteome(self, n_sample: int) -> List[str]:
         """
         Sample n unique peptides from the proteome.
+        Filters out strange peptides (repeats, high single AA fraction, invalid characters).
         """
         peptides = set()
-        max_attempts = n_sample * 10  # Prevent infinite loop
+        max_attempts = n_sample * 20  # Increase attempts due to filtering
         attempts = 0
         
         while len(peptides) < n_sample and attempts < max_attempts:
             peptide, protein_id, start_pos = self._sample_peptide_from_proteome()
             if peptide not in self._evaluated_sequences:
-                peptides.add(peptide)
-                # Store metadata for this peptide
-                self._peptide_metadata[peptide] = {
-                    "protein_id": protein_id,
-                    "start_pos": start_pos
-                }
+                # Filter out strange peptides
+                filtered = filter_sequences(
+                    [peptide],
+                    max_single_aa_fraction=0.75,
+                    max_repeat_length=5,
+                    min_length=self.min_peptide_length,
+                    max_length=self.max_peptide_length
+                )
+                if filtered:  # Peptide passed filtering
+                    peptides.add(peptide)
+                    # Store metadata for this peptide
+                    self._peptide_metadata[peptide] = {
+                        "protein_id": protein_id,
+                        "start_pos": start_pos
+                    }
             attempts += 1
         
         if len(peptides) < n_sample:
@@ -310,10 +346,9 @@ class ProteomeSearch:
         return list(peptides)
     
     def _embed_sequences(self, sequences: List[str]) -> Dict[str, Any]:
-        """Embed, scale, and apply PCA to sequences."""
+        """Embed, scale, and optionally apply PCA to sequences."""
         if not sequences:
             return {}
-        
         # Embed sequences
         if self.embed_method == 'esm':
             raw_embeddings = self.embedder.embed_esm(
@@ -332,14 +367,29 @@ class ProteomeSearch:
             )
         else:
             raise ValueError("embed_method must be 'esm' or 'aaindex'")
-        
-        # Scale and reduce
-        scaled_embeddings = self.embedder.scale_embeddings(raw_embeddings)
-        reduced_embeddings = self.embedder.reduce_embeddings_pca(
-            scaled_embeddings,
-            n_components=self.pca_n_components
-        )
-        
+        # Apply PCA if enabled
+        if self.use_pca:
+            # If pca_fit_data was provided, always use fit=False here (already fitted)
+            if self.pca_fit_data is not None:
+                reduced_embeddings = self.embedder.reduce_embeddings_pca(
+                    raw_embeddings,
+                    n_components=self.pca_n_components,
+                    fit=False
+                )
+            else:
+                # Fit PCA on first call, then just transform on subsequent calls
+                fit_pca = not self._pca_fitted
+                reduced_embeddings = self.embedder.reduce_embeddings_pca(
+                    raw_embeddings,
+                    n_components=self.pca_n_components,
+                    fit=fit_pca
+                )
+                if fit_pca:
+                    self._pca_fitted = True
+                    print("PCA fitted on initial dataset")
+        else:
+            # No PCA - return raw embeddings
+            reduced_embeddings = raw_embeddings
         return reduced_embeddings
     
     def _embed_generation(self, scored_sequences: List[str], candidate_sequences: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -378,7 +428,7 @@ class ProteomeSearch:
         self._evaluated_sequences.update(sequences)
         return scores
     
-    def _optimize_hyperparameters(self, embeddings: Dict[str, Any], objectives: Dict[str, float], iteration: Optional[int] = None, max_hpo_samples: int = 200) -> None:
+    def _optimize_hyperparameters(self, embeddings: Dict[str, Any], objectives: Dict[str, float], iteration: Optional[int] = None, max_hpo_samples: int = 500) -> None:
         """
         Hyperparameter tuning using the surrogate model manager.
         """

@@ -16,6 +16,8 @@ class Embedder:
     def __init__(self):
         self.esm_model = None
         self.alphabet = None
+        self.pca = None
+        self.scaler = None
 
     def embed_esm(self, sequences: list, average: bool, model_path: str = None, batch_size:int = 128, filter:bool = True, device : Optional[str] = None) -> dict:
         if filter:
@@ -60,14 +62,11 @@ class Embedder:
         embeddings = embed_aaindex(sequences, average)
         return embeddings
     
-    def scale_embeddings(self, embeddings: dict) -> dict:
+    def scale_embeddings(self, embeddings: dict, fit: bool = True) -> dict:
         """
         Scales the embeddings using StandardScaler.
         Handles both 1D (vector form) and 2D (matrix form) embeddings.
         """
-        # Initialize scaler
-        scaler = StandardScaler()
-        
         # Prepare data for scaling - flatten all embeddings to 2D
         all_embeddings = []
         for emb in embeddings.values():
@@ -77,23 +76,29 @@ class Embedder:
                 all_embeddings.append(emb)
                 
         # Fit scaler on the embedding dimension
-        scaler.fit(np.array(all_embeddings))
+        if fit:
+            self.scaler = StandardScaler()
+            self.scaler.fit(np.array(all_embeddings))
+        else:
+            if self.scaler is None:
+                raise ValueError("Scaler has not been fitted. Set fit=True to fit the scaler.")
+            
         
         # Transform embeddings while preserving original shapes
         scaled_embeddings = {}
         for sequence, emb in embeddings.items():
             if len(emb.shape) == 2:  # Matrix form
                 # Scale each position's embedding separately
-                scaled = scaler.transform(emb)
+                scaled = self.scaler.transform(emb)
             else:  # Vector form
-                scaled = scaler.transform(emb.reshape(1, -1))[0]
+                scaled = self.scaler.transform(emb.reshape(1, -1))[0]
             scaled_embeddings[sequence] = scaled
             
         return scaled_embeddings
 
 
     def reduce_embeddings_pca(
-        self, embeddings: dict, explained_variance_ratio: float = 0.95, n_components : int = None
+        self, embeddings: dict, explained_variance_ratio: float = 0.95, n_components : int = None, fit:bool=True
     ):
         """
         Reduces the dimensionality of the embeddings using PCA.
@@ -122,16 +127,19 @@ class Embedder:
             all_position_embeddings = np.array(all_position_embeddings)
             
             # Apply PCA to all position embeddings
-            if n_components is not None:
-                pca = PCA(n_components=n_components)
-            else:
-                pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
-            pca.fit(all_position_embeddings)
+            if fit:
+                if n_components is not None:
+                    self.pca = PCA(n_components=n_components)
+                else:
+                    self.pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
+                self.pca.fit(all_position_embeddings)
+            elif self.pca is None:
+                raise ValueError("PCA model has not been fitted. Set fit=True to fit the model.")
             
             # Transform each sequence's sequence of embeddings
             reduced_embeddings = {}
             for sequence, emb in embeddings.items():
-                reduced_embeddings[sequence] = pca.transform(emb)
+                reduced_embeddings[sequence] = self.pca.transform(emb)
                 
             print(f"Original embedding dimension: {first_emb.shape[1]}")
             print(f"Reduced embedding dimension: {reduced_embeddings[next(iter(reduced_embeddings))].shape[1]}")
@@ -141,14 +149,16 @@ class Embedder:
             # For averaged embeddings (average=True case) - original implementation
             embedding_array = np.array(list(embeddings.values()))
             sequences = list(embeddings.keys())
-
-            if n_components is not None:
-                pca = PCA(n_components=n_components)
-            else:
-                pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
-        
-            reduced_embeddings_array = pca.fit_transform(embedding_array)
-
+            if fit:
+                if n_components is not None:
+                    self.pca = PCA(n_components=n_components)
+                else:
+                    self.pca = PCA(n_components=explained_variance_ratio, svd_solver="full")
+                self.pca.fit(embedding_array)
+            elif self.pca is None:
+                raise ValueError("PCA model has not been fitted. Set fit=True to fit the model.")
+            
+            reduced_embeddings_array = self.pca.transform(embedding_array)
             print("The reduced embeddings are of shape: ", reduced_embeddings_array.shape)
 
             reduced_embeddings = {
