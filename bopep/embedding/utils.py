@@ -38,8 +38,4 @@ def filter_sequences(
             continue
 
         filtered_sequences.append(sequence)
-
-    print(f"Number of sequences before filtering: {len(sequences)}")
-    print(f"Number of sequences after filtering: {len(filtered_sequences)}")
-
     return filtered_sequences

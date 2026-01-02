@@ -643,7 +643,7 @@ class PeptidomeSearch:
                 sequence_scores = self.scorer.score_batch(
                     scores_to_include=scores_to_include,
                     inputs=[dir_path],
-                    input_type="colab_dir",
+                    input_type="processed_dir",
                     binding_site_residue_indices=sequence_binding_sites,
                     n_jobs=1,
                     binding_site_distance_threshold=binding_site_distance_threshold,
@@ -657,9 +657,9 @@ class PeptidomeSearch:
             new_scores = self.scorer.score_batch(
                 scores_to_include=scores_to_include,
                 inputs=docked_dirs,
-                input_type="colab_dir",
+                input_type="processed_dir",
                 binding_site_residue_indices=self.binding_site_residue_indices,
-                n_jobs=self.scoring_kwargs.get("n_jobs", 1), # Default to 1 job unless specified (not safe otherwise)
+                n_jobs=self.scoring_kwargs.get("n_jobs", 12), # Default to 12 job unless specified (not safe otherwise)
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 required_n_contact_residues=required_n_contact_residues,
                 template_structures=self.template_structures,

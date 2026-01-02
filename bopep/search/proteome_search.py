@@ -56,6 +56,10 @@ class ProteomeSearch:
         # Selection options
         m_select: Optional[int] = None,
         k_propose: Optional[int] = None,
+        local_sampling_fraction: Optional[float] = None,
+        n_top_scorers_for_local: Optional[int] = None,
+        local_position_std: Optional[float] = None,
+        local_length_std: Optional[float] = None,
         # Logging options
         log_dir: Optional[str] = None,
         # Continuation options
@@ -89,6 +93,10 @@ class ProteomeSearch:
             min_training_samples: Minimum samples for training
             m_select: Number of candidates to select and dock per iteration
             k_propose: Number of candidates to sample from proteome per iteration
+            local_sampling_fraction: Fraction of k_propose to sample locally (0-1)
+            n_top_scorers_for_local: Number of top-scoring peptides to sample around
+            local_position_std: Std dev for Gaussian position perturbation
+            local_length_std: Std dev for Gaussian length perturbation
             log_dir: Directory for logging
             continue_from_logs: Path to previous log directory to resume from
             config: Optional Config object. If not provided, defaults will be loaded.
@@ -159,6 +167,10 @@ class ProteomeSearch:
         # Get selection parameters
         self.m_select = get_param(m_select, 'selection.m_select')
         self.k_propose = get_param(k_propose, 'selection.k_propose')
+        self.local_sampling_fraction = get_param(local_sampling_fraction, 'selection.local_sampling_fraction')
+        self.n_top_scorers_for_local = get_param(n_top_scorers_for_local, 'selection.n_top_scorers_for_local')
+        self.local_position_std = get_param(local_position_std, 'selection.local_position_std')
+        self.local_length_std = get_param(local_length_std, 'selection.local_length_std')
         
         # Device configuration
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -184,9 +196,7 @@ class ProteomeSearch:
             raise ValueError(
                 "pca_n_components must be specified when use_pca=True to ensure dimensional consistency. "
             )
-        # Track whether PCA has been fitted
-        self._pca_fitted = False
-        # If pca_fit_data is provided, fit PCA immediately
+        self.embedder = Embedder()
         if self.use_pca and self.pca_fit_data is not None:
             print("Fitting PCA on provided pca_fit_data...")
             # Embed the fit data
@@ -196,14 +206,14 @@ class ProteomeSearch:
                     average=self.embed_average,
                     model_path=self.embed_model_path,
                     batch_size=self.embed_batch_size,
-                    filter=False,
+                    filter=True,
                     device=self.embed_device
                 )
             elif self.embed_method == 'aaindex':
                 fit_embeddings = self.embedder.embed_aaindex(
                     self.pca_fit_data,
                     average=self.embed_average,
-                    filter=False
+                    filter=True
                 )
             else:
                 raise ValueError("embed_method must be 'esm' or 'aaindex'")
@@ -213,8 +223,6 @@ class ProteomeSearch:
                 n_components=self.pca_n_components,
                 fit=True
             )
-            self._pca_fitted = True
-            print("PCA fitted on pca_fit_data.")
         
         # Get docker kwargs
         if docker_kwargs is not None:
@@ -231,7 +239,6 @@ class ProteomeSearch:
         self.docker.set_target_structure(self.target_structure_path)
         self.scorer = ComplexScorer()
         self.scores_to_objective = ScoresToObjective()
-        self.embedder = Embedder()
         self.acquisition_function_obj = AcquisitionFunction()
         
         # Set max_seq_len based on max_peptide_length if not already specified
@@ -311,18 +318,63 @@ class ProteomeSearch:
         
         return peptide, protein_id, start
     
-    def _sample_peptides_from_proteome(self, n_sample: int) -> List[str]:
+    def _sample_peptides_locally(self, n_sample: int, objectives: Dict[str, float]) -> List[str]:
         """
-        Sample n unique peptides from the proteome.
-        Filters out strange peptides (repeats, high single AA fraction, invalid characters).
+        Sample n peptides locally around top-scoring peptides.
+        Uses Gaussian perturbations of position and length.
         """
+        if not objectives or not self._peptide_metadata:
+            # No scored peptides yet, return empty list
+            return []
+        
+        # Get top scorers
+        sorted_peptides = sorted(objectives.items(), key=lambda x: x[1], reverse=True)
+        # Filter to only those with metadata
+        top_with_metadata = [(seq, score) for seq, score in sorted_peptides 
+                             if seq in self._peptide_metadata]
+        
+        if not top_with_metadata:
+            return []
+        
+        # Limit to n_top_scorers_for_local
+        n_top = min(self.n_top_scorers_for_local, len(top_with_metadata))
+        top_peptides = [seq for seq, _ in top_with_metadata[:n_top]]
+        
         peptides = set()
-        max_attempts = n_sample * 20  # Increase attempts due to filtering
+        max_attempts = n_sample * 20
         attempts = 0
         
         while len(peptides) < n_sample and attempts < max_attempts:
-            peptide, protein_id, start_pos = self._sample_peptide_from_proteome()
-            if peptide not in self._evaluated_sequences:
+            # Randomly select a top peptide to perturb
+            base_peptide = random.choice(top_peptides)
+            base_metadata = self._peptide_metadata[base_peptide]
+            protein_id = base_metadata['protein_id']
+            base_start_pos = base_metadata['start_pos']
+            base_length = len(base_peptide)
+            
+            # Perturb position with Gaussian
+            position_offset = int(np.random.normal(0, self.local_position_std))
+            new_start_pos = base_start_pos + position_offset
+            
+            # Perturb length with Gaussian
+            length_offset = int(np.random.normal(0, self.local_length_std))
+            new_length = base_length + length_offset
+            # Clip to valid range
+            new_length = max(self.min_peptide_length, min(self.max_peptide_length, new_length))
+            
+            # Extract peptide from protein
+            protein_seq = self.proteome[protein_id]
+            
+            # Ensure valid position
+            new_start_pos = max(0, min(new_start_pos, len(protein_seq) - new_length))
+            if new_start_pos + new_length > len(protein_seq):
+                attempts += 1
+                continue
+            
+            peptide = protein_seq[new_start_pos:new_start_pos + new_length]
+            
+            # Check if already evaluated or in current set
+            if peptide not in self._evaluated_sequences and peptide not in peptides:
                 # Filter out strange peptides
                 filtered = filter_sequences(
                     [peptide],
@@ -336,14 +388,66 @@ class ProteomeSearch:
                     # Store metadata for this peptide
                     self._peptide_metadata[peptide] = {
                         "protein_id": protein_id,
-                        "start_pos": start_pos
+                        "start_pos": new_start_pos
                     }
             attempts += 1
         
         if len(peptides) < n_sample:
-            print(f"Warning: Only sampled {len(peptides)} unique peptides (requested {n_sample})")
+            print(f"Local sampling: generated {len(peptides)}/{n_sample} peptides")
         
         return list(peptides)
+    
+    def _sample_peptides_from_proteome(self, n_sample: int, objectives: Optional[Dict[str, float]] = None) -> List[str]:
+        """
+        Sample n unique peptides from the proteome.
+        Combines local sampling (around top scorers) and global sampling (random).
+        Filters out strange peptides (repeats, high single AA fraction, invalid characters).
+        """
+        # Split into local and global sampling
+        if objectives and self.local_sampling_fraction > 0:
+            n_local = int(n_sample * self.local_sampling_fraction)
+            n_global = n_sample - n_local
+            print(f"Sampling strategy: {n_local} local + {n_global} global = {n_sample} total")
+        else:
+            n_local = 0
+            n_global = n_sample
+        
+        # Local sampling around top scorers
+        local_peptides = []
+        if n_local > 0 and objectives:
+            local_peptides = self._sample_peptides_locally(n_local, objectives)
+        
+        # Global random sampling
+        global_peptides = set()
+        max_attempts = n_global * 20  # Increase attempts due to filtering
+        attempts = 0
+        
+        while len(global_peptides) < n_global and attempts < max_attempts:
+            peptide, protein_id, start_pos = self._sample_peptide_from_proteome()
+            if peptide not in self._evaluated_sequences and peptide not in global_peptides:
+                # Filter out strange peptides
+                filtered = filter_sequences(
+                    [peptide],
+                    max_single_aa_fraction=0.75,
+                    max_repeat_length=5,
+                    min_length=self.min_peptide_length,
+                    max_length=self.max_peptide_length
+                )
+                if filtered:  # Peptide passed filtering
+                    global_peptides.add(peptide)
+                    # Store metadata for this peptide
+                    self._peptide_metadata[peptide] = {
+                        "protein_id": protein_id,
+                        "start_pos": start_pos
+                    }
+            attempts += 1
+        
+        if len(global_peptides) < n_global:
+            print(f"Warning: Global sampling generated {len(global_peptides)}/{n_global} peptides")
+        
+        # Combine local and global
+        all_peptides = local_peptides + list(global_peptides)
+        return all_peptides
     
     def _embed_sequences(self, sequences: List[str]) -> Dict[str, Any]:
         """Embed, scale, and optionally apply PCA to sequences."""
@@ -377,16 +481,12 @@ class ProteomeSearch:
                     fit=False
                 )
             else:
-                # Fit PCA on first call, then just transform on subsequent calls
-                fit_pca = not self._pca_fitted
                 reduced_embeddings = self.embedder.reduce_embeddings_pca(
                     raw_embeddings,
                     n_components=self.pca_n_components,
-                    fit=fit_pca
+                    fit=True
                 )
-                if fit_pca:
-                    self._pca_fitted = True
-                    print("PCA fitted on initial dataset")
+
         else:
             # No PCA - return raw embeddings
             reduced_embeddings = raw_embeddings
@@ -569,9 +669,9 @@ class ProteomeSearch:
                 global_iteration += 1
                 print(f"\n--- Iteration {global_iteration} (Phase {phase_index}, Iter {iter_num}/{iterations}) ---")
                 
-                # Sample k_propose peptides from proteome
+                # Sample k_propose peptides from proteome (mix of local and global)
                 print(f"Sampling {self.k_propose} peptides from proteome...")
-                candidate_pool = self._sample_peptides_from_proteome(self.k_propose)
+                candidate_pool = self._sample_peptides_from_proteome(self.k_propose, objectives)
                 print(f"Sampled {len(candidate_pool)} candidate peptides")
                 
                 # Embed scored sequences + candidates together

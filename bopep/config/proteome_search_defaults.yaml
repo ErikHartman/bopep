@@ -13,6 +13,10 @@ n_init: 500  # Number of initial peptides to sample from proteome
 selection:
   m_select: 10              # Number of candidates to dock per iteration
   k_propose: 10000          # Number of peptides to sample from proteome per iteration
+  local_sampling_fraction: 0.2  # Fraction of k_propose to sample locally around top scorers
+  n_top_scorers_for_local: 100  # Number of top-scoring peptides to sample around
+  local_position_std: 5     # Standard deviation for Gaussian perturbation of position
+  local_length_std: 2       # Standard deviation for Gaussian perturbation of length
 
 # Surrogate model configuration
 surrogate_model:
