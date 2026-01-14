@@ -160,11 +160,11 @@ if __name__ == "__main__":
     #LKNPDDPDMVD,0.21621160762107358,-352.43062003747855,-10.933749597646795,6.070098449822542,0.25,25.55502085070889,True,1.0
     example_scores = {
         "KSLLQQLLTE": {
-            "rosetta_score": -636.1152754278565,
-            "interface_dG": -44.35348584226472,
-            "iptm": 0.92,
-            "sequence_pae": 7.250308300395252,
-            "distance_score": 7.110018269096763,
+            "rosetta_score": -574,
+            "interface_dG": -43,
+            "iptm": 0.86,
+            "sequence_pae": 8.39,
+            "distance_score": 6.4,
             "in_binding_site": True
         },
         "LKNPDDPDMVD": {
