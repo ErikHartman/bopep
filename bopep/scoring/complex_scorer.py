@@ -794,11 +794,15 @@ class ComplexScorer(BaseScorer):
             if has_boltz and boltz_model_file and template_structure is not None:
                 scores["boltz_template_rmsd"] = align_and_compute_rmsd(template_structure, boltz_model_file, sequence)
                 added = True
+            # If using structure_file directly (not processed_dir), compute RMSD between structure_file and template
+            if not added and structure_file and template_structure is not None:
+                scores["template_rmsd"] = align_and_compute_rmsd(template_structure, structure_file, sequence)
+                added = True
             if not added:
                 if template_structure is None:
                     raise ValueError("template_rmsd requires template_structure parameter to be provided")
                 else:
-                    raise ValueError("template_rmsd requires docking output with model file")
+                    raise ValueError("template_rmsd requires either structure_file or docking output with model file")
             if has_alphafold ^ has_boltz:  # only one method available -> keep generic alias
                 scores["template_rmsd"] = scores.get("alphafold_template_rmsd") or scores.get("boltz_template_rmsd")
 
@@ -1002,19 +1006,19 @@ class ComplexScorer(BaseScorer):
             scores["uHrel"] = sequence_properties.get_uHrel()
         if "dssp_helix_fraction" in scores_to_include:
             if target_structure_file:
-                dssp_analyzer = DSSPAnalyzer(target_structure_file)
+                dssp_analyzer = DSSPAnalyzer(target_structure_file, chain_id=sequence_chain)
                 scores["dssp_helix_fraction"] = dssp_analyzer.get_dssp_helix_fraction()
             else:
                 raise ValueError("dssp_helix_fraction requires a structure file to be available")
         if "dssp_sheet_fraction" in scores_to_include:
             if target_structure_file:
-                dssp_analyzer = DSSPAnalyzer(target_structure_file)
+                dssp_analyzer = DSSPAnalyzer(target_structure_file, chain_id=sequence_chain)
                 scores["dssp_sheet_fraction"] = dssp_analyzer.get_dssp_sheet_fraction()
             else:
                 raise ValueError("dssp_sheet_fraction requires a structure file to be available")
         if "dssp_loop_fraction" in scores_to_include:
             if target_structure_file:
-                dssp_analyzer = DSSPAnalyzer(target_structure_file)
+                dssp_analyzer = DSSPAnalyzer(target_structure_file, chain_id=sequence_chain)
                 scores["dssp_loop_fraction"] = dssp_analyzer.get_dssp_loop_fraction()
             else:
                 raise ValueError("dssp_loop_fraction requires a structure file to be available")
