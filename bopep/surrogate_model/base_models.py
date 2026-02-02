@@ -147,19 +147,31 @@ class RNNetwork(nn.Module):
         architecture: str = "gru",   # "gru" or "lstm"
         n_objectives: int = 1,
         max_seq_len: int = 150,  # Maximum sequence length for positional encoding
+        proj_dim: Optional[int] = None,
     ):
         super().__init__()
         self.architecture = architecture
         self.n_objectives = n_objectives
         self.output_dim = output_dim
+
+        # optional learned projection (recommended over PCA for BiGRU/BiLSTM)
+        self.proj_dim = proj_dim
+        if self.proj_dim is not None:
+            self.input_proj = nn.Linear(input_dim, self.proj_dim)
+            self.input_ln = nn.LayerNorm(self.proj_dim)
+            rnn_input_dim = self.proj_dim
+        else:
+            self.input_proj = None
+            self.input_ln = None
+            rnn_input_dim = input_dim
         
         # positional encoding with configurable max length
-        self.positional_encoding = PositionalEncoding(input_dim, max_len=max_seq_len)
+        self.positional_encoding = PositionalEncoding(rnn_input_dim, max_len=max_seq_len)
         
         # choose RNN class
         rnn_cls = nn.GRU if architecture=="gru" else nn.LSTM
         self.rnn = rnn_cls(
-            input_size=input_dim,
+            input_size=rnn_input_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
@@ -186,6 +198,11 @@ class RNNetwork(nn.Module):
     ) -> torch.Tensor:
         B, T, _ = x.size()
         device = x.device
+
+        # optional learned projection to fixed dimension
+        if self.input_proj is not None:
+            x = self.input_proj(x)      # [B, T, proj_dim]
+            x = self.input_ln(x)        # stabilize scale
 
         # add positional encodings
         x = self.positional_encoding(x)  # [B, T, input_dim]

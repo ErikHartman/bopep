@@ -1,5 +1,6 @@
 import random
 import string
+from typing import Tuple
 from bopep.docking.alphafold_docker import AlphaFoldDocker
 from bopep.docking.boltz_docker import BoltzDocker
 from bopep.structure.parser import extract_sequence_from_structure, parse_structure
@@ -57,7 +58,7 @@ class Docker:
         self.target_name = None
 
     def set_target_structure(self, target_structure_path: str, strip_template: bool = False, 
-                        get_first_model: bool = False, keep_chains: str = "A"):
+                        get_first_model: bool = False, keep_chains: str = "A", truncate_range: Tuple = None):
         """
         Set the target structure for docking.
         
@@ -66,6 +67,7 @@ class Docker:
         - strip_template: If True, keep only the specified chains and amino acids (removes waters/ligands)
         - get_first_model: If True, keep only the first model from the PDB
         - keep_chains: Chains to keep when strip_template is True (default: "A")
+        - truncate_range: Tuple specifying the range to truncate the target sequence (start, end)
         """
         if not os.path.exists(target_structure_path):
             raise FileNotFoundError(
@@ -86,14 +88,15 @@ class Docker:
             os.remove(self.temp_pdb_path)
             self.temp_pdb_path = None
             
-        if strip_template or get_first_model:
+        if strip_template or get_first_model or truncate_range:
 
             if target_structure_path.lower().endswith('.cif'):
                 raise ValueError("CIF files cannot be processed with strip_template or get_first_model options.")
             
             class ChainSelect(Select):
-                def __init__(self, chains_to_keep):
+                def __init__(self, chains_to_keep, truncate_range=None):
                     self.chains_to_keep = chains_to_keep
+                    self.truncate_range = truncate_range
                 
                 def accept_chain(self, chain):
                     return chain.id in self.chains_to_keep
@@ -102,12 +105,23 @@ class Docker:
                     return model.id == 0 if get_first_model else True
                 
                 def accept_residue(self, residue):
+                    # Check truncation range first
+                    if self.truncate_range is not None:
+                        res_id = residue.get_id()[1]
+                        if not (self.truncate_range[0] <= res_id <= self.truncate_range[1]):
+                            return 0
+                    
                     # If strip_template is True, only keep standard amino acids
                     if strip_template:
                         if residue.get_resname() in ["HOH", "WAT"]:
                             return 0
                         return residue.get_id()[0] == " "
                     return 1
+            
+            # Validate truncation parameter
+            if truncate_range is not None:
+                if not isinstance(truncate_range, tuple) or len(truncate_range) != 2:
+                    raise ValueError("truncate_range must be a tuple of (start, end)")
             
             # Parse the PDB file
             structure = parse_structure(target_structure_path, structure_id="target")
@@ -121,7 +135,7 @@ class Docker:
             # Save the cleaned structure
             io = PDBIO()
             io.set_structure(structure)
-            io.save(temp_path, ChainSelect(keep_chains))
+            io.save(temp_path, ChainSelect(keep_chains, truncate_range))
             
             # Update the path to the temporary file
             self.target_structure_path = temp_path
@@ -136,6 +150,8 @@ class Docker:
             logging.info(f"Using cleaned version: {self.temp_pdb_path}")
             if strip_template:
                 logging.info("Removed waters and ligands, keeping only standard amino acids")
+            if truncate_range is not None:
+                logging.info(f"Truncated target chain to residues {truncate_range[0]}-{truncate_range[1]}")
         self._log_config()
 
     def dock_sequences(self, sequences: list):

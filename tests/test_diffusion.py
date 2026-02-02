@@ -391,7 +391,8 @@ class TestBoRFIntegration:
         # Check data types and content
         assert df['sample_id'].dtype in ['int64', 'object']
         assert df['length'].dtype == 'int64'
-        assert df['hotspots'].dtype == 'object'
+        # Accept both object dtype (pandas <2.0) and StringDtype (pandas 2.0+)
+        assert df['hotspots'].dtype == 'object' or pd.api.types.is_string_dtype(df['hotspots'])
         
         # Check that all lengths are positive
         assert (df['length'] > 0).all()

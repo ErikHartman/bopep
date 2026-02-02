@@ -7,7 +7,7 @@ import logging
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from bopep.search.optimization import BoPep
+from bopep.search.peptidome_search import PeptidomeSearch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -87,7 +87,7 @@ def load_benchmark_embeddings(embedding_path, embedding_type="esm1d"):
         return None
 
 
-def test_bopep_with_precomputed_data(
+def test_peptidome_search_with_precomputed_data(
     embeddings_path=None,
     objectives_csv=None,
     output_dir="./test_output",
@@ -152,13 +152,13 @@ def test_bopep_with_precomputed_data(
     network_type = "mlp"
     logging.info(f"Using {network_type} network based on embedding shape {any_embedding.shape}")
 
-    from bopep.search import optimization
+    from bopep.search import peptidome_search
 
-    original_validate = optimization._validate_dependencies
-    optimization._validate_dependencies = lambda: None
+    original_validate = peptidome_search._validate_dependencies
+    peptidome_search._validate_dependencies = lambda: None
 
     try:
-        bopep = BoPep(
+        peptidome_search = PeptidomeSearch(
             surrogate_model_kwargs={
                 "network_type": network_type,
                 "model_type": "deep_evidential",
@@ -178,7 +178,7 @@ def test_bopep_with_precomputed_data(
             checkpoint_interval=3  # Test checkpointing frequently
         )
     finally:
-        optimization._validate_dependencies = original_validate
+        peptidome_search._validate_dependencies = original_validate
 
     def mock_score_batch(docked_dirs):
         selected_peptides = docked_dirs
@@ -190,8 +190,8 @@ def test_bopep_with_precomputed_data(
 
         return mock_scores
 
-    bopep._score_batch = mock_score_batch
-    bopep.docker.dock_sequences = lambda peptides: peptides  # Just return the peptide names
+    peptidome_search._score_batch = mock_score_batch
+    peptidome_search.docker.dock_sequences = lambda peptides: peptides  # Just return the peptide names
 
     schedule = [ {"acquisition": "standard_deviation", "iterations": 2},
         {"acquisition": "expected_improvement", "iterations": 10},
@@ -224,7 +224,7 @@ def test_bopep_with_precomputed_data(
         logging.warning(f"Could not find PDB file, using {target_pdb_path} (may not exist)")
 
     try:
-        bopep.run(
+        peptidome_search.run(
             target_structure_path=target_pdb_path,
             num_initial=100,
             batch_size=10,
@@ -235,10 +235,10 @@ def test_bopep_with_precomputed_data(
             n_validate=50
         )
 
-        # For the second BoPep instance, temporarily disable validation again
-        optimization._validate_dependencies = lambda: None
+        # For the second PeptidomeSearch instance, temporarily disable validation again
+        peptidome_search._validate_dependencies = lambda: None
         try:
-            bopep_cont = BoPep(
+            peptidome_search_cont = PeptidomeSearch(
                 surrogate_model_kwargs={
                     "network_type": network_type,
                     "model_type": "deep_evidential",
@@ -259,13 +259,13 @@ def test_bopep_with_precomputed_data(
             )
         finally:
             # Restore the original function again
-            optimization._validate_dependencies = original_validate
+            peptidome_search._validate_dependencies = original_validate
 
         logging.info("Continuing optimization from checkpoint")
-        bopep_cont._score_batch = mock_score_batch
-        bopep_cont.docker.dock_peptides = lambda peptides: peptides
+        peptidome_search_cont._score_batch = mock_score_batch
+        peptidome_search_cont.docker.dock_peptides = lambda peptides: peptides
 
-        bopep_cont.run(
+        peptidome_search_cont.run(
             target_structure_path=target_pdb_path,
             batch_size=10,
             schedule=schedule_continue,
@@ -281,14 +281,14 @@ def test_bopep_with_precomputed_data(
 
 
 
-def test_bopep_synthetic_only(output_dir="./test_output_synthetic"):
+def test_peptidome_search_synthetic_only(output_dir="./test_output_synthetic"):
     """
     Simple test function that only uses synthetic data.
     This should work on any system without external dependencies.
     """
-    print("Running BoPep test with synthetic data only...")
+    print("Running PeptidomeSearch test with synthetic data only...")
 
-    return test_bopep_with_precomputed_data(
+    return test_peptidome_search_with_precomputed_data(
         output_dir=output_dir,
         use_synthetic=True
     )
@@ -340,12 +340,12 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
     # Test 1: Traditional approach (same binding site for all peptides)
     logging.info("Testing traditional binding site approach (list format)...")
 
-    from bopep.search import optimization
-    original_validate = optimization._validate_dependencies
-    optimization._validate_dependencies = lambda: None
+    from bopep.search import peptidome_search
+    original_validate = peptidome_search._validate_dependencies
+    peptidome_search._validate_dependencies = lambda: None
 
     try:
-        bopep_traditional = BoPep(
+        peptidome_search_traditional = PeptidomeSearch(
             surrogate_model_kwargs={
                 "network_type": "mlp",
                 "model_type": "deep_evidential",
@@ -365,7 +365,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
             checkpoint_interval=2
         )
     finally:
-        optimization._validate_dependencies = original_validate
+        peptidome_search._validate_dependencies = original_validate
 
     # Mock scoring for traditional approach
     def mock_score_batch_traditional(docked_dirs):
@@ -377,15 +377,15 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
                 mock_scores[peptide]['binding_site_type'] = 'traditional'
         return mock_scores
 
-    bopep_traditional._score_batch = mock_score_batch_traditional
-    bopep_traditional.docker.dock_peptides = lambda peptides: peptides
+    peptidome_search_traditional._score_batch = mock_score_batch_traditional
+    peptidome_search_traditional.docker.dock_peptides = lambda peptides: peptides
 
     # Test 2: Peptide-specific approach (dict format)
     logging.info("Testing peptide-specific binding site approach (dict format)...")
 
-    optimization._validate_dependencies = lambda: None
+    peptidome_search._validate_dependencies = lambda: None
     try:
-        bopep_specific = BoPep(
+        peptidome_search_specific = PeptidomeSearch(
             surrogate_model_kwargs={
                 "network_type": "mlp", 
                 "model_type": "deep_evidential",
@@ -405,7 +405,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
             checkpoint_interval=2
         )
     finally:
-        optimization._validate_dependencies = original_validate
+        peptidome_search._validate_dependencies = original_validate
 
     # Mock scoring for peptide-specific approach
     def mock_score_batch_specific(docked_dirs):
@@ -417,8 +417,8 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
                 mock_scores[peptide]['binding_site_type'] = 'peptide_specific'
         return mock_scores
 
-    bopep_specific._score_batch = mock_score_batch_specific
-    bopep_specific.docker.dock_peptides = lambda peptides: peptides
+    peptidome_search_specific._score_batch = mock_score_batch_specific
+    peptidome_search_specific.docker.dock_peptides = lambda peptides: peptides
 
     # Define peptide-specific binding sites
     peptide_specific_binding_sites = {
@@ -460,7 +460,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
     try:
         # Run traditional approach
         logging.info("Running optimization with traditional binding sites...")
-        bopep_traditional.run(
+        peptidome_search_traditional.run(
             target_structure_path=target_pdb_path,
             num_initial=3,
             batch_size=2,
@@ -474,7 +474,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
 
         # Run peptide-specific approach  
         logging.info("Running optimization with peptide-specific binding sites...")
-        bopep_specific.run(
+        peptidome_search_specific.run(
             target_structure_path=target_pdb_path,
             num_initial=3,
             batch_size=2,
@@ -516,7 +516,7 @@ def test_peptide_specific_binding_sites(output_dir="./test_output_peptide_specif
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='Test BoPep optimization functionality')
+    parser = argparse.ArgumentParser(description='Test PeptidomeSearch optimization functionality')
     parser.add_argument('--synthetic', action='store_true', 
                        help='Use synthetic data instead of trying to load real data')
     parser.add_argument('--binding-sites', action='store_true',
@@ -531,17 +531,17 @@ if __name__ == "__main__":
         test_peptide_specific_binding_sites(args.output_dir + "_binding_sites")
     elif args.synthetic:
         print("Running test with synthetic data only...")
-        test_bopep_synthetic_only(args.output_dir)
+        test_peptidome_search_synthetic_only(args.output_dir)
     else:
         # Option 1: Try to use real data if available
         embeddings_path = "/srv/data1/er8813ha/docking-peptide/output_v2/benchmarking/embedding_methods/embedding_benchmark_data.pkl"
         objectives_csv = "/home/er8813ha/docking-peptide/src/benchmark/benchmark_scores.csv"
 
-        print("Testing BoPep with checkpointing...")
+        print("Testing PeptidomeSearch with checkpointing...")
         print("Trying real data paths first, will fall back to synthetic data if not found")
         print()
 
-        test_bopep_with_precomputed_data(
+        test_peptidome_search_with_precomputed_data(
             embeddings_path=embeddings_path,
             objectives_csv=objectives_csv,
             embedding_type="esm_1d_pca",

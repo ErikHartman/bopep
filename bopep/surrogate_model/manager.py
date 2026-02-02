@@ -112,6 +112,8 @@ class SurrogateModelManager(ObjectiveMixin):
         hidden_dims = hyperparams.get('hidden_dims')
         hidden_dim = hyperparams.get('hidden_dim')
         num_layers = hyperparams.get('num_layers', 2)
+
+        proj_dim = hyperparams.get('proj_dim', None)
         uncertainty_param = hyperparams.get('uncertainty_param')
         
         # Check if multi-model approach is requested
@@ -138,8 +140,10 @@ class SurrogateModelManager(ObjectiveMixin):
             'num_layers': num_layers,
             'network_type': network_type,
             'n_objectives': n_objectives,
-            'max_seq_len': self.surrogate_model_kwargs.get('max_seq_len', 150)
+            'max_seq_len': self.surrogate_model_kwargs.get('max_seq_len', 150),
         }
+        if proj_dim is not None:
+            model_kwargs['proj_dim'] = proj_dim
         
         # Add model-specific parameters
         if model_type == 'mve':

@@ -11,7 +11,7 @@ from bopep.scoring.complex_scorer import ComplexScorer
 from bopep.scoring.monomer_scorer import MonomerScorer
 from bopep.surrogate_model import SurrogateModelManager
 from bopep.scoring.scores_to_objective import ScoresToObjective
-from bopep.search.utils import _validate_surrogate_model_kwargs
+from bopep.search.utils import _validate_surrogate_model_kwargs, print_leaderboard
 from bopep.bayes.acquisition import AcquisitionFunction
 from bopep.logging.logger import Logger
 from bopep.genetic_algorithm.mutate import Mutator
@@ -246,40 +246,14 @@ class BoGA:
 
     def _print_leaderboard(self, objectives: Dict[str, Any], generation: int, print_n: int = 5, objective_directions: Dict[str, str] = None):
         """Print leaderboard for both single and multi-objective cases."""
-        if not objectives:
-            return
-        
-        print(f"Generation {generation} leaderboard:")
-        
-        sample_obj = next(iter(objectives.values()))
-        if isinstance(sample_obj, dict):
-            # Multi-objective case: show top performers for each objective (like optimization.py)
-            obj_names = list(sample_obj.keys())
-            print(f"Top {print_n} sequences (multiobjective):")
-            
-            for obj_name in obj_names:
-                print(f"\n--- {obj_name} ---")
-                
-                # Sort by direction
-                if objective_directions and obj_name in objective_directions:
-                    reverse_sort = objective_directions[obj_name] == "max"
-                else:
-                    reverse_sort = True  # Default to maximization
-                
-                sorted_sequences = sorted(objectives.items(), 
-                                       key=lambda x: x[1][obj_name], 
-                                       reverse=reverse_sort)[:print_n]
-                print(f"{'Peptide':<20} | {obj_name:<15}")
-                print("-" * 40)
-                for sequence, obj_dict in sorted_sequences:
-                    print(f"{sequence:<20} | {obj_dict[obj_name]:<15.4f}")
-        else:
-            # Single objective case: original behavior
-            sorted_leaderboard = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:print_n]
-            print(f"{'Peptide':<20} | {'Objective':<10} ")
-            print("-" * 60)
-            for rank, (seq, obj) in enumerate(sorted_leaderboard, start=1):
-                print(f"  {rank}. {seq} - Objective: {obj:.4f}")
+        print_leaderboard(
+            objectives=objectives,
+            iteration=generation,
+            print_n=print_n,
+            objective_directions=objective_directions,
+            iteration_label="Generation",
+            use_logging=False
+        )
 
     def _generate_initial_sequences(self) -> List[str]:
         return [self.mutator.generate_random_sequence() for _ in range(self.n_init)]

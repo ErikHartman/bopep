@@ -8,7 +8,7 @@ from bopep.scoring.complex_scorer import ComplexScorer
 from bopep.surrogate_model.manager import SurrogateModelManager
 from bopep.logging.logger import Logger
 from bopep.bayes.acquisition import AcquisitionFunction
-from bopep.search.utils import (_validate_args, _validate_surrogate_model_kwargs)
+from bopep.search.utils import (_validate_args, _validate_surrogate_model_kwargs, print_leaderboard)
 from bopep.search.structure_utils import _check_binding_site_residue_indices
 from bopep.search.checkpointing import _next_checkpoint_dir, _save_checkpoint, _copy_logs_to_checkpoint, _setup_checkpoint_dir, _rebuild_logs_from_csvs, _validate_checkpoint
 from bopep.search.selection import SequenceSelector
@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 
 
-class BoPep:
+class PeptidomeSearch:
 
     def __init__(
         self,
@@ -42,7 +42,7 @@ class BoPep:
         config: Optional[Config] = None,
     ):
         """
-        Initialize the BoPep optimizer with various configuration options.
+        Initialize the PeptidomeSearch optimizer with various configuration options.
 
         Args:
             surrogate_model_kwargs: Configuration for the surrogate model including:
@@ -58,11 +58,11 @@ class BoPep:
                     returns score dictionaries. If provided, this will be used
                     instead of the default scorer.
             checkpoint_interval: Number of iterations between automatic checkpoints (default: 5)
-            config: Optional Config object for BoPep. If not provided, defaults will be loaded.
+            config: Optional Config object for PeptidomeSearch. If not provided, defaults will be loaded.
         """
         # Initialize or load config
         if config is None:
-            config = Config(script="BoPep")  # Load defaults
+            config = Config(script="PeptidomeSearch")  # Load defaults
         self.config = config
         
         # Get flattened config for easy parameter access
@@ -147,11 +147,11 @@ class BoPep:
         self.checkpoint_interval = get_param(checkpoint_interval, 'checkpointing.checkpoint_interval')
         
         # checkpointing functions
-        self._next_checkpoint_dir = _next_checkpoint_dir.__get__(self, BoPep)
-        self._save_checkpoint = _save_checkpoint.__get__(self, BoPep)
-        self._copy_logs_to_checkpoint = _copy_logs_to_checkpoint.__get__(self, BoPep)
-        self._setup_checkpoint_dir = _setup_checkpoint_dir.__get__(self, BoPep)
-        self._rebuild_logs_from_csvs = _rebuild_logs_from_csvs.__get__(self, BoPep)
+        self._next_checkpoint_dir = _next_checkpoint_dir.__get__(self, PeptidomeSearch)
+        self._save_checkpoint = _save_checkpoint.__get__(self, PeptidomeSearch)
+        self._copy_logs_to_checkpoint = _copy_logs_to_checkpoint.__get__(self, PeptidomeSearch)
+        self._setup_checkpoint_dir = _setup_checkpoint_dir.__get__(self, PeptidomeSearch)
+        self._rebuild_logs_from_csvs = _rebuild_logs_from_csvs.__get__(self, PeptidomeSearch)
 
 
     def run(
@@ -275,7 +275,7 @@ class BoPep:
         assume_zero_indexed: Optional[bool] = None,
     ):
         """
-        Initializes the BoPep optimizer for a fresh search
+        Initializes the PeptidomeSearch optimizer for a fresh search
         """
         sequences = list(self.embeddings.keys())
         for sequence in sequences:
@@ -643,7 +643,7 @@ class BoPep:
                 sequence_scores = self.scorer.score_batch(
                     scores_to_include=scores_to_include,
                     inputs=[dir_path],
-                    input_type="colab_dir",
+                    input_type="processed_dir",
                     binding_site_residue_indices=sequence_binding_sites,
                     n_jobs=1,
                     binding_site_distance_threshold=binding_site_distance_threshold,
@@ -657,9 +657,9 @@ class BoPep:
             new_scores = self.scorer.score_batch(
                 scores_to_include=scores_to_include,
                 inputs=docked_dirs,
-                input_type="colab_dir",
+                input_type="processed_dir",
                 binding_site_residue_indices=self.binding_site_residue_indices,
-                n_jobs=self.scoring_kwargs.get("n_jobs", 1), # Default to 1 job unless specified (not safe otherwise)
+                n_jobs=self.scoring_kwargs.get("n_jobs", 12), # Default to 12 job unless specified (not safe otherwise)
                 binding_site_distance_threshold=binding_site_distance_threshold,
                 required_n_contact_residues=required_n_contact_residues,
                 template_structures=self.template_structures,
@@ -693,30 +693,13 @@ class BoPep:
                     )
 
     def _print_top_performers(self, objectives: dict, top_n: int = 10):
-        if not objectives:
-            return
-        
-        # Check if multiobjective case
-        sample_obj = next(iter(objectives.values()))
-        if isinstance(sample_obj, dict):
-            # Multi-objective case: show top performers for each objective
-            obj_names = list(sample_obj.keys())
-            logging.info(f"Top {top_n} sequences (multiobjective):")
-            
-            for obj_name in obj_names:
-                logging.info(f"\n--- {obj_name} ---")
-                sorted_sequences = sorted(objectives.items(), 
-                                       key=lambda x: x[1][obj_name], reverse=True)[:top_n]
-                logging.info(f"{'Sequence':<20} | {obj_name:<15}")
-                logging.info("-" * 40)
-                for sequence, obj_dict in sorted_sequences:
-                    logging.info(f"{sequence:<20} | {obj_dict[obj_name]:<15.4f}")
-        else:
-            # Single objective case (original)
-            sorted_sequences = sorted(objectives.items(), key=lambda x: x[1], reverse=True)[:top_n]
-            logging.info(f"Top {top_n} sequences:")
-            logging.info(f"{'Sequence':<20} | {'Objective':<10} ")
-            logging.info("-" * 60)
-            for sequence, obj_value in sorted_sequences:
-                logging.info(f"{sequence:<20} | {obj_value:<10.4f} ")
+        """Print top performing sequences."""
+        print_leaderboard(
+            objectives=objectives,
+            iteration=None,
+            print_n=top_n,
+            objective_directions=None,
+            iteration_label="Iteration",
+            use_logging=True
+        )
 

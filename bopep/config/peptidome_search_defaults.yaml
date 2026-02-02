@@ -1,5 +1,5 @@
-# BoPep Default Configuration
-# This file contains default parameters for the Bayesian Optimization for Sequences search
+# PeptidomeSearch Default Configuration
+# This file contains default parameters for the peptidome-based Bayesian optimization search
 
 # Initial population parameters
 num_initial: 10

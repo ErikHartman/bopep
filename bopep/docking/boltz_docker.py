@@ -369,7 +369,7 @@ class BoltzDocker(BaseDockingModel):
         
         # Create metrics dict with only the best model's data
         metrics = {
-            "sequence_sequence": sequence_sequence,
+            "sequence": sequence_sequence,
             "docking_method": "boltz",
             "best_model_id": best_model_id,
             # Store all metrics from best model at root level (like AlphaFold)

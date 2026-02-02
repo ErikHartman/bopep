@@ -35,10 +35,6 @@ class AcquisitionFunction:
         """
         Single-objective predictions: {sequence: (mean, std)}
         Multiobjective predictions: {sequence: {obj: (mean, std), ...}}
-        
-        Args:
-            maximize: For single-objective, whether to maximize (True) or minimize (False).
-                     For multi-objective, use objective_directions parameter instead.
         """
 
         # Detect multiobjective if first value is a dict
