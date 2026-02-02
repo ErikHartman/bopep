@@ -10,6 +10,7 @@ torch
 biopython
 fair-esm
 pydssp
+PyYAML
 pytest>=6.0
 pytest-mock
 pyrosetta-installer
