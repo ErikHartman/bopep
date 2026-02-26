@@ -2,36 +2,25 @@
   <img src="assets/bopep_header_image.png" width="350", alt="BoPep">
 </p>
 
-## *BoPep: Navigating the binder landscape*
+## *BoPep: Navigating protein sequence landscape with Bayesian Optimization*
 
-This repository contains the code for `BoPep`, a method suite for identifying and generating proteins and peptides using Bayesian Optimization (BO). While it started as a method specialized for peptide-binder optimization (the Pep in BoPep), it has now expanded to include proteins and different objectives (not necessarily related to binding). We have currently implemented three different methods in the BoPep framework:
+This repository contains the code for `BoPep`, a method suite for identifying and generating proteins and peptides using Bayesian Optimization (BO). While it started as a method specialized for peptide-binder optimization (the *Pep* in BoPep), it has now expanded to include proteins and different objectives (not necessarily related to binding). We have currently implemented three different methods in the BoPep framework:
 
-- **BoPep search**: This is the core method for BoPep, which uses Bayesian Optimization to navigate through large datasets in search for proteins that optimize some objective.
+- **BoPep search**: This is the core method for BoPep, which uses Bayesian Optimization to navigate through large datasets in search for proteins that optimize some objective. It currently supports two types of searches: a peptidome search in which a pre-defined peptide-list is provided as the search space, and a proteome search, in which a protein list is provided as a search space. For the proteome search, peptides are sampled from the proteome.
 - **BoRF**: A design module for generating a large dataset using a diffusion pipeline, which is then searched with BoPep.
-- **BoGA**: A module which allows you to generate proteins using a surrogate model guided evolutionary algorithm.
+- **BoGA**: A module which allows you to generate proteins using a surrogate model guided evolutionary algorithm. In the literature, these types of methods have been referred to as *"machine learning-guided directed evolution"* or *"surrogate-assisted evolutionary algorithms"*.
+
+BoPep search and BoRF are showcased in the BoPep preprint and the genetic algorithm is showcased in the BoGA preprint.
 
 > NOTE: We are currently working on updating the documentation for BoPep with instructive examples and API references.
 
-### TODO
-Add examples on how to run:
-- [ ] Embeddings
-- [ ] Search
-- [ ] BoGA
-- [ ] BoRF
-
-Add documentation including "how-to" for:
-- [ ] Search
-- [ ] BoGA
-- [ ] BoRF
-
-
 ## Installation
 
-To run `bopep` locally, you will need to clone this repository, as well as dependencies which vary based on what you want to optimize for. If you wish to use AlphaFold and/or Boltz, you will need to install **LocalColabFold** and/or **Boltz**. **PyRosetta** is always needed as well as other dependencies included in `requirements.txt`. Follow the steps below to set up your environment:
+To run `bopep` locally, you will need to clone this repository, as well as dependencies which vary based on what you want to optimize for. If you wish to use AlphaFold and/or Boltz, you will need to install [**LocalColabFold**](https://github.com/YoshitakaMo/localcolabfold) and/or [**Boltz**](https://github.com/jwohlwend/boltz). [**PyRosetta**](https://www.pyrosetta.org/) is always needed as well as other dependencies included in `requirements.txt`. Follow the steps below to set up your environment:
 
 ### Step 1: Clone the Repository
 
-First, clone the repository to your local machine (not available on pip yet):
+First, clone the repository to your local machine (not available on `pip` yet):
 
 ```bash
 git clone https://github.com/ErikHartman/bopep.git
@@ -92,40 +81,43 @@ This should work if you follow the instructions in the LocalColabFold git repo.
 
 ## Modules
 
+BoPep is modular, and the different modules can be strung together in different algorithms. The main modules entail surrogate modelling, structure prediction, scoring (objective functions) and embedding. 
+
 ### Surrogate modelling
 The task of the surrogate model is to learn a mapping between the embedding and the score. We use probibalistic deep learning models to do so. The architectures include: BiGRU, BiLSTM and MLP. 
 
 The probibalistic modalities include: an ensemble of networks, MC dropout, deep evidential regression and mean-variance estimation.
 
-### Docking
-Docking is performed to predict the complex structure given a target and a sequence. We support docking via co-folding using AlphaFold and/or Boltz.
+### Structure prediction
+Docking is performed to predict the complex structure given a target and a sequence. We support docking via co-folding using AlphaFold 2 implemented via ColabFold and/or Boltz-2. For monomer structure prediction, we support AlphaFold 2 implemented via ColabFold.
 
 ### Scoring
-Scoring of complexes defines the fitness/reward which is maximized during search. It should correlate with binding probability/affinity. We have defined a score called `benchmark_objective_v1` using data from PDBBind. You can also provide your own objective function easily.
+Scoring of complexes defines the fitness/reward which is maximized during search. When searching for binders, it should correlate with binding probability/affinity. We have defined a score called `benchmark_objective_v1` using data from PDBBind and symbolic regression. You can also provide your own objective function easily.
 
 ### Embedding
 Embedding serves to create a navigatable space of seqeunce representations. We support embedding through AAindex and ESM-2. You can also create your own embeddings and pass to the BO search function.
 
+## Algorithms
 
-## Search datasets (BoPep)
+### Search datasets
 The core of the BoPep framework lies in searching large datasets for binders. It does so by training a surrogate model to predict whether a seqeuence will bind or not to a given target, based on embeddings and previous docking experiments. During the search, the sequence dataset is navigated with the help of surrogate models. 
 
 <p align="center">
   <img src="assets/bopep.png" width="1000", alt="BoPep">
 </p>
 
-## Generation with diffusion (BoRF)
+### Generation with diffusion (BoRF)
 We also provide a way to generate large candidate datasets using an RFdiffusion + ProteinMPNN + FastRelax pipeline. By sampling lengths and hotspots we generate a large diverse dataset of candidate sequences. We can then apply the BoPep search on the datasets, leading to less computationally expensive design of binders.
 <p align="center">
   <img src="assets/borf.png" width="1000", alt="BoPep">
 </p>
 
-## Generation with evolutionary algorithm (BoGA)
+### Generation with evolutionary algorithm (BoGA)
 The surrogate models can also be leveraged from design. The BoGA algorithm uses the surrogate models in an evolutionary algorithm to generate a binder from a biological prior. The prior can be either a single sequence or a set of sequences.
 
 *_preprint coming soon_
 
-## Versions
+## Changelog
 
 ### 27 Nov 2025 $\rightarrow$ current
 I consider this **version 1** due to major changes in the workflow. Here, the package expanded to sequence optimization OVERALL. This included unconditional and sequence generation. As such, many APIs and variables were changed from "peptide" to "sequence". Some examples in `/examples` may still be outdated and be called "peptide" or "pep".
