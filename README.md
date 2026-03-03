@@ -121,6 +121,8 @@ The surrogate models can also be leveraged for protein design, in an evolutionar
 
 ## Changelog
 
+We're currently keeping an informal changelog here. As the project goes public we will switch to best practices.
+
 ### 27 Nov 2025 $\rightarrow$ current
 I consider this **version 1** due to major changes in the workflow. Here, the package expanded to sequence optimization OVERALL. This included unconditional and sequence generation. As such, many APIs and variables were changed from "peptide" to "sequence". Some examples in `/examples` may still be outdated and be called "peptide" or "pep".
 
