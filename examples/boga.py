@@ -1,168 +1,98 @@
-#!/usr/bin/env python3
+"""
+Example: Bayesian-optimized Genetic Algorithm (BoGA)
+"""
 
-import os
-from bopep.genetic_algorithm.generate import BoGA
+import random
 from bopep.scoring.scores_to_objective import bopep_objective_v1
+from bopep.genetic_algorithm.generate import BoGA
+
 
 def main():
-    # File paths
-    target_structure_path = "./data/ply1.pdb"
-    
-    # Verify target file exists
-    if not os.path.exists(target_structure_path):
-        raise FileNotFoundError(f"Target structure not found: {target_structure_path}")
-    
-    # Starting sequence
-    starting_sequence = "ARNPRYDGLGAMDY"
-    
-    # Binding site residues (370-465)
-    binding_site_residues = list(range(370, 466))  # 466 to include 465
-    
-    # Define acquisition schedule
+    # Path to the target protein structure (.cif or .pdb)
+    target_structure_path = "/path/to/target_structure.cif"
+
+    # Generate random starting sequences
+    random.seed(42)
+    amino_acids = list("ACDEFGHIKLMNPQRSTVWY")
+    starting_sequences = [
+        ''.join(random.choices(amino_acids, k=random.randint(8, 25)))
+        for _ in range(100)
+    ]
+
+    # Binding site residue indices 
+    # Identify these from your structure using a tool such as PyMOL or ChimeraX.
+    binding_site_residues = [15, 17, 18, 19, 20, 44, 45, 46, 66, 67, 68, 69, 75, 76, 77, 78, 79, 80]
+
+    # Optimization schedule: one or more stages with different acquisition functions.
+    # Stages run sequentially; the surrogate model is updated between each generation.
     schedule = [
         {
-            'acquisition': 'expected_improvement',
-            'generations': 5,
-            'm_select': 5,
-            'k_pool': 10_000,
-            'mutation_mode': 'uniform'  # Add missing mutation_mode
+            'acquisition': 'expected_improvement',  # Acquisition function: 'expected_improvement', 'standard_deviation', or 'greedy'
+            'generations': 100,                     # Number of GA generations to run in this stage
+            'm_select': 10,                         # Sequences selected for docking each generation
+            'k_pool': 5000,                         # Candidate pool size scored by the surrogate before selection
+            'acquisition_kwargs': {
+                'top_fraction': 50,             # Top-N sequences kept as parents for the next generation
+                'selection_method': 'uniform',  # Parent sampling strategy: 'uniform' or 'softmax'
+            },
         },
-        {
-            'acquisition': 'upper_confidence_bound', 
-            'generations': 5,
-            'm_select': 5,
-            'k_pool': 10_000,
-            'mutation_mode': 'blosum_elite'  # Add missing mutation_mode
-        }
     ]
-    
-    # BoGA configuration
+
     boga = BoGA(
-        # Target and sequence parameters
-        target_structure_path=target_structure_path,
-        initial_sequences=starting_sequence,  # Single sequence to mutate
-        min_sequence_length=8,
-        max_sequence_length=25,
-        
-        # Population and evolution parameters  
-        n_init=10,           # Initial population size (reduced for testing)
-        mutation_rate=0.05,  # Higher mutation rate for exploration
-        
-        # Surrogate model configuration (MLP + DER)
+        target_structure_path=target_structure_path,  # Path to the target protein structure (.cif or .pdb)
+        initial_sequences=starting_sequences,          # Seed sequences for the genetic algorithm
+        min_sequence_length=8,                         # Minimum peptide length (residues)
+        max_sequence_length=25,                        # Maximum peptide length (residues)
+        mode='binding',                                # 'binding' (requires target structure), 'unconditional', or 'sequence'
+
+        n_init=100,          # Number of sequences docked during the initialisation round
+        mutation_rate=0.05,  # Per-residue probability of a random mutation each generation
+
         surrogate_model_kwargs={
-            'model_type': 'deep_evidential',  # Deep Evidential Regression (DER)
-            'network_type': 'mlp',          # MLP network (will auto-detect embed_average=True)
-            'n_trials': 10,                   # Hyperparameter optimization trials (reduced for testing)
-            'n_splits': 3,                    # Cross-validation splits
-            'random_state': 42,
-            'hpo_interval': 5,                # Hyperparameter optimization every 5 generations
+            'model_type': 'deep_evidential',  # Uncertainty-aware model: 'deep_evidential', 'nn_ensemble', 'mc_dropout', or 'mve'
+            'network_type': 'bigru',          # Sequence encoder: 'bigru', 'bilstm', or 'mlp'
+            'n_trials': 50,                   # Optuna HPO trials per HPO round
+            'n_splits': 5,                    # Cross-validation folds used during HPO
+            'hpo_interval': 200,              # Re-run HPO every N generations (set high to disable)
         },
-        
-        # Scoring configuration
+
         scoring_kwargs={
             'scores_to_include': [
-                # Required scores for bopep_objective_v1 function
-                'rosetta_score',           # Rosetta energy score
-                'interface_dG',            # Binding free energy
-                'distance_score',          # Distance-based score  
-                'iptm',                    # Interface predicted template modeling score
-                'peptide_pae',            # Peptide positional average error
-                'in_binding_site',         # Binding site occupancy (boolean)
-                
-                # Additional useful scores
-                'interface_sasa',          # Solvent accessible surface area
-                'n_contacts',              # Number of contacts
-                'peptide_plddt',          # Peptide confidence score
+                'interface_dG',    # Rosetta interface binding free energy (kcal/mol)
+                'iptm',            # Interface predicted TM-score from the docking model
+                'in_binding_site', # Boolean: peptide centre-of-mass is within the binding site
+                'distance_score',  # Distance from the peptide to the binding site centroid
+                'peptide_pae',     # Mean predicted aligned error for peptide residues
+                'rosetta_score',   # Rosetta full-complex total score
             ],
-            'binding_site_residue_indices': binding_site_residues,
-            'required_n_contact_residues': 5,  # Number of contacts as requested
-            'binding_site_distance_threshold': 5.0,
-            'n_jobs': 12  # Parallel scoring jobs
+            'binding_site_residue_indices': binding_site_residues,  # 0-indexed label_seq_id residues defining the binding site
+            'required_n_contact_residues': 5,                        # Minimum receptor residues in contact to count as 'in binding site'
+            'n_jobs': 4,                                             # Parallel workers for scoring
         },
-        
+
         docker_kwargs={
-            'models': ['alphafold'],  # Use AlphaFold for docking
-            'output_dir': '../boga_output_docking',
-            'num_models': 2,            # Number of docking models to generate
-            'num_recycles': 1,          # Number of recycles in AlphaFold
+            'models': ['boltz'],                  # Docking backend(s): 'boltz' and/or 'alphafold'
+            'output_dir': '/path/to/docking_output',  # Directory where docking results are written
+            'num_models': 3,                      # Number of structure models generated per sequence (Boltz: diffusion_samples)
+            'num_recycles': 5,                    # Recycling iterations for AlphaFold (ignored by Boltz)
+            'diffusion_samples': 3,               # Boltz diffusion samples per sequence
+            'recycling_steps': 5,                 # Boltz recycling steps
+            'gpu_ids': ['0'],                     # GPU device IDs for docking (list of strings)
         },
-        
-        # Objective function - use benchmark objective
-        objective_function=bopep_objective_v1,
-        objective_function_kwargs={},  # bopep_objective_v1 doesn't need additional kwargs
-        
-        # Embedding configuration
-        embed_method='esm',           # ESM protein language model
-        # embed_average will be auto-detected: False for BiGRU, True for MLP
-        embed_batch_size=32,          # Batch size for embedding
-        pca_n_components=10,          # PCA components to retain (less than n_init)
 
-        # Logging configuration
-        log_dir="../boga_logs",
+        objective_function=bopep_objective_v1,  # Maps score dict -> scalar objective; bopep_objective_v1 is the recommended default
+        objective_function_kwargs={},            # Extra keyword arguments forwarded to the objective function
+
+        embed_method='esm',      # Embedding method: 'esm' (ESM-2) or 'aaindex'
+        embed_batch_size=64,     # Sequences embedded per forward pass
+        pca_n_components=100,    # PCA output dimensionality; must be set when use_pca=True
+        n_validate=0.2,          # Fraction (or count) of docked sequences held out for surrogate validation
+
+        log_dir='./logs/boga_run',  # Directory for logs, scores, and checkpoints
     )
-    
-    print("="*60)
-    print("BoGA Peptide Binder Discovery")
-    print("="*60)
-    print(f"Target structure: {target_structure_path}")
-    print(f"Starting sequence: {starting_sequence}")
-    print(f"Binding site residues: {min(binding_site_residues)}-{max(binding_site_residues)}")
-    print(f"Required contacts: 5")
-    print(f"Surrogate model: MLP + Deep Evidential Regression")
-    print(f"Objective function: bopep_objective_v1")
-    print(f"Initial population: {boga.n_init} sequences")
-    print(f"Schedule phases: {len(schedule)}")
-    for i, phase in enumerate(schedule, 1):
-        print(f"  Phase {i}: {phase['acquisition']} for {phase['generations']} generations (m_select={phase['m_select']}, k_pool={phase['k_pool']}, mutation={phase['mutation_mode']})")
 
-    print(f"Logging enabled: {boga.logger is not None}")
-    if boga.logger:
-        print(f"Log directory: {boga.logger.log_dir}")
-    print("="*60)
-    
-    # Run the genetic algorithm
-    print("Starting BoGA optimization...")
-    final_results = boga.run(schedule=schedule)
-    
-    # Display results
-    print("\n" + "="*60)
-    print("FINAL RESULTS")
-    print("="*60)
-    
-    # Sort by objective value (highest first)
-    sorted_results = sorted(final_results.items(), key=lambda x: x[1], reverse=True)
-    
-    print(f"Top 10 sequences found:")
-    for i, (sequence, objective) in enumerate(sorted_results[:10], 1):
-        print(f"{i:2d}. {sequence:20s} | Objective: {objective:.4f}")
-    
-    print(f"\nTotal sequences evaluated: {len(final_results)}")
-    print(f"Best objective value: {sorted_results[0][1]:.4f}")
-    print(f"Best sequence: {sorted_results[0][0]}")
-    
-    # Save results
-    output_file = "../boga_results.txt"
-    with open(output_file, 'w') as f:
-        f.write("BoGA Results\n")
-        f.write("="*50 + "\n")
-        f.write(f"Target: {target_structure_path}\n")
-        f.write(f"Starting sequence: {starting_sequence}\n")
-        f.write(f"Binding site: {min(binding_site_residues)}-{max(binding_site_residues)}\n")
-        f.write(f"Model: MLP + Deep Evidential Regression\n")
-        f.write(f"Objective: bopep_objective_v1\n\n")
-        
-        for i, (sequence, objective) in enumerate(sorted_results, 1):
-            f.write(f"{i:3d}. {sequence:25s} | {objective:.6f}\n")
-    
-    print(f"\nResults saved to: {output_file}")
-    if boga.logger:
-        print(f"Detailed logs saved to: {boga.logger.log_dir}")
-        print("Log files created:")
-        print("  - scores.csv: Raw scores for all sequences")
-        print("  - objectives.csv: Objective values for all sequences") 
-        print("  - model_losses.csv: Surrogate model accuracy metrics")
-        print("  - hyperparameters.csv: Hyperparameter optimization history")
-    print("BoGA optimization completed!")
+    boga.run(schedule=schedule)
+
 
 if __name__ == "__main__":
     main()
