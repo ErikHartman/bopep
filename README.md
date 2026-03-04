@@ -10,7 +10,7 @@ This repository contains the code for `BoPep`, a method suite for identifying an
 - **BoRF**: A design module for generating a large dataset using a diffusion pipeline, which is then searched with BoPep.
 - **BoGA**: A module which allows you to generate proteins using a surrogate model guided evolutionary algorithm. In the literature, these types of methods have been referred to as *"machine learning-guided directed evolution"* or *"surrogate-assisted evolutionary algorithms"*.
 
-BoPep search and BoRF are showcased in the [BoPep preprint](https://www.biorxiv.org/content/10.1101/2025.01.20.633551v2) and the genetic algorithm is showcased in the BoGA preprint.
+BoPep search and BoRF are showcased in the [BoPep preprint](https://www.biorxiv.org/content/10.1101/2025.01.20.633551v2) and the genetic algorithm is showcased in the [BoGA preprint](https://arxiv.org/abs/2603.02753v1).
 
 > NOTE: We are currently working on updating the documentation for BoPep with more instructive examples and API references. All current examples can be found in `/examples`.
 
@@ -134,6 +134,7 @@ I consider this **version 0**. The main experiments were run to showcase BoPep a
 ## Cite
 
 If you use BoPep, please cite:
+
 ```bib
 @article{Hartman2025,
   title = {Navigating the peptide sequence space in search for peptide binders with BoPep},
@@ -142,10 +143,20 @@ If you use BoPep, please cite:
   publisher = {openRxiv},
   author = {Hartman,  Erik and Samsudin,  Firdaus and Siljehag Alencar,  Malcolm and Tang,  Di and Bond,  Peter J and Schmidtchen,  Artur and Malmstrom,  Johan},
   year = {2025},
-  month = jan 
 }
 ```
 If you use BoGA, please cite:
+
+```
+@misc{Hartman2026,
+  doi = {10.48550/ARXIV.2603.02753},
+  url = {https://arxiv.org/abs/2603.02753},
+  author = {Hartman,  Erik and Tang,  Di and Malmstr\"{o}m,  Johan},
+  title = {Deep learning-guided evolutionary optimization for protein design},
+  publisher = {arXiv},
+  year = {2026},
+}
+```
 
 Additionally, please cite the relevant papers below for your use case: 
 
