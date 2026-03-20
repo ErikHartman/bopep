@@ -278,6 +278,18 @@ class Docker:
 
         if "openfold3" in self.models:
             logging.info("OpenFold3 parameters:")
-            for param in ["openfold3_command_template", "openfold3_extra_args", "num_models", "num_recycles"]:
+            for param in [
+                "openfold3_binary",
+                "openfold3_subcommand",
+                "openfold3_use_msa_server",
+                "openfold3_use_templates",
+                "openfold3_runner_yaml",
+                "openfold3_inference_ckpt_path",
+                "openfold3_inference_ckpt_name",
+                "openfold3_command_template",
+                "openfold3_extra_args",
+                "num_models",
+                "num_model_seeds",
+            ]:
                 if param in self.docking_kwargs:
                     logging.info(f"  {param}: {self.docking_kwargs[param]}")

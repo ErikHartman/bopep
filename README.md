@@ -54,14 +54,25 @@ This should work if you follow the instructions in the LocalColabFold git repo.
 
 1. (b) If you would like to dock with Boltz: **Install Boltz**: Boltz-2 is another nice way of docking through co-folding. Follow the installation procedure [here](https://github.com/jwohlwend/boltz) to install Boltz-2. Make sure you can run boltz after installing.
 
-1. (c) If you would like to dock with OpenFold3: **Install OpenFold3**: install your OpenFold3 repository/CLI and verify you can run its inference command from your BOPEP environment.
+1. (c) If you would like to dock with OpenFold3: **Install OpenFold3**: install your OpenFold3 repository/CLI and verify `run_openfold` is callable in your BOPEP environment.
 
-  BOPEP's OpenFold3 backend is command-template based (to support different repos/entrypoints). In `docker_kwargs`, provide:
+  BOPEP now supports OpenFold3 natively via:
+
+  - `run_openfold predict --query-json ... --output-dir ...`
+
+  In `docker_kwargs`, set:
 
   - `models: ['openfold3']`
-  - `openfold3_command_template`: command string with placeholders, e.g. `python /path/to/openfold3/infer.py --fasta {input_fasta} --template {target_structure} --out {output_dir}`
+  - `openfold3_binary: 'run_openfold'` (default)
+  - `openfold3_subcommand: 'predict'` (default)
+  - `openfold3_use_msa_server: true|false`
+  - `num_models`: maps to `--num-diffusion-samples`
+  - `num_model_seeds`: maps to `--num-model-seeds`
+  - optional: `openfold3_runner_yaml`, `openfold3_inference_ckpt_path`, `openfold3_inference_ckpt_name`
 
-  Supported placeholders include: `{input_fasta}`, `{output_dir}`, `{target_structure}`, `{target_sequence}`, `{sequence}`, `{target_name}`, `{num_models}`, `{num_recycles}`.
+  For custom OpenFold3 forks/entrypoints, you can still override the full command with
+  `openfold3_command_template`. Supported placeholders are:
+  `{query_json}`, `{output_dir}`, `{target_structure}`, `{target_sequence}`, `{sequence}`, `{target_name}`, `{num_models}`, `{num_model_seeds}`.
 
 
 2. **Install PyRosetta**: PyRosetta is freely available for academic users and is used to score complexes. Any commercial usage requires the purchasing of a license.

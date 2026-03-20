@@ -2,7 +2,6 @@ import glob
 import json
 import logging
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -19,9 +18,11 @@ class OpenFold3Docker(BaseDockingModel):
     """
     OpenFold3-based docking backend.
 
-    This backend is intentionally CLI-template driven to support different OpenFold3
-    repository entrypoints. Provide `openfold3_command_template` with placeholders
-    documented in `_build_openfold3_command`.
+    By default this backend uses the documented OpenFold3 CLI pattern:
+    `run_openfold predict --query-json ... --output-dir ...`
+
+    If your OpenFold3 fork has a custom entrypoint, you can provide
+    `openfold3_command_template` to fully override command construction.
     """
 
     def __init__(self, **kwargs):
@@ -29,7 +30,21 @@ class OpenFold3Docker(BaseDockingModel):
         super().__init__(**kwargs)
 
         self.num_models = kwargs.get("num_models", 5)
-        self.num_recycles = kwargs.get("num_recycles", 10)
+        self.num_model_seeds = kwargs.get("num_model_seeds", 1)
+
+        # Native run_openfold settings
+        self.openfold3_binary = kwargs.get("openfold3_binary", "run_openfold")
+        self.openfold3_subcommand = kwargs.get("openfold3_subcommand", "predict")
+        self.openfold3_use_msa_server = kwargs.get("openfold3_use_msa_server", True)
+        self.openfold3_use_templates = kwargs.get("openfold3_use_templates", True)
+        self.openfold3_runner_yaml = kwargs.get("openfold3_runner_yaml")
+        self.openfold3_inference_ckpt_path = kwargs.get("openfold3_inference_ckpt_path")
+        self.openfold3_inference_ckpt_name = kwargs.get("openfold3_inference_ckpt_name")
+
+        # Optional custom JSON for advanced users
+        self.openfold3_query_builder = kwargs.get("openfold3_query_builder", "default")
+
+        # Full command override for custom forks
         self.openfold3_command_template = kwargs.get("openfold3_command_template")
         self.openfold3_extra_args = kwargs.get("openfold3_extra_args", [])
 
@@ -55,15 +70,15 @@ class OpenFold3Docker(BaseDockingModel):
         logging.info(f"Docking sequence '{sequence_sequence}' on GPU {gpu_id}...")
 
         raw_sequence_dir = self._create_raw_sequence_dir(target_name, sequence_sequence)
-
-        combined_fasta_path = os.path.join(raw_sequence_dir, f"input_{sequence_sequence}.fasta")
-        with open(combined_fasta_path, "w") as fasta_handle:
-            fasta_handle.write(
-                f">{target_name}_{sequence_sequence}\n{target_sequence}:{sequence_sequence}\n"
-            )
+        query_json_path = self._create_query_json(
+            raw_sequence_dir=raw_sequence_dir,
+            target_name=target_name,
+            sequence_sequence=sequence_sequence,
+            target_sequence=target_sequence,
+        )
 
         command = self._build_openfold3_command(
-            input_fasta=combined_fasta_path,
+            query_json_path=query_json_path,
             output_dir=raw_sequence_dir,
             target_structure=target_structure,
             target_sequence=target_sequence,
@@ -99,9 +114,52 @@ class OpenFold3Docker(BaseDockingModel):
 
         return raw_sequence_dir
 
+    def _create_query_json(
+        self,
+        raw_sequence_dir: str,
+        target_name: str,
+        sequence_sequence: str,
+        target_sequence: str,
+    ) -> str:
+        query_name = f"{target_name}_{sequence_sequence}"
+
+        if self.openfold3_query_builder == "default":
+            # Minimal protein-protein complex query compatible with
+            # openfold3.projects.of3_all_atom.config.inference_query_format.InferenceQuerySet
+            # Chain A = target, Chain B = designed sequence.
+            query_payload: Any = {
+                "queries": {
+                    query_name: {
+                        "chains": [
+                            {
+                                "molecule_type": "protein",
+                                "chain_ids": "A",
+                                "sequence": target_sequence,
+                            },
+                            {
+                                "molecule_type": "protein",
+                                "chain_ids": "B",
+                                "sequence": sequence_sequence,
+                            },
+                        ]
+                    }
+                }
+            }
+        else:
+            raise ValueError(
+                f"Unsupported openfold3_query_builder='{self.openfold3_query_builder}'. "
+                "Currently supported: ['default']"
+            )
+
+        query_json_path = os.path.join(raw_sequence_dir, "query.json")
+        with open(query_json_path, "w") as query_file:
+            json.dump(query_payload, query_file, indent=2)
+
+        return query_json_path
+
     def _build_openfold3_command(
         self,
-        input_fasta: str,
+        query_json_path: str,
         output_dir: str,
         target_structure: str,
         target_sequence: str,
@@ -112,33 +170,61 @@ class OpenFold3Docker(BaseDockingModel):
         Build OpenFold3 command from `openfold3_command_template`.
 
         Supported placeholders:
-        - {input_fasta}
+        - {query_json}
         - {output_dir}
         - {target_structure}
         - {target_sequence}
         - {sequence}
         - {target_name}
         - {num_models}
-        - {num_recycles}
+        - {num_model_seeds}
         """
-        if not self.openfold3_command_template:
-            raise ValueError(
-                "'openfold3_command_template' is required for model='openfold3'. "
-                "Example: \"python /path/to/openfold3/infer.py --fasta {input_fasta} "
-                "--template {target_structure} --out {output_dir}\""
+        if self.openfold3_command_template:
+            formatted_command = self.openfold3_command_template.format(
+                query_json=query_json_path,
+                output_dir=output_dir,
+                target_structure=target_structure,
+                target_sequence=target_sequence,
+                sequence=sequence_sequence,
+                target_name=target_name,
+                num_models=self.num_models,
+                num_model_seeds=self.num_model_seeds,
             )
+            command = shlex.split(formatted_command)
+        else:
+            command = [
+                self.openfold3_binary,
+                self.openfold3_subcommand,
+                "--query-json",
+                query_json_path,
+                "--output-dir",
+                output_dir,
+                "--num-diffusion-samples",
+                str(self.num_models),
+                "--num-model-seeds",
+                str(self.num_model_seeds),
+            ]
 
-        formatted_command = self.openfold3_command_template.format(
-            input_fasta=input_fasta,
-            output_dir=output_dir,
-            target_structure=target_structure,
-            target_sequence=target_sequence,
-            sequence=sequence_sequence,
-            target_name=target_name,
-            num_models=self.num_models,
-            num_recycles=self.num_recycles,
-        )
-        command = shlex.split(formatted_command)
+            if self.openfold3_use_msa_server:
+                command.append("--use-msa-server")
+            else:
+                command.append("--use-msa-server=False")
+
+            if self.openfold3_use_templates:
+                command.append("--use-templates")
+            else:
+                command.append("--use-templates=False")
+
+            if self.openfold3_runner_yaml:
+                command.extend(["--runner-yaml", str(self.openfold3_runner_yaml)])
+            if self.openfold3_inference_ckpt_path:
+                command.extend(
+                    ["--inference-ckpt-path", str(self.openfold3_inference_ckpt_path)]
+                )
+            if self.openfold3_inference_ckpt_name:
+                command.extend(
+                    ["--inference-ckpt-name", str(self.openfold3_inference_ckpt_name)]
+                )
 
         if self.openfold3_extra_args:
             if isinstance(self.openfold3_extra_args, list):
@@ -153,14 +239,17 @@ class OpenFold3Docker(BaseDockingModel):
     ) -> str:
         processed_dir = self._create_processed_sequence_dir(target_name, sequence_sequence)
 
-        structure_files = self._find_structure_files(raw_sequence_dir)
-        if not structure_files:
+        sample_entries = self._collect_sample_entries(raw_sequence_dir)
+        if not sample_entries:
             raise ValueError(
                 f"No OpenFold3 structure files found under raw output: {raw_sequence_dir}"
             )
 
+        sorted_entries = sorted(sample_entries, key=self._sample_sort_key, reverse=True)
+
         all_models_data = []
-        for model_index, structure_path in enumerate(structure_files, 1):
+        for model_index, entry in enumerate(sorted_entries, 1):
+            structure_path = entry["structure_path"]
             standardized_filename = self._standardize_model_filename(structure_path, model_index)
             destination = os.path.join(processed_dir, standardized_filename)
             shutil.copy2(structure_path, destination)
@@ -168,11 +257,12 @@ class OpenFold3Docker(BaseDockingModel):
             model_metrics = {
                 "pdb_file": standardized_filename,
                 "model_index": model_index,
+                "source_structure": os.path.relpath(structure_path, raw_sequence_dir),
             }
-            model_metrics.update(self._extract_neighbor_metrics(structure_path))
+            model_metrics.update(entry.get("metrics", {}))
             all_models_data.append(model_metrics)
 
-        best_model = max(all_models_data, key=self._best_model_key)
+        best_model = all_models_data[0]
 
         metrics = {
             "sequence": sequence_sequence,
@@ -180,11 +270,42 @@ class OpenFold3Docker(BaseDockingModel):
             "docking_method": "openfold3",
             "model_count": len(all_models_data),
             "best_model_index": best_model.get("model_index", 1),
+            "all_models": all_models_data,
             **{k: v for k, v in best_model.items() if k != "pdb_file"},
         }
 
         self._save_metrics_json(metrics, processed_dir, prefix="openfold3_metrics")
         return processed_dir
+
+    def _collect_sample_entries(self, raw_sequence_dir: str) -> List[Dict[str, Any]]:
+        structure_files = self._find_structure_files(raw_sequence_dir)
+        sample_entries: List[Dict[str, Any]] = []
+
+        for structure_path in structure_files:
+            metrics = self._read_confidence_metrics_for_structure(structure_path)
+            sample_entries.append(
+                {
+                    "structure_path": structure_path,
+                    "metrics": metrics,
+                }
+            )
+
+        return sample_entries
+
+    @staticmethod
+    def _sample_sort_key(entry: Dict[str, Any]) -> Tuple[float, float, float, float]:
+        metrics = entry.get("metrics", {}) if isinstance(entry, dict) else {}
+        score = OpenFold3Docker._as_float(metrics.get("sample_ranking_score"))
+        iptm = OpenFold3Docker._as_float(metrics.get("iptm"))
+        ptm = OpenFold3Docker._as_float(metrics.get("ptm"))
+        plddt = OpenFold3Docker._as_float(metrics.get("avg_plddt"))
+        return (score, iptm, ptm, plddt)
+
+    @staticmethod
+    def _as_float(value: Any) -> float:
+        if isinstance(value, (int, float)):
+            return float(value)
+        return float("-inf")
 
     @staticmethod
     def _best_model_key(model_metrics: Dict[str, Any]) -> float:
@@ -209,38 +330,44 @@ class OpenFold3Docker(BaseDockingModel):
             file_path
             for file_path in candidates
             if "template" not in os.path.basename(file_path).lower()
+            and os.path.basename(file_path).lower().endswith(("_model.pdb", "_model.cif"))
         ]
 
         return sorted(filtered)
 
-    def _extract_neighbor_metrics(self, structure_path: str) -> Dict[str, Any]:
+    def _read_confidence_metrics_for_structure(self, structure_path: str) -> Dict[str, Any]:
         directory = os.path.dirname(structure_path)
-        base_name = os.path.splitext(os.path.basename(structure_path))[0]
-        rank_match = re.search(r"(?:rank|model)[_\-]?(\d+)", base_name.lower())
-        rank_token = rank_match.group(1) if rank_match else None
+        file_name = os.path.basename(structure_path)
+        if file_name.endswith("_model.cif"):
+            stem = file_name[: -len("_model.cif")]
+        elif file_name.endswith("_model.pdb"):
+            stem = file_name[: -len("_model.pdb")]
+        else:
+            stem = os.path.splitext(file_name)[0]
 
-        json_candidates = glob.glob(os.path.join(directory, "*.json"))
+        aggregated_path = os.path.join(directory, f"{stem}_confidences_aggregated.json")
+        confidence_path = os.path.join(directory, f"{stem}_confidences.json")
+
         chosen_json = None
-        if rank_token:
+        if os.path.exists(aggregated_path):
+            chosen_json = aggregated_path
+        elif os.path.exists(confidence_path):
+            chosen_json = confidence_path
+        else:
+            json_candidates = sorted(glob.glob(os.path.join(directory, "*.json")))
             for candidate in json_candidates:
                 candidate_name = os.path.basename(candidate).lower()
-                if rank_token in candidate_name and (
-                    "score" in candidate_name
-                    or "metric" in candidate_name
-                    or "rank" in candidate_name
-                    or "result" in candidate_name
-                ):
+                if "confidences_aggregated" in candidate_name:
                     chosen_json = candidate
                     break
+            if chosen_json is None:
+                for candidate in json_candidates:
+                    candidate_name = os.path.basename(candidate).lower()
+                    if "confidence" in candidate_name:
+                        chosen_json = candidate
+                        break
 
-        if chosen_json is None:
-            for candidate in json_candidates:
-                candidate_name = os.path.basename(candidate).lower()
-                if any(token in candidate_name for token in ["score", "metric", "rank", "result"]):
-                    chosen_json = candidate
-                    break
-
-        if chosen_json is None:
+        if not chosen_json:
             return {}
 
         try:
@@ -257,7 +384,15 @@ class OpenFold3Docker(BaseDockingModel):
     def _get_method_parameters(self) -> dict:
         return {
             "num_models": self.num_models,
-            "num_recycles": self.num_recycles,
+            "num_model_seeds": self.num_model_seeds,
+            "openfold3_binary": self.openfold3_binary,
+            "openfold3_subcommand": self.openfold3_subcommand,
+            "openfold3_use_msa_server": self.openfold3_use_msa_server,
+            "openfold3_use_templates": self.openfold3_use_templates,
+            "openfold3_runner_yaml": self.openfold3_runner_yaml,
+            "openfold3_inference_ckpt_path": self.openfold3_inference_ckpt_path,
+            "openfold3_inference_ckpt_name": self.openfold3_inference_ckpt_name,
+            "openfold3_query_builder": self.openfold3_query_builder,
             "openfold3_command_template": self.openfold3_command_template,
             "openfold3_extra_args": self.openfold3_extra_args,
             "save_raw": self.save_raw,
