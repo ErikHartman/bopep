@@ -39,11 +39,14 @@ scoring:
 docker:
   models:
     - 'boltz'
+    # - 'openfold3'
   output_dir: './docking_outputs'
   num_models: 3
   num_recycles: 5
   diffusion_samples: 3
   recycling_steps: 5
+  openfold3_command_template: null
+  openfold3_extra_args: []
   gpu_ids: null
   save_raw: false
   force: false

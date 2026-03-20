@@ -53,11 +53,14 @@ scoring:
 docker:
   models:
     - 'boltz'
+    # - 'openfold3'
   output_dir: './proteome_search_docking'
   num_models: 5
   num_recycles: 10
   diffusion_samples: 5
   recycling_steps: 10
+  openfold3_command_template: null
+  openfold3_extra_args: []
   gpu_ids: null
   save_raw: false
   force: false

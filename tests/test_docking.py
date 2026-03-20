@@ -39,6 +39,14 @@ class TestDocker:
         assert docker.models == ["alphafold", "boltz"]
         assert docker.output_dir == "/tmp"
 
+    def test_init_openfold3_model(self):
+        """Test Docker initialization with OpenFold3 model."""
+        docker_kwargs = {"output_dir": "/tmp", "models": ["openfold3"]}
+        docker = Docker(docker_kwargs)
+
+        assert docker.models == ["openfold3"]
+        assert docker.output_dir == "/tmp"
+
     
 
     def test_set_target_structure_nonexistent_file(self):
@@ -56,6 +64,22 @@ class TestDocker:
         
         with pytest.raises(ValueError, match="Target structure not set"):
             docker.dock_sequences([])
+
+    def test_dock_sequences_dispatches_openfold3(self):
+        """Test docking dispatch calls OpenFold3 backend when requested."""
+        docker_kwargs = {"output_dir": "/tmp", "models": ["openfold3"]}
+        docker = Docker(docker_kwargs)
+
+        docker.target_structure_path = "/tmp/mock_target.pdb"
+        docker.target_sequence = "MOCKSEQ"
+        docker.target_name = "mock_target"
+
+        expected_dirs = ["/tmp/processed/mock_target_ABC"]
+        with patch.object(docker, "_dock_with_openfold3", return_value=expected_dirs) as mocked_method:
+            docked = docker.dock_sequences(["ABC"])
+
+        mocked_method.assert_called_once_with(["ABC"])
+        assert docked == expected_dirs
 
 
 class TestDockingUtils:
