@@ -398,6 +398,16 @@ class ComplexScorer(BaseScorer):
         
         # Initialize sequence properties
         sequence_properties = SequenceProperties(sequence=sequence)
+        rosetta_scorers_cache = {}
+
+        def _get_rosetta_scorer(structure_path: Optional[str]):
+            if not structure_path:
+                raise ValueError("No structure file available for Rosetta scoring")
+            scorer_obj = rosetta_scorers_cache.get(structure_path)
+            if scorer_obj is None:
+                scorer_obj = RosettaScorer(structure_path)
+                rosetta_scorers_cache[structure_path] = scorer_obj
+            return scorer_obj
         
         # Check method availability upfront
         alphafold_scores_requested = any(score.startswith("alphafold_") for score in scores_to_include)
@@ -413,23 +423,23 @@ class ComplexScorer(BaseScorer):
             scores["alphafold_iptm"] = alphafold_data.get("iptm")
         
         if "alphafold_rosetta_score" in scores_to_include:
-            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
             scores["alphafold_rosetta_score"] = rosetta_scorer.get_rosetta_score()
         
         if "alphafold_interface_sasa" in scores_to_include:
-            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
             scores["alphafold_interface_sasa"] = rosetta_scorer.get_interface_sasa()
         
         if "alphafold_interface_dG" in scores_to_include:
-            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
             scores["alphafold_interface_dG"] = rosetta_scorer.get_interface_dG()
         
         if "alphafold_interface_delta_hbond_unsat" in scores_to_include:
-            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
             scores["alphafold_interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
         
         if "alphafold_packstat" in scores_to_include:
-            rosetta_scorer = RosettaScorer(alphafold_model_file)
+            rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
             scores["alphafold_packstat"] = rosetta_scorer.get_packstat()
         
         if "alphafold_distance_score" in scores_to_include:
@@ -536,23 +546,23 @@ class ComplexScorer(BaseScorer):
         
         # Boltz structural scores
         if "boltz_rosetta_score" in scores_to_include:
-            rosetta_scorer = RosettaScorer(boltz_model_file)
+            rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
             scores["boltz_rosetta_score"] = rosetta_scorer.get_rosetta_score()
         
         if "boltz_interface_sasa" in scores_to_include:
-            rosetta_scorer = RosettaScorer(boltz_model_file)
+            rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
             scores["boltz_interface_sasa"] = rosetta_scorer.get_interface_sasa()
         
         if "boltz_interface_dG" in scores_to_include:
-            rosetta_scorer = RosettaScorer(boltz_model_file)
+            rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
             scores["boltz_interface_dG"] = rosetta_scorer.get_interface_dG()
         
         if "boltz_interface_delta_hbond_unsat" in scores_to_include:
-            rosetta_scorer = RosettaScorer(boltz_model_file)
+            rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
             scores["boltz_interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
         
         if "boltz_packstat" in scores_to_include:
-            rosetta_scorer = RosettaScorer(boltz_model_file)
+            rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
             scores["boltz_packstat"] = rosetta_scorer.get_packstat()
         
         if "boltz_distance_score" in scores_to_include:
@@ -632,15 +642,15 @@ class ComplexScorer(BaseScorer):
         if "rosetta_score" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file:
-                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
                 scores["alphafold_rosetta_score"] = rosetta_scorer.get_rosetta_score()
                 added = True
             if has_boltz and boltz_model_file:
-                rosetta_scorer = RosettaScorer(boltz_model_file)
+                rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
                 scores["boltz_rosetta_score"] = rosetta_scorer.get_rosetta_score()
                 added = True
             if not added:
-                rosetta_scorer = RosettaScorer(target_structure_file)
+                rosetta_scorer = _get_rosetta_scorer(target_structure_file)
                 scores["rosetta_score"] = rosetta_scorer.get_rosetta_score()
             elif has_alphafold ^ has_boltz:
                 scores["rosetta_score"] = scores.get("alphafold_rosetta_score") or scores.get("boltz_rosetta_score")
@@ -648,15 +658,15 @@ class ComplexScorer(BaseScorer):
         if "interface_sasa" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file:
-                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
                 scores["alphafold_interface_sasa"] = rosetta_scorer.get_interface_sasa()
                 added = True
             if has_boltz and boltz_model_file:
-                rosetta_scorer = RosettaScorer(boltz_model_file)
+                rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
                 scores["boltz_interface_sasa"] = rosetta_scorer.get_interface_sasa()
                 added = True
             if not added:
-                rosetta_scorer = RosettaScorer(target_structure_file)
+                rosetta_scorer = _get_rosetta_scorer(target_structure_file)
                 scores["interface_sasa"] = rosetta_scorer.get_interface_sasa()
             elif has_alphafold ^ has_boltz:
                 scores["interface_sasa"] = scores.get("alphafold_interface_sasa") or scores.get("boltz_interface_sasa")
@@ -664,15 +674,15 @@ class ComplexScorer(BaseScorer):
         if "interface_dG" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file:
-                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
                 scores["alphafold_interface_dG"] = rosetta_scorer.get_interface_dG()
                 added = True
             if has_boltz and boltz_model_file:
-                rosetta_scorer = RosettaScorer(boltz_model_file)
+                rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
                 scores["boltz_interface_dG"] = rosetta_scorer.get_interface_dG()
                 added = True
             if not added:
-                rosetta_scorer = RosettaScorer(target_structure_file)
+                rosetta_scorer = _get_rosetta_scorer(target_structure_file)
                 scores["interface_dG"] = rosetta_scorer.get_interface_dG()
             elif has_alphafold ^ has_boltz:
                 scores["interface_dG"] = scores.get("alphafold_interface_dG") or scores.get("boltz_interface_dG")
@@ -680,15 +690,15 @@ class ComplexScorer(BaseScorer):
         if "interface_delta_hbond_unsat" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file:
-                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
                 scores["alphafold_interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
                 added = True
             if has_boltz and boltz_model_file:
-                rosetta_scorer = RosettaScorer(boltz_model_file)
+                rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
                 scores["boltz_interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
                 added = True
             if not added:
-                rosetta_scorer = RosettaScorer(target_structure_file)
+                rosetta_scorer = _get_rosetta_scorer(target_structure_file)
                 scores["interface_delta_hbond_unsat"] = rosetta_scorer.get_interface_delta_hbond_unsat()
             elif has_alphafold ^ has_boltz:
                 scores["interface_delta_hbond_unsat"] = scores.get("alphafold_interface_delta_hbond_unsat") or scores.get("boltz_interface_delta_hbond_unsat")
@@ -696,15 +706,15 @@ class ComplexScorer(BaseScorer):
         if "packstat" in scores_to_include:
             added = False
             if has_alphafold and alphafold_model_file:
-                rosetta_scorer = RosettaScorer(alphafold_model_file)
+                rosetta_scorer = _get_rosetta_scorer(alphafold_model_file)
                 scores["alphafold_packstat"] = rosetta_scorer.get_packstat()
                 added = True
             if has_boltz and boltz_model_file:
-                rosetta_scorer = RosettaScorer(boltz_model_file)
+                rosetta_scorer = _get_rosetta_scorer(boltz_model_file)
                 scores["boltz_packstat"] = rosetta_scorer.get_packstat()
                 added = True
             if not added:
-                rosetta_scorer = RosettaScorer(target_structure_file)
+                rosetta_scorer = _get_rosetta_scorer(target_structure_file)
                 scores["packstat"] = rosetta_scorer.get_packstat()
             elif has_alphafold ^ has_boltz:
                 scores["packstat"] = scores.get("alphafold_packstat") or scores.get("boltz_packstat")
