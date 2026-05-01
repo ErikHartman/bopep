@@ -274,6 +274,7 @@ class ComplexScorer(BaseScorer):
         template_structure: Optional[str] = None,
         receptor_chain: str = "A",
         sequence_chain: str = "B",
+        prefer_relaxed_for_rosetta: Optional[bool] = None,
     ) -> dict:
         """
         Calculate and return selected scores for a sequence.
@@ -399,14 +400,22 @@ class ComplexScorer(BaseScorer):
         # Initialize sequence properties
         sequence_properties = SequenceProperties(sequence=sequence)
         rosetta_scorers_cache = {}
+        if prefer_relaxed_for_rosetta is None:
+            prefer_relaxed_for_rosetta = os.environ.get("SCORE_PREFER_RELAXED_STRUCTURES", "").strip().lower() in {
+                "1", "true", "yes", "y", "on"
+            }
 
         def _get_rosetta_scorer(structure_path: Optional[str]):
             if not structure_path:
                 raise ValueError("No structure file available for Rosetta scoring")
-            scorer_obj = rosetta_scorers_cache.get(structure_path)
+            rosetta_structure_path = RosettaScorer.choose_structure_for_rosetta(
+                structure_path,
+                prefer_relaxed=bool(prefer_relaxed_for_rosetta),
+            )
+            scorer_obj = rosetta_scorers_cache.get(rosetta_structure_path)
             if scorer_obj is None:
-                scorer_obj = RosettaScorer(structure_path)
-                rosetta_scorers_cache[structure_path] = scorer_obj
+                scorer_obj = RosettaScorer(rosetta_structure_path)
+                rosetta_scorers_cache[rosetta_structure_path] = scorer_obj
             return scorer_obj
         
         # Check method availability upfront
@@ -1048,6 +1057,7 @@ class ComplexScorer(BaseScorer):
         n_jobs: int = None,
         receptor_chain: str = "A",
         sequence_chain: str = "B",
+        prefer_relaxed_for_rosetta: Optional[bool] = None,
     ) -> dict:
         """
         Score multiple structures in parallel.
@@ -1099,6 +1109,7 @@ class ComplexScorer(BaseScorer):
                     template_structures,
                     receptor_chain,
                     sequence_chain,
+                    prefer_relaxed_for_rosetta,
                 )
                 for input_val in inputs
             ]
@@ -1134,6 +1145,7 @@ class ComplexScorer(BaseScorer):
                         template_structures,
                         receptor_chain,
                         sequence_chain,
+                        prefer_relaxed_for_rosetta,
                     )
                     all_scores.update(result)
                     print(f"Scoring progress: {i}/{len(inputs)}")
@@ -1145,7 +1157,7 @@ class ComplexScorer(BaseScorer):
 
     @staticmethod
     def _process_single_input(
-        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices, required_n_contact_residues, binding_site_distance_threshold, template_structures, receptor_chain, sequence_chain
+        scorer, scores_to_include, input_value, input_type, binding_site_residue_indices, required_n_contact_residues, binding_site_distance_threshold, template_structures, receptor_chain, sequence_chain, prefer_relaxed_for_rosetta
     ):
         """
         Process a single input for scoring.
@@ -1196,6 +1208,7 @@ class ComplexScorer(BaseScorer):
                 template_structure=template_structure,
                 receptor_chain=receptor_chain,
                 sequence_chain=sequence_chain,
+                prefer_relaxed_for_rosetta=prefer_relaxed_for_rosetta,
             )
         elif input_type == "processed_dir":
             return scorer.score(
@@ -1207,6 +1220,7 @@ class ComplexScorer(BaseScorer):
                 template_structure=template_structure,
                 receptor_chain=receptor_chain,
                 sequence_chain=sequence_chain,
+                prefer_relaxed_for_rosetta=prefer_relaxed_for_rosetta,
             )
         elif input_type == "sequence":
             return scorer.score(
@@ -1214,6 +1228,7 @@ class ComplexScorer(BaseScorer):
                 sequence=input_value,
                 receptor_chain=receptor_chain,
                 sequence_chain=sequence_chain,
+                prefer_relaxed_for_rosetta=prefer_relaxed_for_rosetta,
             )
 
 
