@@ -267,7 +267,7 @@ class HyperparameterTuner:
         Then does cross-validation and returns average combined score.
         """
         if self.network_type == "mlp":
-            n_layers = trial.suggest_int("num_layers", 1, 5)
+            n_layers = trial.suggest_int("num_layers", 1, 10)
             hidden_dims = []
             for i in range(n_layers):
                 hd = trial.suggest_int(
@@ -276,15 +276,15 @@ class HyperparameterTuner:
                 hidden_dims.append(hd)
             chosen_hidden_dim = None
         else:
-            n_layers = trial.suggest_int("num_layers", 1, 5)
+            n_layers = trial.suggest_int("num_layers", 1, 10)
             chosen_hidden_dim = trial.suggest_int(
                 "rnn_hidden_dim", self.hidden_dim_min, self.hidden_dim_max, log=True
             )
             hidden_dims = None  # Not used for RNN
 
         learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
-        epochs = trial.suggest_int("epochs", 50, 200)
-        batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
+        epochs = trial.suggest_int("epochs", 50, 500)
+        batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128, 256])
 
         if self.model_type in ["mve", "deep_evidential"]:
             # Ensure parameters are floats
