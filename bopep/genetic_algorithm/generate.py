@@ -19,6 +19,16 @@ from bopep.config import Config
 import torch
 
 
+_DEFAULT_EMBED_METHOD = object()
+
+
+def _has_custom_surrogate(surrogate_model_kwargs: Dict[str, Any]) -> bool:
+    return (
+        surrogate_model_kwargs.get('model_type') == 'custom'
+        or any(key in surrogate_model_kwargs for key in ('custom_model', 'surrogate_model', 'model'))
+    )
+
+
 class BoGA:
     """
     Evoluationary algorithm for protein discovery using surrogate modeling.
@@ -42,7 +52,7 @@ class BoGA:
         docker_kwargs: Optional[Dict[str, Any]] = None,
         mutation_rate: Optional[float] = None,
         # Embedding options
-        embed_method: Optional[str] = None,
+        embed_method: Optional[str] = _DEFAULT_EMBED_METHOD,
         embed_model_path: Optional[str] = None,
         embed_batch_size: Optional[int] = None,
         embed_device: Optional[str] = None,
@@ -66,6 +76,7 @@ class BoGA:
         continue_from_logs: Optional[str] = None,
         # Config object 
         config: Optional[Config] = None,
+        custom_surrogate_model: Optional[Any] = None,
     ):
         # Initialize or load config
         if config is None:
@@ -100,8 +111,9 @@ class BoGA:
         self.mutation_rate = get_param(mutation_rate, 'mutation_rate')
         
         # Get surrogate model kwargs
+        user_provided_surrogate_kwargs = surrogate_model_kwargs is not None
         if surrogate_model_kwargs is not None:
-            self.surrogate_model_kwargs = surrogate_model_kwargs
+            self.surrogate_model_kwargs = dict(surrogate_model_kwargs)
         else:
             # Extract from flattened config
             self.surrogate_model_kwargs = {
@@ -111,6 +123,25 @@ class BoGA:
                 'n_splits': cfg.get('surrogate_model.n_splits'),
                 'hpo_interval': cfg.get('surrogate_model.hpo_interval'),
             }
+
+        if custom_surrogate_model is not None:
+            self.surrogate_model_kwargs['custom_model'] = custom_surrogate_model
+
+        if _has_custom_surrogate(self.surrogate_model_kwargs):
+            self.surrogate_model_kwargs['model_type'] = 'custom'
+            if custom_surrogate_model is not None and not user_provided_surrogate_kwargs:
+                self.surrogate_model_kwargs['network_type'] = 'custom'
+            else:
+                self.surrogate_model_kwargs.setdefault('network_type', 'custom')
+
+        for key, config_key in {
+            'n_trials': 'surrogate_model.n_trials',
+            'n_splits': 'surrogate_model.n_splits',
+            'hpo_interval': 'surrogate_model.hpo_interval',
+        }.items():
+            self.surrogate_model_kwargs.setdefault(key, cfg.get(config_key))
+
+        self._uses_custom_surrogate = _has_custom_surrogate(self.surrogate_model_kwargs)
         _validate_surrogate_model_kwargs(self.surrogate_model_kwargs)
         
         # Get scoring kwargs
@@ -150,21 +181,30 @@ class BoGA:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         # Get embedding configuration
-        self.embed_method = get_param(embed_method, 'embedding.method').lower()
+        embed_method_value = cfg.get('embedding.method') if embed_method is _DEFAULT_EMBED_METHOD else embed_method
+        self.embed_method = embed_method_value.lower() if isinstance(embed_method_value, str) else None
         self.embed_model_path = get_param(embed_model_path, 'embedding.model_path')
         self.embed_batch_size = get_param(embed_batch_size, 'embedding.batch_size')
         self.embed_device = get_param(embed_device, 'embedding.device')
         self.pca_n_components = get_param(pca_n_components, 'embedding.pca_n_components')
+
+        if self.embed_method is None:
+            if not self._uses_custom_surrogate:
+                raise ValueError(
+                    "embed_method=None is only supported with a custom surrogate model, "
+                    "because built-in surrogate models require numeric embeddings."
+                )
+            self.pca_n_components = None
         
         # Auto-detect embedding averaging based on network type
-        network_type = self.surrogate_model_kwargs.get('network_type', 'mlp').lower()
+        network_type = (self.surrogate_model_kwargs.get('network_type') or 'mlp').lower()
         if network_type == "mlp":
             self.embed_average = True
         else:
             self.embed_average = False
         
         # Enforce fixed PCA dimensions for consistent neural network training
-        if self.pca_n_components is None:
+        if self.embed_method is not None and self.pca_n_components is None:
             raise ValueError(
                 "pca_n_components must be specified to ensure dimensional consistency. "
                 "Use a fixed value (e.g., pca_n_components=20) for stable neural network training."
@@ -307,10 +347,16 @@ class BoGA:
 
     def _embed_sequences(self, sequences: List[str]) -> Dict[str, Any]:
         """
-        Embed, scale, and apply PCA to a list of sequences.
+        Prepare surrogate inputs for a list of sequences.
+
+        When embed_method is None, the raw sequence strings are passed through.
+        Otherwise, sequences are embedded, scaled, and reduced with PCA.
         """
         if not sequences:
             return {}
+
+        if self.embed_method is None:
+            return {sequence: sequence for sequence in sequences}
         
         # Fresh embed all sequences
         if self.embed_method == 'esm':
@@ -329,7 +375,7 @@ class BoGA:
                 filter=False
             )
         else:
-            raise ValueError("embed_method must be 'esm' or 'aaindex'")
+            raise ValueError("embed_method must be 'esm', 'aaindex', or None")
         
         # Scale and reduce the embeddings
         scaled_embeddings = self.embedder.scale_embeddings(raw_embeddings)

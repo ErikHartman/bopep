@@ -437,6 +437,42 @@ class TestBoGA:
         mock_dependencies['embedder'].scale_embeddings.assert_called_once()
         mock_dependencies['embedder'].reduce_embeddings_pca.assert_called_once()
 
+    def test_embed_sequences_none_passes_raw_sequences(self, mock_dependencies):
+        """Test raw sequence inputs for custom surrogates."""
+        class RawSequencePredictor:
+            def predict_dict(self, input_dict, **kwargs):
+                return {sequence: (float(len(value)), 0.1) for sequence, value in input_dict.items()}
+
+        predictor = RawSequencePredictor()
+        boga = BoGA(
+            mode='binding',
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            embed_method=None,
+            custom_surrogate_model=predictor,
+        )
+
+        result = boga._embed_sequences(["ACDEFG", "HIKLMN"])
+
+        assert result == {"ACDEFG": "ACDEFG", "HIKLMN": "HIKLMN"}
+        assert boga.pca_n_components is None
+        assert boga.surrogate_model_kwargs['model_type'] == 'custom'
+        assert boga.surrogate_model_kwargs['network_type'] == 'custom'
+        assert boga.surrogate_model_kwargs['custom_model'] is predictor
+        mock_dependencies['embedder'].embed_esm.assert_not_called()
+        mock_dependencies['embedder'].embed_aaindex.assert_not_called()
+
+    def test_embed_method_none_requires_custom_surrogate(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test that raw sequences are not sent to built-in surrogate models."""
+        with pytest.raises(ValueError, match="embed_method=None is only supported with a custom surrogate model"):
+            BoGA(
+                mode='binding',
+                target_structure_path="/fake/path.pdb",
+                initial_sequences="ACDEFG",
+                embed_method=None,
+                surrogate_model_kwargs=basic_surrogate_kwargs,
+            )
+
     def test_select_top_objectives(self, mock_dependencies, basic_surrogate_kwargs):
         """Test selection of top objectives"""
         boga = BoGA(

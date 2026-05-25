@@ -10,6 +10,7 @@ from bopep.surrogate_model import (
     DeepEvidentialRegression,
     MVE
 )
+from bopep.surrogate_model.custom import CustomSurrogateModel
 from bopep.surrogate_model.multi_model import MultiModelWrapper
 from bopep.surrogate_model.helpers import ObjectiveMixin
 
@@ -24,10 +25,25 @@ class SurrogateModelManager(ObjectiveMixin):
         Initialize the surrogate model manager.
         """
         self.surrogate_model_kwargs = surrogate_model_kwargs or {}
+        if self._custom_model_instance() is not None:
+            self.surrogate_model_kwargs['model_type'] = 'custom'
+            self.surrogate_model_kwargs.setdefault('network_type', 'custom')
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = None
         self.best_hyperparams = None
         self.previous_study = None
+
+    def _custom_model_instance(self) -> Optional[Any]:
+        for key in ('custom_model', 'surrogate_model', 'model'):
+            if key in self.surrogate_model_kwargs:
+                return self.surrogate_model_kwargs[key]
+        return None
+
+    def _uses_custom_model(self) -> bool:
+        return (
+            self.surrogate_model_kwargs.get('model_type') == 'custom'
+            or self._custom_model_instance() is not None
+        )
         
     def optimize_hyperparameters(
         self, 
@@ -39,6 +55,11 @@ class SurrogateModelManager(ObjectiveMixin):
         iteration: Optional[int] = None
     ) -> Dict[str, Any]:
         """Optimize hyperparameters using Optuna."""
+        if self._uses_custom_model():
+            self.best_hyperparams = {}
+            logging.info("Skipping hyperparameter optimization for custom surrogate model.")
+            return self.best_hyperparams
+
         model_type = self.surrogate_model_kwargs['model_type']
         network_type = self.surrogate_model_kwargs['network_type']
         
@@ -75,6 +96,26 @@ class SurrogateModelManager(ObjectiveMixin):
 
         Sets self.model to the initialized model instance.
         """
+        if self._uses_custom_model():
+            custom_model = self._custom_model_instance()
+            if custom_model is None:
+                raise ValueError(
+                    "model_type='custom' requires a custom_model, surrogate_model, or model entry "
+                    "in surrogate_model_kwargs."
+                )
+
+            self.cleanup_model()
+            if objectives:
+                self._setup_objectives(objectives)
+            self.best_hyperparams = self.best_hyperparams or {}
+            self.model = CustomSurrogateModel(
+                custom_model,
+                default_std=self.surrogate_model_kwargs.get('default_std', 0.0)
+            )
+            self.model.to(self.device)
+            logging.info("Initialized custom surrogate model")
+            return
+
         if hyperparams is None:
             hyperparams = self.best_hyperparams
             if hyperparams is None:
@@ -236,17 +277,19 @@ class SurrogateModelManager(ObjectiveMixin):
 
     def _train_and_validate(self, train_emb: dict, train_obj: dict, val_emb: dict, val_obj: dict) -> Dict[str, Any]:
         """Train on train set, evaluate on both splits."""
-        if not self.best_hyperparams:
+        if not self.best_hyperparams and not self._uses_custom_model():
             raise RuntimeError("Hyperparameters must be optimized before training")
+
+        hyperparams = self.best_hyperparams or {}
             
         loss = self.model.fit_dict(
             embedding_dict=train_emb,
             objective_dict=train_obj,
             val_embedding_dict=val_emb,
             val_objective_dict=val_obj,
-            epochs=self.best_hyperparams.get("epochs", 100),
-            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
-            batch_size=self.best_hyperparams.get("batch_size", 16),
+            epochs=hyperparams.get("epochs", 100),
+            learning_rate=hyperparams.get("learning_rate", 1e-3),
+            batch_size=hyperparams.get("batch_size", 16),
             device=self.device,
         )
         
@@ -286,15 +329,17 @@ class SurrogateModelManager(ObjectiveMixin):
 
     def _train_on_all(self, embeddings: dict, objectives: dict) -> Dict[str, Any]:
         """Train on the entire dataset (no validation)."""
-        if not self.best_hyperparams:
+        if not self.best_hyperparams and not self._uses_custom_model():
             raise RuntimeError("Hyperparameters must be optimized before training")
+
+        hyperparams = self.best_hyperparams or {}
             
         loss = self.model.fit_dict(
             embedding_dict=embeddings,
             objective_dict=objectives,
-            epochs=self.best_hyperparams.get("epochs", 100),
-            learning_rate=self.best_hyperparams.get("learning_rate", 1e-3),
-            batch_size=self.best_hyperparams.get("batch_size", 16),
+            epochs=hyperparams.get("epochs", 100),
+            learning_rate=hyperparams.get("learning_rate", 1e-3),
+            batch_size=hyperparams.get("batch_size", 16),
             device=self.device,
         )
         
