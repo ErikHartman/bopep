@@ -70,6 +70,7 @@ class BoGA:
         beta: Optional[float] = None,
         adalead_k: Optional[float] = None,
         selection_pool: Optional[str] = None,
+        candidate_diversity_strength: Optional[float] = None,
         # Logging options
         log_dir: Optional[str] = None,
         # Continuation options
@@ -172,6 +173,17 @@ class BoGA:
         self.beta = get_param(beta, 'selection.beta')
         self.adalead_k = get_param(adalead_k, 'selection.adalead_k')
         self.selection_pool = get_param(selection_pool, 'selection.selection_pool')
+        self.candidate_diversity_strength = get_param(
+            candidate_diversity_strength,
+            'selection.candidate_diversity_strength'
+        )
+        if self.candidate_diversity_strength is None:
+            self.candidate_diversity_strength = 0.0
+        if not (0.0 <= self.candidate_diversity_strength <= 1.0):
+            raise ValueError(
+                "candidate_diversity_strength must be in [0, 1], "
+                f"got {self.candidate_diversity_strength}"
+            )
         
         # Logging options
         self.continue_from_logs = get_param(continue_from_logs, 'logging.continue_from_logs')
@@ -260,6 +272,8 @@ class BoGA:
             min_sequence_length=self.min_sequence_length,
             max_sequence_length=self.max_sequence_length,
             mutation_rate=self.mutation_rate,
+            p_ins = 0.3,
+            p_del = 0.3,
         )
         
         # Initialize surrogate model manager
@@ -614,6 +628,7 @@ class BoGA:
                 **{'selection.beta': self.beta},
                 **{'selection.adalead_k': self.adalead_k},
                 **{'selection.selection_pool': self.selection_pool},
+                **{'selection.candidate_diversity_strength': self.candidate_diversity_strength},
                 **{'embedding.method': self.embed_method},
                 **{'embedding.model_path': self.embed_model_path},
                 **{'embedding.batch_size': self.embed_batch_size},
@@ -749,7 +764,13 @@ class BoGA:
 
                 # Select candidates using acquisition function
                 acquisition_kwargs = phase.get("acquisition_kwargs", {})
-                candidates = self._select_top_predictions(preds, self.m_select, acquisition_function, acquisition_kwargs)
+                candidates = self._select_top_predictions(
+                    preds,
+                    self.m_select,
+                    acquisition_function,
+                    acquisition_kwargs,
+                    candidate_diversity_strength=self.candidate_diversity_strength
+                )
 
                 print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
 
@@ -875,12 +896,106 @@ class BoGA:
         print(f"AdaLead: Selected {len(candidates)} sequences above threshold (threshold={threshold:.4f}, max={best_value:.4f}, k={adalead_k})")
         return candidates
 
-    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
+    @staticmethod
+    def _normalized_levenshtein_distance(seq_a: str, seq_b: str) -> float:
+        """
+        Return Levenshtein distance normalized to [0, 1] by the longer sequence length.
+        """
+        if seq_a == seq_b:
+            return 0.0
+
+        max_len = max(len(seq_a), len(seq_b))
+        if max_len == 0:
+            return 0.0
+
+        previous = list(range(len(seq_b) + 1))
+        for i, char_a in enumerate(seq_a, start=1):
+            current = [i]
+            for j, char_b in enumerate(seq_b, start=1):
+                insertion = current[j - 1] + 1
+                deletion = previous[j] + 1
+                substitution = previous[j - 1] + (char_a != char_b)
+                current.append(min(insertion, deletion, substitution))
+            previous = current
+
+        return previous[-1] / max_len
+
+    @staticmethod
+    def _normalize_scores(values: Dict[str, float]) -> Dict[str, float]:
+        min_value = min(values.values())
+        max_value = max(values.values())
+        if max_value == min_value:
+            return {seq: 1.0 for seq in values}
+        return {
+            seq: (value - min_value) / (max_value - min_value)
+            for seq, value in values.items()
+        }
+
+    def _select_diverse_predictions(
+        self,
+        acquisition_values: Dict[str, float],
+        k: int,
+        candidate_diversity_strength: float
+    ) -> List[str]:
+        if k <= 0:
+            return []
+
+        candidate_order = sorted(acquisition_values, key=acquisition_values.get, reverse=True)
+        selected = [candidate_order[0]]
+        remaining = candidate_order[1:]
+        normalized_acquisition = self._normalize_scores(acquisition_values)
+
+        while len(selected) < k and remaining:
+            best_candidate = None
+            best_score = -np.inf
+
+            for candidate in remaining:
+                novelty = min(
+                    self._normalized_levenshtein_distance(candidate, selected_seq)
+                    for selected_seq in selected
+                )
+                score = (
+                    (1.0 - candidate_diversity_strength) * normalized_acquisition[candidate]
+                    + candidate_diversity_strength * novelty
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best_candidate = candidate
+
+            selected.append(best_candidate)
+            remaining.remove(best_candidate)
+
+        return selected
+
+    def _select_top_predictions(
+        self,
+        predictions: Dict[str, tuple],
+        k: int,
+        acquisition_function: str,
+        acquisition_kwargs: Dict[str, Any] = None,
+        candidate_diversity_strength: float = 0.0
+    ) -> List[str]:
         if acquisition_kwargs is None:
             acquisition_kwargs = {}
+        if k <= 0:
+            return []
+        if not (0.0 <= candidate_diversity_strength <= 1.0):
+            raise ValueError(
+                "candidate_diversity_strength must be in [0, 1], "
+                f"got {candidate_diversity_strength}"
+            )
         acquisition_values = self.acquisition_function_obj.compute_acquisition(
             predictions, 
             acquisition_function, 
             **acquisition_kwargs
         )
-        return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
+        if not acquisition_values:
+            return []
+        if candidate_diversity_strength == 0.0:
+            return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
+        return self._select_diverse_predictions(
+            acquisition_values,
+            k,
+            candidate_diversity_strength
+        )

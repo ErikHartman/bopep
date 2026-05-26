@@ -248,6 +248,7 @@ class TestBoGA:
         assert boga.max_sequence_length == 25  # From config defaults
         assert boga.n_init == 100  # From config defaults
         assert boga.pca_n_components == 10
+        assert boga.candidate_diversity_strength == 0.0
 
     def test_init_custom_params(self, mock_dependencies, basic_surrogate_kwargs, basic_docker_kwargs, basic_scoring_kwargs):
         """Test BoGA initialization with custom parameters"""
@@ -261,6 +262,7 @@ class TestBoGA:
             min_sequence_length=4,
             max_sequence_length=20,
             mutation_rate=0.05,
+            candidate_diversity_strength=0.4,
             embed_method='aaindex',
             pca_n_components=5,
             surrogate_model_kwargs=basic_surrogate_kwargs,
@@ -272,8 +274,21 @@ class TestBoGA:
         assert boga.min_sequence_length == 4
         assert boga.max_sequence_length == 20
         assert boga.mutation_rate == 0.05
+        assert boga.candidate_diversity_strength == 0.4
         assert boga.embed_method == 'aaindex'
         assert boga.pca_n_components == 5
+
+    def test_init_invalid_candidate_diversity_strength(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test candidate diversity strength validation."""
+        with pytest.raises(ValueError, match="candidate_diversity_strength must be in \\[0, 1\\]"):
+            BoGA(
+                mode='binding',
+                target_structure_path="/fake/path.pdb",
+                initial_sequences="ACDEFG",
+                candidate_diversity_strength=1.5,
+                pca_n_components=10,
+                surrogate_model_kwargs=basic_surrogate_kwargs
+            )
 
     def test_init_no_pca_components_error(self, mock_dependencies, basic_surrogate_kwargs, basic_docker_kwargs, basic_scoring_kwargs):
         """Test that initialization uses config default when pca_n_components not provided"""
@@ -577,6 +592,81 @@ class TestBoGA:
         
         assert len(top_seqs) == 2
         assert "SEQ2" in top_seqs  # Highest acquisition value
+
+    def test_normalized_levenshtein_distance(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test normalized Levenshtein distance used for candidate diversity."""
+        boga = BoGA(
+            mode='binding',
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+
+        assert boga._normalized_levenshtein_distance("AAAA", "AAAA") == 0.0
+        assert boga._normalized_levenshtein_distance("AAAA", "AAAT") == 0.25
+        assert boga._normalized_levenshtein_distance("AAAA", "TTTT") == 1.0
+        assert boga._normalized_levenshtein_distance("AAA", "AAAA") == 0.25
+
+    def test_select_top_predictions_diversity_strength_zero_preserves_ranking(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test diversity strength 0.0 keeps pure acquisition ranking."""
+        boga = BoGA(
+            mode='binding',
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+
+        predictions = {
+            "AAAA": (0.5, 0.1),
+            "AAAT": (0.6, 0.2),
+            "TTTT": (0.4, 0.3)
+        }
+        mock_dependencies['acq_func'].compute_acquisition.return_value = {
+            "AAAA": 1.0,
+            "AAAT": 0.9,
+            "TTTT": 0.85
+        }
+
+        top_seqs = boga._select_top_predictions(
+            predictions,
+            k=2,
+            acquisition_function='ei',
+            candidate_diversity_strength=0.0
+        )
+
+        assert top_seqs == ["AAAA", "AAAT"]
+
+    def test_select_top_predictions_additive_sequence_diversity(self, mock_dependencies, basic_surrogate_kwargs):
+        """Test additive Levenshtein novelty can prefer a farther candidate."""
+        boga = BoGA(
+            mode='binding',
+            target_structure_path="/fake/path.pdb",
+            initial_sequences="ACDEFG",
+            pca_n_components=10,
+            surrogate_model_kwargs=basic_surrogate_kwargs
+        )
+
+        predictions = {
+            "AAAA": (0.5, 0.1),
+            "AAAT": (0.6, 0.2),
+            "TTTT": (0.4, 0.3)
+        }
+        mock_dependencies['acq_func'].compute_acquisition.return_value = {
+            "AAAA": 1.0,
+            "AAAT": 0.9,
+            "TTTT": 0.85
+        }
+
+        top_seqs = boga._select_top_predictions(
+            predictions,
+            k=2,
+            acquisition_function='ei',
+            candidate_diversity_strength=0.7
+        )
+
+        assert top_seqs == ["AAAA", "TTTT"]
 
     def test_load_from_logs(self, mock_dependencies, basic_surrogate_kwargs, temp_dir):
         """Test loading previous results from log files"""
