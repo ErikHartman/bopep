@@ -106,6 +106,8 @@ The core of the BoPep framework lies in searching large datasets for binders. It
   <img src="assets/bopep.png" width="1000", alt="BoPep">
 </p>
 
+The run-scripts for the BoPep search presented in the paper is present in `/examples/run_scipts_bopep/`.
+
 ### Protein design with RFdiffusion + Relax + ProteinMPNN, followed by search (BoRF)
 We also provide a way to generate large candidate datasets using an RFdiffusion + ProteinMPNN + FastRelax pipeline. By sampling lengths and hotspots we generate a large diverse dataset of candidate sequences. We can then apply the BoPep search on the datasets, leading to less computationally expensive design of binders.
 <p align="center">
@@ -118,10 +120,12 @@ The surrogate models can also be leveraged for protein design, in an evolutionar
   <img src="assets/boga.png" width="1000", alt="BoPep">
 </p>
 
+## Testing
+BoPep has been tested on Python versions 3.10-3.13 on both Apple Silicon and modern NVIDIA-GPUs. The time it takes to run BoPep search, BoRF and BoGA depends on hyperparameters. Example data to demo BoPep can be found in `/data/`, including some peptides and structures.
 
 ## Changelog
 
-We're currently keeping an informal changelog here. As the project goes public we will switch to best practices.
+We're currently keeping an informal changelog here. As the project goes public we will switch to versioning.
 
 ### 27 Nov 2025 $\rightarrow$ current
 I consider this **version 1** due to major changes in the workflow. Here, the package expanded to sequence optimization OVERALL. This included unconditional and sequence generation. As such, many APIs and variables were changed from "peptide" to "sequence". Some examples in `/examples` may still be outdated and be called "peptide" or "pep".
