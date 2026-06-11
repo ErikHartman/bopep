@@ -8,6 +8,7 @@ import yaml
 from typing import List, Tuple
 from bopep.docking.docker import Docker
 from bopep.docking.boltz_docker import BoltzDocker
+from bopep.docking.openfold3_docker import OpenFold3Docker
 from bopep.docking.base_docking_model import BaseDockingModel
 from bopep.structure.parser import extract_sequence_from_structure
 
@@ -39,6 +40,14 @@ class TestDocker:
         assert docker.models == ["alphafold", "boltz"]
         assert docker.output_dir == "/tmp"
 
+    def test_init_openfold3_model(self):
+        """Test Docker initialization with OpenFold3 model."""
+        docker_kwargs = {"output_dir": "/tmp", "models": ["openfold3"]}
+        docker = Docker(docker_kwargs)
+
+        assert docker.models == ["openfold3"]
+        assert docker.output_dir == "/tmp"
+
     
 
     def test_set_target_structure_nonexistent_file(self):
@@ -56,6 +65,22 @@ class TestDocker:
         
         with pytest.raises(ValueError, match="Target structure not set"):
             docker.dock_sequences([])
+
+    def test_dock_sequences_dispatches_openfold3(self):
+        """Test docking dispatch calls OpenFold3 backend when requested."""
+        docker_kwargs = {"output_dir": "/tmp", "models": ["openfold3"]}
+        docker = Docker(docker_kwargs)
+
+        docker.target_structure_path = "/tmp/mock_target.pdb"
+        docker.target_sequence = "MOCKSEQ"
+        docker.target_name = "mock_target"
+
+        expected_dirs = ["/tmp/processed/mock_target_ABC"]
+        with patch.object(docker, "_dock_with_openfold3", return_value=expected_dirs) as mocked_method:
+            docked = docker.dock_sequences(["ABC"])
+
+        mocked_method.assert_called_once_with(["ABC"])
+        assert docked == expected_dirs
 
 
 class TestDockingUtils:
@@ -429,3 +454,106 @@ class TestBoltzDocker:
             
             with pytest.raises(ValueError, match="Unsupported file format"):
                 boltz._prepare_template_file(unsupported_path, temp_dir)
+
+
+class TestOpenFold3Docker:
+    """Test OpenFold3 backend query/command/output handling."""
+
+    def test_build_default_run_openfold_command(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docker = OpenFold3Docker(
+                output_dir=temp_dir,
+                num_models=3,
+                num_model_seeds=2,
+                openfold3_use_msa_server=False,
+                openfold3_use_templates=False,
+                openfold3_runner_yaml="/tmp/runner.yaml",
+                openfold3_inference_ckpt_name="openfold3_p2_v1",
+            )
+
+            cmd = docker._build_openfold3_command(
+                query_json_path="/tmp/query.json",
+                output_dir="/tmp/out",
+                target_structure="/tmp/target.cif",
+                target_sequence="AAAA",
+                sequence_sequence="BBBB",
+                target_name="target",
+            )
+
+            cmd_text = " ".join(cmd)
+            assert cmd[0] == "run_openfold"
+            assert "predict" in cmd
+            assert "--query-json /tmp/query.json" in cmd_text
+            assert "--output-dir /tmp/out" in cmd_text
+            assert "--num-diffusion-samples 3" in cmd_text
+            assert "--num-model-seeds 2" in cmd_text
+            assert "--use-msa-server=False" in cmd_text
+            assert "--use-templates=False" in cmd_text
+            assert "--runner-yaml /tmp/runner.yaml" in cmd_text
+            assert "--inference-ckpt-name openfold3_p2_v1" in cmd_text
+
+    def test_create_query_json_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docker = OpenFold3Docker(output_dir=temp_dir)
+
+            query_path = docker._create_query_json(
+                raw_sequence_dir=temp_dir,
+                target_name="5cr6",
+                sequence_sequence="PEPTIDE",
+                target_sequence="TARGETSEQ",
+            )
+
+            with open(query_path) as f:
+                query = json.load(f)
+
+            assert isinstance(query, dict)
+            assert "queries" in query
+            assert "5cr6_PEPTIDE" in query["queries"]
+            query_object = query["queries"]["5cr6_PEPTIDE"]
+            assert "chains" in query_object
+            assert query_object["chains"][0]["molecule_type"] == "protein"
+            assert query_object["chains"][0]["chain_ids"] == "A"
+            assert query_object["chains"][1]["chain_ids"] == "B"
+
+    def test_process_raw_output_ranks_by_sample_ranking_score(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docker = OpenFold3Docker(output_dir=temp_dir)
+
+            raw_dir = os.path.join(temp_dir, "raw", "openfold3", "target_PEP")
+            os.makedirs(raw_dir, exist_ok=True)
+            seed_dir = os.path.join(raw_dir, "query_1", "seed_42")
+            os.makedirs(seed_dir, exist_ok=True)
+
+            low_model = os.path.join(seed_dir, "query_1_seed_42_sample_1_model.cif")
+            high_model = os.path.join(seed_dir, "query_1_seed_42_sample_2_model.cif")
+
+            with open(low_model, "w") as f:
+                f.write("data_low")
+            with open(high_model, "w") as f:
+                f.write("data_high")
+
+            with open(
+                os.path.join(seed_dir, "query_1_seed_42_sample_1_confidences_aggregated.json"),
+                "w",
+            ) as f:
+                json.dump({"sample_ranking_score": 0.1, "iptm": 0.2, "ptm": 0.3}, f)
+
+            with open(
+                os.path.join(seed_dir, "query_1_seed_42_sample_2_confidences_aggregated.json"),
+                "w",
+            ) as f:
+                json.dump({"sample_ranking_score": 0.9, "iptm": 0.8, "ptm": 0.7}, f)
+
+            processed_dir = docker.process_raw_output(raw_dir, "PEP", "target")
+            metrics_path = os.path.join(processed_dir, "openfold3_metrics.json")
+
+            with open(metrics_path) as f:
+                metrics = json.load(f)
+
+            assert metrics["model_count"] == 2
+            assert metrics["best_model_index"] == 1
+            assert metrics["sample_ranking_score"] == 0.9
+            assert metrics["iptm"] == 0.8
+
+            top_model_path = os.path.join(processed_dir, "openfold3_model_1.cif")
+            assert os.path.exists(top_model_path)

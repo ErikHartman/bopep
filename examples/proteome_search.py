@@ -18,7 +18,7 @@ def main():
     ]
 
     DOCKING_KWARGS = {
-        "models": ["alphafold"],               # Docking backend(s): 'alphafold' and/or 'boltz'
+        "models": ["alphafold"],               # Docking backend(s): 'alphafold', 'boltz', and/or 'openfold3'
         "num_models": 5,                       # AlphaFold: number of model replicates per sequence
         "num_recycles": 10,                    # AlphaFold: structure-refinement recycling iterations
         "recycle_early_stop_tolerance": 0.1,  # AlphaFold: stop recycling early if Cα RMSD change < threshold

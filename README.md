@@ -16,7 +16,7 @@ BoPep search and BoRF are showcased in the [BoPep preprint](https://www.biorxiv.
 
 ## Installation
 
-To run `bopep` locally, you will need to clone this repository, as well as dependencies which vary based on what you want to optimize for. If you wish to use AlphaFold and/or Boltz, you will need to install [**LocalColabFold**](https://github.com/YoshitakaMo/localcolabfold) and/or [**Boltz**](https://github.com/jwohlwend/boltz). [**PyRosetta**](https://www.pyrosetta.org/) is always needed as well as other dependencies included in `requirements.txt`. Follow the steps below to set up your environment:
+To run `bopep` locally, you will need to clone this repository, as well as dependencies which vary based on what you want to optimize for. If you wish to use AlphaFold, Boltz and/or OpenFold3, you will need to install [**LocalColabFold**](https://github.com/YoshitakaMo/localcolabfold), [**Boltz**](https://github.com/jwohlwend/boltz), and/or your preferred OpenFold3 repository setup. [**PyRosetta**](https://www.pyrosetta.org/) is always needed as well as other dependencies included in `requirements.txt`. Follow the steps below to set up your environment:
 
 ### Step 1: Clone the Repository
 
@@ -54,6 +54,26 @@ This should work if you follow the instructions in the LocalColabFold git repo.
 
 1. (b) If you would like to dock with Boltz: **Install Boltz**: Boltz-2 is another nice way of docking through co-folding. Follow the installation procedure [here](https://github.com/jwohlwend/boltz) to install Boltz-2. Make sure you can run boltz after installing.
 
+1. (c) If you would like to dock with OpenFold3: **Install OpenFold3**: install your OpenFold3 repository/CLI and verify `run_openfold` is callable in your BOPEP environment.
+
+  BOPEP now supports OpenFold3 natively via:
+
+  - `run_openfold predict --query-json ... --output-dir ...`
+
+  In `docker_kwargs`, set:
+
+  - `models: ['openfold3']`
+  - `openfold3_binary: 'run_openfold'` (default)
+  - `openfold3_subcommand: 'predict'` (default)
+  - `openfold3_use_msa_server: true|false`
+  - `num_models`: maps to `--num-diffusion-samples`
+  - `num_model_seeds`: maps to `--num-model-seeds`
+  - optional: `openfold3_runner_yaml`, `openfold3_inference_ckpt_path`, `openfold3_inference_ckpt_name`
+
+  For custom OpenFold3 forks/entrypoints, you can still override the full command with
+  `openfold3_command_template`. Supported placeholders are:
+  `{query_json}`, `{output_dir}`, `{target_structure}`, `{target_sequence}`, `{sequence}`, `{target_name}`, `{num_models}`, `{num_model_seeds}`.
+
 
 2. **Install PyRosetta**: PyRosetta is freely available for academic users and is used to score complexes. Any commercial usage requires the purchasing of a license.
 
@@ -89,7 +109,7 @@ The task of the surrogate model is to learn a mapping between the embedding and 
 The probibalistic modalities include: an ensemble of networks, MC dropout, deep evidential regression and mean-variance estimation.
 
 ### Structure prediction
-Docking is performed to predict the complex structure given a target and a sequence. We support docking via co-folding using AlphaFold 2 implemented via ColabFold and/or Boltz-2. For monomer structure prediction, we support AlphaFold 2 implemented via ColabFold.
+Docking is performed to predict the complex structure given a target and a sequence. We support docking via co-folding using AlphaFold 2 implemented via ColabFold, Boltz-2, and OpenFold3 (via configurable CLI command template). For monomer structure prediction, we support AlphaFold 2 implemented via ColabFold.
 
 ### Scoring
 Scoring of complexes defines the fitness/reward which is maximized during search. When searching for binders, it should correlate with binding probability/affinity. We have defined a score called `benchmark_objective_v1` using data from PDBBind and symbolic regression. You can also provide your own objective function easily.

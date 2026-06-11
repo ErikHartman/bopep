@@ -71,7 +71,7 @@ def main():
         },
 
         docker_kwargs={
-            'models': ['boltz'],                  # Docking backend(s): 'boltz' and/or 'alphafold'
+            'models': ['boltz'],                  # Docking backend(s): 'boltz', 'alphafold', and/or 'openfold3'
             'output_dir': '/path/to/docking_output',  # Directory where docking results are written
             'num_models': 3,                      # Number of structure models generated per sequence (Boltz: diffusion_samples)
             'num_recycles': 5,                    # Recycling iterations for AlphaFold (ignored by Boltz)

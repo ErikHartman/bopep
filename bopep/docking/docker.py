@@ -3,6 +3,7 @@ import string
 from typing import Tuple
 from bopep.docking.alphafold_docker import AlphaFoldDocker
 from bopep.docking.boltz_docker import BoltzDocker
+from bopep.docking.openfold3_docker import OpenFold3Docker
 from bopep.structure.parser import extract_sequence_from_structure, parse_structure
 import os
 from Bio.PDB import PDBIO, Select
@@ -23,6 +24,7 @@ class Docker:
     
     For AlphaFold parameters, see AlphaFoldDocker documentation.
     For Boltz parameters, see BoltzDocker documentation.
+    For OpenFold3 parameters, see OpenFold3Docker documentation.
     """
     def __init__(self, kwargs):
         models = kwargs.pop("models", None)
@@ -34,7 +36,7 @@ class Docker:
             raise ValueError("'models' must be specified.")
         
         # Validate supported models
-        supported_models = ["alphafold", "boltz"]
+        supported_models = ["alphafold", "boltz", "openfold3"]
         for model in self.models:
             if model not in supported_models:
                 raise ValueError(f"Unsupported model: {model}. Supported models are {supported_models}")
@@ -174,6 +176,8 @@ class Docker:
                 docker_dirs = self._dock_with_alphafold(sequences)
             elif model == "boltz":
                 docker_dirs = self._dock_with_boltz(sequences)
+            elif model == "openfold3":
+                docker_dirs = self._dock_with_openfold3(sequences)
             else:
                 raise ValueError(f"Unsupported model: {model}")
             all_docked_dirs[model] = docker_dirs
@@ -222,6 +226,20 @@ class Docker:
             self.target_name
         )
 
+    def _dock_with_openfold3(self, sequences: list):
+        """Dock sequences using OpenFold3."""
+        openfold3_docker = OpenFold3Docker(
+            output_dir=self.output_dir,
+            **self.docking_kwargs
+        )
+
+        return openfold3_docker.dock(
+            sequences,
+            self.target_structure_path,
+            self.target_sequence,
+            self.target_name,
+        )
+
     def _clean_up(self):
         """Remove any temporary files created during processing."""
         if self.temp_pdb_path and os.path.exists(self.temp_pdb_path):
@@ -255,5 +273,23 @@ class Docker:
         if "boltz" in self.models:
             logging.info("Boltz parameters:")
             for param in ["diffusion_samples", "output_format", "sampling_steps", "step_scale"]:
+                if param in self.docking_kwargs:
+                    logging.info(f"  {param}: {self.docking_kwargs[param]}")
+
+        if "openfold3" in self.models:
+            logging.info("OpenFold3 parameters:")
+            for param in [
+                "openfold3_binary",
+                "openfold3_subcommand",
+                "openfold3_use_msa_server",
+                "openfold3_use_templates",
+                "openfold3_runner_yaml",
+                "openfold3_inference_ckpt_path",
+                "openfold3_inference_ckpt_name",
+                "openfold3_command_template",
+                "openfold3_extra_args",
+                "num_models",
+                "num_model_seeds",
+            ]:
                 if param in self.docking_kwargs:
                     logging.info(f"  {param}: {self.docking_kwargs[param]}")
