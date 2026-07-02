@@ -1,6 +1,7 @@
 """
 Tests for the genetic algorithm module.
 """
+import csv
 import pytest
 import numpy as np
 import tempfile
@@ -116,6 +117,22 @@ class TestMutator:
         assert all(isinstance(seq, str) for seq in pool)
         assert all(seq not in evaluated for seq in pool)
         assert all(seq not in parents for seq in pool)
+
+    def test_mutate_pool_with_parents(self):
+        """Test mutation pool lineage mapping."""
+        mutator = Mutator(
+            min_sequence_length=5,
+            max_sequence_length=10,
+            mutation_rate=0.2
+        )
+
+        with patch.object(mutator, "mutate_sequence", side_effect=["AAAAC", "AAAAD"]):
+            child_to_parent = mutator.mutate_pool_with_parents(["AAAAA"], 2, set())
+
+        assert child_to_parent == {
+            "AAAAC": "AAAAA",
+            "AAAAD": "AAAAA",
+        }
 
     def test_mutate_pool_large_evaluated_set(self):
         """Test mutation pool with large evaluated set"""
@@ -394,6 +411,44 @@ class TestBoGA:
         assert len(sequences) >= 5
         for seq in initial_seqs:
             assert seq in sequences
+            assert boga._sequence_parents[seq] is None
+
+        assert any(
+            parent in sequences
+            for seq, parent in boga._sequence_parents.items()
+            if seq not in initial_seqs
+        )
+
+    def test_log_lineage_file_records_parent_metadata(self, temp_dir):
+        """Test BoGA lineage CSV records parent-child metadata."""
+        assert BoGA._lineage_filename_for_scores_file("/tmp/scores_1.csv") == "lineage_1.csv"
+
+        boga = BoGA.__new__(BoGA)
+        boga._lineage_file = Path(temp_dir) / "lineage.csv"
+
+        boga._log_lineage(
+            {
+                "AAAAA": None,
+                "AAAAT": "AAAAA",
+                "AAAAG": "AAAAA",
+            },
+            generation=0,
+            selected_sequences=["AAAAA", "AAAAT"],
+        )
+
+        with open(boga._lineage_file, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+
+        assert len(rows) == 2
+        assert list(rows[0].keys()) == ["generation", "parent_sequence", "child_sequence"]
+        assert rows[0]["generation"] == "0"
+        assert rows[0]["parent_sequence"] == ""
+        assert rows[0]["child_sequence"] == "AAAAA"
+
+        assert rows[1]["generation"] == "0"
+        assert rows[1]["parent_sequence"] == "AAAAA"
+        assert rows[1]["child_sequence"] == "AAAAT"
+        assert "AAAAG" not in {row["child_sequence"] for row in rows}
 
     def test_prepare_initial_population_many_sequences(self, mock_dependencies, basic_surrogate_kwargs):
         """Test initial population when we have more sequences than needed"""

@@ -1,3 +1,4 @@
+import csv
 import random
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Union, Tuple
@@ -297,6 +298,100 @@ class BoGA:
             self.logger = None
 
         self._evaluated_sequences  = set()
+        self._sequence_parents: Dict[str, Optional[str]] = {}
+        self._lineage_file = None
+        if self.logger and hasattr(self.logger, 'log_dir') and isinstance(self.logger.log_dir, (str, Path)):
+            scores_file = getattr(self.logger, '_scores_file', None)
+            self._lineage_file = self._setup_lineage_file(
+                self.logger.log_dir,
+                overwrite=self.continue_from_logs is None,
+                scores_file=scores_file if isinstance(scores_file, (str, Path)) else None,
+            )
+
+    @staticmethod
+    def _get_unique_lineage_filename(path: Path) -> Path:
+        name = path.stem
+        suffix = path.suffix
+        i = 1
+        candidate = path
+        while candidate.exists():
+            candidate = path.with_name(f"{name}_{i}{suffix}")
+            i += 1
+        return candidate
+
+    @staticmethod
+    def _lineage_filename_for_scores_file(scores_file: Optional[Union[str, Path]]) -> str:
+        if scores_file is None:
+            return "lineage.csv"
+
+        scores_stem = Path(scores_file).stem
+        if scores_stem.startswith("scores_"):
+            return f"lineage_{scores_stem.removeprefix('scores_')}.csv"
+        return "lineage.csv"
+
+    def _setup_lineage_file(
+        self,
+        log_dir: Union[str, Path],
+        overwrite: bool,
+        scores_file: Optional[Union[str, Path]] = None,
+    ) -> Path:
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
+        lineage_file = log_path / self._lineage_filename_for_scores_file(scores_file)
+
+        if lineage_file.exists():
+            if overwrite:
+                lineage_file.unlink()
+            else:
+                lineage_file = self._get_unique_lineage_filename(lineage_file)
+
+        return lineage_file
+
+    @staticmethod
+    def _levenshtein_distance(seq_a: str, seq_b: str) -> int:
+        if seq_a == seq_b:
+            return 0
+
+        previous = list(range(len(seq_b) + 1))
+        for i, char_a in enumerate(seq_a, start=1):
+            current = [i]
+            for j, char_b in enumerate(seq_b, start=1):
+                insertion = current[j - 1] + 1
+                deletion = previous[j] + 1
+                substitution = previous[j - 1] + (char_a != char_b)
+                current.append(min(insertion, deletion, substitution))
+            previous = current
+
+        return previous[-1]
+
+    def _log_lineage(
+        self,
+        child_to_parent: Dict[str, Optional[str]],
+        generation: int,
+        selected_sequences: Optional[List[str]] = None,
+    ) -> None:
+        if self._lineage_file is None or not child_to_parent:
+            return
+
+        if selected_sequences is not None:
+            selected_set = set(selected_sequences)
+            child_to_parent = {
+                child: parent
+                for child, parent in child_to_parent.items()
+                if child in selected_set
+            }
+            if not child_to_parent:
+                return
+
+        write_header = not self._lineage_file.exists() or self._lineage_file.stat().st_size == 0
+
+        with open(self._lineage_file, "a", newline="", encoding="utf-8") as f:
+            wr = csv.writer(f)
+            if write_header:
+                wr.writerow(["generation", "parent_sequence", "child_sequence"])
+
+            for child, parent in child_to_parent.items():
+                wr.writerow([generation, parent or "", child])
 
     def _print_leaderboard(self, objectives: Dict[str, Any], generation: int, print_n: int = 5, objective_directions: Dict[str, str] = None):
         """Print leaderboard for both single and multi-objective cases."""
@@ -337,16 +432,22 @@ class BoGA:
             # Single sequence provided - mutate until we have enough UNIQUE sequences
             base_sequence = self.initial_sequences
             sequences = {base_sequence}
+            self._sequence_parents[base_sequence] = None
             
             # Keep mutating until we have enough unique sequences
             while len(sequences) < self.n_init:
                 # Mutate a random sequence from our current set (more diversity)
                 parent = random.choice(list(sequences))
                 new_seq = self.mutator.mutate_sequence(parent, self._evaluated_sequences)  # Always forces change now
+                if new_seq not in sequences:
+                    self._sequence_parents[new_seq] = parent
                 sequences.add(new_seq)
             return list(sequences)
         
         elif isinstance(self.initial_sequences, list):
+            for seq in self.initial_sequences:
+                self._sequence_parents.setdefault(seq, None)
+
             if len(self.initial_sequences) >= self.n_init:
                 return self.initial_sequences
             else:
@@ -354,7 +455,10 @@ class BoGA:
 
                 while len(sequences) < self.n_init:
                     parent = random.choice(list(sequences))
-                    sequences.add(self.mutator.mutate_sequence(parent, self._evaluated_sequences))
+                    new_seq = self.mutator.mutate_sequence(parent, self._evaluated_sequences)
+                    if new_seq not in sequences:
+                        self._sequence_parents[new_seq] = parent
+                    sequences.add(new_seq)
                 return list(sequences)
         else:
             raise ValueError("initial_sequences must be None, a string, or a list of strings")
@@ -673,6 +777,11 @@ class BoGA:
             if self.logger:
                 self.logger.log_scores(scores, iteration=0, acquisition_name="initial")
                 self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
+                self._log_lineage(
+                    {seq: self._sequence_parents.get(seq) for seq in init_seqs},
+                    generation=0,
+                    selected_sequences=init_seqs,
+                )
 
             # Show initial population leaderboard
             print("Initial population results:")
@@ -738,7 +847,14 @@ class BoGA:
                 )
                 print(f"Selected top {len(parents)} parents for mutation")
                 
-                pool = self.mutator.mutate_pool(parents, self.k_propose, self._evaluated_sequences, objectives)
+                pool_parents = self.mutator.mutate_pool_with_parents(
+                    parents,
+                    self.k_propose,
+                    self._evaluated_sequences,
+                    objectives
+                )
+                self._sequence_parents.update(pool_parents)
+                pool = list(pool_parents)
                 print(f"Generated candidate pool of {len(pool)} sequences")
 
                 # Embed scored sequences + candidates together with fresh scaling/PCA
@@ -785,6 +901,11 @@ class BoGA:
                     self.logger.log_model_metrics(loss, iteration=global_generation, metrics=metrics)
                     self.logger.log_scores(new_scores, iteration=global_generation, acquisition_name=acquisition_function)
                     self.logger.log_objectives(new_objectives, iteration=global_generation, acquisition_name=acquisition_function)
+                    self._log_lineage(
+                        pool_parents,
+                        generation=global_generation,
+                        selected_sequences=candidates,
+                    )
                     
                     if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0 and self.surrogate_manager.best_hyperparams:
                         self.logger.log_hyperparameters(
@@ -901,24 +1022,11 @@ class BoGA:
         """
         Return Levenshtein distance normalized to [0, 1] by the longer sequence length.
         """
-        if seq_a == seq_b:
-            return 0.0
-
         max_len = max(len(seq_a), len(seq_b))
         if max_len == 0:
             return 0.0
 
-        previous = list(range(len(seq_b) + 1))
-        for i, char_a in enumerate(seq_a, start=1):
-            current = [i]
-            for j, char_b in enumerate(seq_b, start=1):
-                insertion = current[j - 1] + 1
-                deletion = previous[j] + 1
-                substitution = previous[j - 1] + (char_a != char_b)
-                current.append(min(insertion, deletion, substitution))
-            previous = current
-
-        return previous[-1] / max_len
+        return BoGA._levenshtein_distance(seq_a, seq_b) / max_len
 
     @staticmethod
     def _normalize_scores(values: Dict[str, float]) -> Dict[str, float]:
