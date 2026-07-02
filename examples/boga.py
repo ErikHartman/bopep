@@ -47,6 +47,7 @@ def main():
 
         n_init=100,          # Number of sequences docked during the initialisation round
         mutation_rate=0.05,  # Per-residue probability of a random mutation each generation
+        candidate_diversity_strength=0.0,  # Levenshtein novelty weight for selected candidates (0 disables)
 
         surrogate_model_kwargs={
             'model_type': 'deep_evidential',  # Uncertainty-aware model: 'deep_evidential', 'nn_ensemble', 'mc_dropout', or 'mve'

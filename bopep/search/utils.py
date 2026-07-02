@@ -104,14 +104,35 @@ def _validate_surrogate_model_kwargs(surrogate_model_kwargs: dict):
     valid_network_types = ["mlp", "bilstm", "bigru"]
     valid_model_types = ["nn_ensemble", "mc_dropout", "deep_evidential", "mve"]
 
+    custom_model = None
+    for key in ("custom_model", "surrogate_model", "model"):
+        if key in surrogate_model_kwargs:
+            custom_model = surrogate_model_kwargs[key]
+            break
+
     network_type = surrogate_model_kwargs.get("network_type")
+    model_type = surrogate_model_kwargs.get("model_type")
+
+    if model_type == "custom" or custom_model is not None:
+        if custom_model is None:
+            raise ValueError(
+                "Custom surrogate configuration requires a custom_model, "
+                "surrogate_model, or model entry."
+            )
+        predict_method = getattr(custom_model, "predict_dict", None)
+        if not callable(predict_method) and not callable(custom_model):
+            raise TypeError(
+                "Custom surrogate models must expose predict_dict(input_dict, **kwargs) "
+                "or be callable with input_dict."
+            )
+        return
+
     if network_type not in valid_network_types:
         raise ValueError(
             f"Invalid network type: {network_type}. "
             f"Must be one of: {', '.join(valid_network_types)}"
         )
 
-    model_type = surrogate_model_kwargs.get("model_type")
     if model_type not in valid_model_types:
         raise ValueError(
             f"Invalid model type: {model_type}. "
@@ -157,4 +178,3 @@ def _validate_args(
                 f"When n_validate is an integer, it must be positive, got {n_validate}"
             )
         
-

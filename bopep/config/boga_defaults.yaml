@@ -22,6 +22,7 @@ selection:
   beta: 1.0                 # Temperature parameter for exponential selection
   adalead_k: 0.05           # Adaptive threshold parameter for AdaLead (0-1)
   selection_pool: 'full_history'  # Pool to select from: 'full_history' or 'last_batch'
+  candidate_diversity_strength: 0.0  # Additive Levenshtein novelty weight for final candidate selection (0-1)
 
 # Surrogate model configuration
 surrogate_model:

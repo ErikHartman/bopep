@@ -1,3 +1,4 @@
+import csv
 import random
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Union, Tuple
@@ -17,6 +18,16 @@ from bopep.logging.logger import Logger
 from bopep.genetic_algorithm.mutate import Mutator
 from bopep.config import Config
 import torch
+
+
+_DEFAULT_EMBED_METHOD = object()
+
+
+def _has_custom_surrogate(surrogate_model_kwargs: Dict[str, Any]) -> bool:
+    return (
+        surrogate_model_kwargs.get('model_type') == 'custom'
+        or any(key in surrogate_model_kwargs for key in ('custom_model', 'surrogate_model', 'model'))
+    )
 
 
 class BoGA:
@@ -42,7 +53,7 @@ class BoGA:
         docker_kwargs: Optional[Dict[str, Any]] = None,
         mutation_rate: Optional[float] = None,
         # Embedding options
-        embed_method: Optional[str] = None,
+        embed_method: Optional[str] = _DEFAULT_EMBED_METHOD,
         embed_model_path: Optional[str] = None,
         embed_batch_size: Optional[int] = None,
         embed_device: Optional[str] = None,
@@ -60,12 +71,14 @@ class BoGA:
         beta: Optional[float] = None,
         adalead_k: Optional[float] = None,
         selection_pool: Optional[str] = None,
+        candidate_diversity_strength: Optional[float] = None,
         # Logging options
         log_dir: Optional[str] = None,
         # Continuation options
         continue_from_logs: Optional[str] = None,
         # Config object 
         config: Optional[Config] = None,
+        custom_surrogate_model: Optional[Any] = None,
     ):
         # Initialize or load config
         if config is None:
@@ -100,8 +113,9 @@ class BoGA:
         self.mutation_rate = get_param(mutation_rate, 'mutation_rate')
         
         # Get surrogate model kwargs
+        user_provided_surrogate_kwargs = surrogate_model_kwargs is not None
         if surrogate_model_kwargs is not None:
-            self.surrogate_model_kwargs = surrogate_model_kwargs
+            self.surrogate_model_kwargs = dict(surrogate_model_kwargs)
         else:
             # Extract from flattened config
             self.surrogate_model_kwargs = {
@@ -111,6 +125,25 @@ class BoGA:
                 'n_splits': cfg.get('surrogate_model.n_splits'),
                 'hpo_interval': cfg.get('surrogate_model.hpo_interval'),
             }
+
+        if custom_surrogate_model is not None:
+            self.surrogate_model_kwargs['custom_model'] = custom_surrogate_model
+
+        if _has_custom_surrogate(self.surrogate_model_kwargs):
+            self.surrogate_model_kwargs['model_type'] = 'custom'
+            if custom_surrogate_model is not None and not user_provided_surrogate_kwargs:
+                self.surrogate_model_kwargs['network_type'] = 'custom'
+            else:
+                self.surrogate_model_kwargs.setdefault('network_type', 'custom')
+
+        for key, config_key in {
+            'n_trials': 'surrogate_model.n_trials',
+            'n_splits': 'surrogate_model.n_splits',
+            'hpo_interval': 'surrogate_model.hpo_interval',
+        }.items():
+            self.surrogate_model_kwargs.setdefault(key, cfg.get(config_key))
+
+        self._uses_custom_surrogate = _has_custom_surrogate(self.surrogate_model_kwargs)
         _validate_surrogate_model_kwargs(self.surrogate_model_kwargs)
         
         # Get scoring kwargs
@@ -141,6 +174,17 @@ class BoGA:
         self.beta = get_param(beta, 'selection.beta')
         self.adalead_k = get_param(adalead_k, 'selection.adalead_k')
         self.selection_pool = get_param(selection_pool, 'selection.selection_pool')
+        self.candidate_diversity_strength = get_param(
+            candidate_diversity_strength,
+            'selection.candidate_diversity_strength'
+        )
+        if self.candidate_diversity_strength is None:
+            self.candidate_diversity_strength = 0.0
+        if not (0.0 <= self.candidate_diversity_strength <= 1.0):
+            raise ValueError(
+                "candidate_diversity_strength must be in [0, 1], "
+                f"got {self.candidate_diversity_strength}"
+            )
         
         # Logging options
         self.continue_from_logs = get_param(continue_from_logs, 'logging.continue_from_logs')
@@ -150,21 +194,30 @@ class BoGA:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         # Get embedding configuration
-        self.embed_method = get_param(embed_method, 'embedding.method').lower()
+        embed_method_value = cfg.get('embedding.method') if embed_method is _DEFAULT_EMBED_METHOD else embed_method
+        self.embed_method = embed_method_value.lower() if isinstance(embed_method_value, str) else None
         self.embed_model_path = get_param(embed_model_path, 'embedding.model_path')
         self.embed_batch_size = get_param(embed_batch_size, 'embedding.batch_size')
         self.embed_device = get_param(embed_device, 'embedding.device')
         self.pca_n_components = get_param(pca_n_components, 'embedding.pca_n_components')
+
+        if self.embed_method is None:
+            if not self._uses_custom_surrogate:
+                raise ValueError(
+                    "embed_method=None is only supported with a custom surrogate model, "
+                    "because built-in surrogate models require numeric embeddings."
+                )
+            self.pca_n_components = None
         
         # Auto-detect embedding averaging based on network type
-        network_type = self.surrogate_model_kwargs.get('network_type', 'mlp').lower()
+        network_type = (self.surrogate_model_kwargs.get('network_type') or 'mlp').lower()
         if network_type == "mlp":
             self.embed_average = True
         else:
             self.embed_average = False
         
         # Enforce fixed PCA dimensions for consistent neural network training
-        if self.pca_n_components is None:
+        if self.embed_method is not None and self.pca_n_components is None:
             raise ValueError(
                 "pca_n_components must be specified to ensure dimensional consistency. "
                 "Use a fixed value (e.g., pca_n_components=20) for stable neural network training."
@@ -220,6 +273,8 @@ class BoGA:
             min_sequence_length=self.min_sequence_length,
             max_sequence_length=self.max_sequence_length,
             mutation_rate=self.mutation_rate,
+            p_ins = 0.3,
+            p_del = 0.3,
         )
         
         # Initialize surrogate model manager
@@ -243,6 +298,100 @@ class BoGA:
             self.logger = None
 
         self._evaluated_sequences  = set()
+        self._sequence_parents: Dict[str, Optional[str]] = {}
+        self._lineage_file = None
+        if self.logger and hasattr(self.logger, 'log_dir') and isinstance(self.logger.log_dir, (str, Path)):
+            scores_file = getattr(self.logger, '_scores_file', None)
+            self._lineage_file = self._setup_lineage_file(
+                self.logger.log_dir,
+                overwrite=self.continue_from_logs is None,
+                scores_file=scores_file if isinstance(scores_file, (str, Path)) else None,
+            )
+
+    @staticmethod
+    def _get_unique_lineage_filename(path: Path) -> Path:
+        name = path.stem
+        suffix = path.suffix
+        i = 1
+        candidate = path
+        while candidate.exists():
+            candidate = path.with_name(f"{name}_{i}{suffix}")
+            i += 1
+        return candidate
+
+    @staticmethod
+    def _lineage_filename_for_scores_file(scores_file: Optional[Union[str, Path]]) -> str:
+        if scores_file is None:
+            return "lineage.csv"
+
+        scores_stem = Path(scores_file).stem
+        if scores_stem.startswith("scores_"):
+            return f"lineage_{scores_stem.removeprefix('scores_')}.csv"
+        return "lineage.csv"
+
+    def _setup_lineage_file(
+        self,
+        log_dir: Union[str, Path],
+        overwrite: bool,
+        scores_file: Optional[Union[str, Path]] = None,
+    ) -> Path:
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
+        lineage_file = log_path / self._lineage_filename_for_scores_file(scores_file)
+
+        if lineage_file.exists():
+            if overwrite:
+                lineage_file.unlink()
+            else:
+                lineage_file = self._get_unique_lineage_filename(lineage_file)
+
+        return lineage_file
+
+    @staticmethod
+    def _levenshtein_distance(seq_a: str, seq_b: str) -> int:
+        if seq_a == seq_b:
+            return 0
+
+        previous = list(range(len(seq_b) + 1))
+        for i, char_a in enumerate(seq_a, start=1):
+            current = [i]
+            for j, char_b in enumerate(seq_b, start=1):
+                insertion = current[j - 1] + 1
+                deletion = previous[j] + 1
+                substitution = previous[j - 1] + (char_a != char_b)
+                current.append(min(insertion, deletion, substitution))
+            previous = current
+
+        return previous[-1]
+
+    def _log_lineage(
+        self,
+        child_to_parent: Dict[str, Optional[str]],
+        generation: int,
+        selected_sequences: Optional[List[str]] = None,
+    ) -> None:
+        if self._lineage_file is None or not child_to_parent:
+            return
+
+        if selected_sequences is not None:
+            selected_set = set(selected_sequences)
+            child_to_parent = {
+                child: parent
+                for child, parent in child_to_parent.items()
+                if child in selected_set
+            }
+            if not child_to_parent:
+                return
+
+        write_header = not self._lineage_file.exists() or self._lineage_file.stat().st_size == 0
+
+        with open(self._lineage_file, "a", newline="", encoding="utf-8") as f:
+            wr = csv.writer(f)
+            if write_header:
+                wr.writerow(["generation", "parent_sequence", "child_sequence"])
+
+            for child, parent in child_to_parent.items():
+                wr.writerow([generation, parent or "", child])
 
     def _print_leaderboard(self, objectives: Dict[str, Any], generation: int, print_n: int = 5, objective_directions: Dict[str, str] = None):
         """Print leaderboard for both single and multi-objective cases."""
@@ -283,16 +432,22 @@ class BoGA:
             # Single sequence provided - mutate until we have enough UNIQUE sequences
             base_sequence = self.initial_sequences
             sequences = {base_sequence}
+            self._sequence_parents[base_sequence] = None
             
             # Keep mutating until we have enough unique sequences
             while len(sequences) < self.n_init:
                 # Mutate a random sequence from our current set (more diversity)
                 parent = random.choice(list(sequences))
                 new_seq = self.mutator.mutate_sequence(parent, self._evaluated_sequences)  # Always forces change now
+                if new_seq not in sequences:
+                    self._sequence_parents[new_seq] = parent
                 sequences.add(new_seq)
             return list(sequences)
         
         elif isinstance(self.initial_sequences, list):
+            for seq in self.initial_sequences:
+                self._sequence_parents.setdefault(seq, None)
+
             if len(self.initial_sequences) >= self.n_init:
                 return self.initial_sequences
             else:
@@ -300,17 +455,26 @@ class BoGA:
 
                 while len(sequences) < self.n_init:
                     parent = random.choice(list(sequences))
-                    sequences.add(self.mutator.mutate_sequence(parent, self._evaluated_sequences))
+                    new_seq = self.mutator.mutate_sequence(parent, self._evaluated_sequences)
+                    if new_seq not in sequences:
+                        self._sequence_parents[new_seq] = parent
+                    sequences.add(new_seq)
                 return list(sequences)
         else:
             raise ValueError("initial_sequences must be None, a string, or a list of strings")
 
     def _embed_sequences(self, sequences: List[str]) -> Dict[str, Any]:
         """
-        Embed, scale, and apply PCA to a list of sequences.
+        Prepare surrogate inputs for a list of sequences.
+
+        When embed_method is None, the raw sequence strings are passed through.
+        Otherwise, sequences are embedded, scaled, and reduced with PCA.
         """
         if not sequences:
             return {}
+
+        if self.embed_method is None:
+            return {sequence: sequence for sequence in sequences}
         
         # Fresh embed all sequences
         if self.embed_method == 'esm':
@@ -329,7 +493,7 @@ class BoGA:
                 filter=False
             )
         else:
-            raise ValueError("embed_method must be 'esm' or 'aaindex'")
+            raise ValueError("embed_method must be 'esm', 'aaindex', or None")
         
         # Scale and reduce the embeddings
         scaled_embeddings = self.embedder.scale_embeddings(raw_embeddings)
@@ -568,6 +732,7 @@ class BoGA:
                 **{'selection.beta': self.beta},
                 **{'selection.adalead_k': self.adalead_k},
                 **{'selection.selection_pool': self.selection_pool},
+                **{'selection.candidate_diversity_strength': self.candidate_diversity_strength},
                 **{'embedding.method': self.embed_method},
                 **{'embedding.model_path': self.embed_model_path},
                 **{'embedding.batch_size': self.embed_batch_size},
@@ -612,6 +777,11 @@ class BoGA:
             if self.logger:
                 self.logger.log_scores(scores, iteration=0, acquisition_name="initial")
                 self.logger.log_objectives(objectives, iteration=0, acquisition_name="initial")
+                self._log_lineage(
+                    {seq: self._sequence_parents.get(seq) for seq in init_seqs},
+                    generation=0,
+                    selected_sequences=init_seqs,
+                )
 
             # Show initial population leaderboard
             print("Initial population results:")
@@ -677,7 +847,14 @@ class BoGA:
                 )
                 print(f"Selected top {len(parents)} parents for mutation")
                 
-                pool = self.mutator.mutate_pool(parents, self.k_propose, self._evaluated_sequences, objectives)
+                pool_parents = self.mutator.mutate_pool_with_parents(
+                    parents,
+                    self.k_propose,
+                    self._evaluated_sequences,
+                    objectives
+                )
+                self._sequence_parents.update(pool_parents)
+                pool = list(pool_parents)
                 print(f"Generated candidate pool of {len(pool)} sequences")
 
                 # Embed scored sequences + candidates together with fresh scaling/PCA
@@ -703,7 +880,13 @@ class BoGA:
 
                 # Select candidates using acquisition function
                 acquisition_kwargs = phase.get("acquisition_kwargs", {})
-                candidates = self._select_top_predictions(preds, self.m_select, acquisition_function, acquisition_kwargs)
+                candidates = self._select_top_predictions(
+                    preds,
+                    self.m_select,
+                    acquisition_function,
+                    acquisition_kwargs,
+                    candidate_diversity_strength=self.candidate_diversity_strength
+                )
 
                 print(f"Selected {len(candidates)} candidates for evaluation using {acquisition_function}")
 
@@ -718,6 +901,11 @@ class BoGA:
                     self.logger.log_model_metrics(loss, iteration=global_generation, metrics=metrics)
                     self.logger.log_scores(new_scores, iteration=global_generation, acquisition_name=acquisition_function)
                     self.logger.log_objectives(new_objectives, iteration=global_generation, acquisition_name=acquisition_function)
+                    self._log_lineage(
+                        pool_parents,
+                        generation=global_generation,
+                        selected_sequences=candidates,
+                    )
                     
                     if global_generation % self.surrogate_model_kwargs['hpo_interval'] == 0 and self.surrogate_manager.best_hyperparams:
                         self.logger.log_hyperparameters(
@@ -829,12 +1017,93 @@ class BoGA:
         print(f"AdaLead: Selected {len(candidates)} sequences above threshold (threshold={threshold:.4f}, max={best_value:.4f}, k={adalead_k})")
         return candidates
 
-    def _select_top_predictions(self, predictions: Dict[str, tuple], k: int, acquisition_function: str, acquisition_kwargs: Dict[str, Any] = None) -> List[str]:
+    @staticmethod
+    def _normalized_levenshtein_distance(seq_a: str, seq_b: str) -> float:
+        """
+        Return Levenshtein distance normalized to [0, 1] by the longer sequence length.
+        """
+        max_len = max(len(seq_a), len(seq_b))
+        if max_len == 0:
+            return 0.0
+
+        return BoGA._levenshtein_distance(seq_a, seq_b) / max_len
+
+    @staticmethod
+    def _normalize_scores(values: Dict[str, float]) -> Dict[str, float]:
+        min_value = min(values.values())
+        max_value = max(values.values())
+        if max_value == min_value:
+            return {seq: 1.0 for seq in values}
+        return {
+            seq: (value - min_value) / (max_value - min_value)
+            for seq, value in values.items()
+        }
+
+    def _select_diverse_predictions(
+        self,
+        acquisition_values: Dict[str, float],
+        k: int,
+        candidate_diversity_strength: float
+    ) -> List[str]:
+        if k <= 0:
+            return []
+
+        candidate_order = sorted(acquisition_values, key=acquisition_values.get, reverse=True)
+        selected = [candidate_order[0]]
+        remaining = candidate_order[1:]
+        normalized_acquisition = self._normalize_scores(acquisition_values)
+
+        while len(selected) < k and remaining:
+            best_candidate = None
+            best_score = -np.inf
+
+            for candidate in remaining:
+                novelty = min(
+                    self._normalized_levenshtein_distance(candidate, selected_seq)
+                    for selected_seq in selected
+                )
+                score = (
+                    (1.0 - candidate_diversity_strength) * normalized_acquisition[candidate]
+                    + candidate_diversity_strength * novelty
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best_candidate = candidate
+
+            selected.append(best_candidate)
+            remaining.remove(best_candidate)
+
+        return selected
+
+    def _select_top_predictions(
+        self,
+        predictions: Dict[str, tuple],
+        k: int,
+        acquisition_function: str,
+        acquisition_kwargs: Dict[str, Any] = None,
+        candidate_diversity_strength: float = 0.0
+    ) -> List[str]:
         if acquisition_kwargs is None:
             acquisition_kwargs = {}
+        if k <= 0:
+            return []
+        if not (0.0 <= candidate_diversity_strength <= 1.0):
+            raise ValueError(
+                "candidate_diversity_strength must be in [0, 1], "
+                f"got {candidate_diversity_strength}"
+            )
         acquisition_values = self.acquisition_function_obj.compute_acquisition(
             predictions, 
             acquisition_function, 
             **acquisition_kwargs
         )
-        return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
+        if not acquisition_values:
+            return []
+        if candidate_diversity_strength == 0.0:
+            return [seq for seq, _ in sorted(acquisition_values.items(), key=lambda x: x[1], reverse=True)[:k]]
+        return self._select_diverse_predictions(
+            acquisition_values,
+            k,
+            candidate_diversity_strength
+        )

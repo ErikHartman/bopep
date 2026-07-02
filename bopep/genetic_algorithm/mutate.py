@@ -80,22 +80,35 @@ class Mutator:
 
         return seq
 
+    def mutate_pool_with_parents(
+        self,
+        parents: List[str],
+        k_pool: int,
+        evaluated_sequences: Set[str],
+        objectives: Dict[str, float] = None
+    ) -> Dict[str, str]:
+        """
+        Generate a pool of mutated offspring and return child -> parent lineage.
+        """
+        child_to_parent = {}
+        attempts = 0
+        max_attempts = max(k_pool * 20, 10_000)
+
+        while len(child_to_parent) < k_pool and attempts < max_attempts:
+            parent = random.choice(parents)
+            avoid_sequences = set(evaluated_sequences) | set(child_to_parent)
+            child = self.mutate_sequence(parent, avoid_sequences, objectives)
+            if child != parent and child not in evaluated_sequences and child not in child_to_parent:
+                child_to_parent[child] = parent
+            attempts += 1
+
+        return child_to_parent
+
     def mutate_pool(self, parents: List[str], k_pool: int, evaluated_sequences: Set[str], objectives: Dict[str, float] = None) -> List[str]:
         """
         Generate a pool of mutated offspring from parent sequences.
         """
-        pool = set()
-        attempts = 0
-        max_attempts = max(k_pool * 20, 10_000)
-
-        while len(pool) < k_pool and attempts < max_attempts:
-            parent = random.choice(parents)
-            child = self.mutate_sequence(parent, evaluated_sequences, objectives)
-            if child not in evaluated_sequences:
-                pool.add(child)
-            attempts += 1
-
-        return list(pool)
+        return list(self.mutate_pool_with_parents(parents, k_pool, evaluated_sequences, objectives))
 
 if __name__ == "__main__":
     mutator = Mutator()

@@ -487,6 +487,54 @@ class TestSurrogateModelManager:
         assert manager.surrogate_model_kwargs['network_type'] == 'mlp'
         assert manager.model is None
         assert manager.best_hyperparams is None
+
+    def test_manager_custom_surrogate_raw_sequence_workflow(self):
+        """Test a custom surrogate that consumes raw sequence strings."""
+        class LengthPredictor:
+            def __init__(self):
+                self.fit_calls = 0
+
+            def fit_dict(self, input_dict, objective_dict, **kwargs):
+                self.fit_calls += 1
+                return 0.123
+
+            def predict_dict(self, input_dict, **kwargs):
+                return {
+                    sequence: float(len(raw_sequence))
+                    for sequence, raw_sequence in input_dict.items()
+                }
+
+        predictor = LengthPredictor()
+        sequence_inputs = {
+            "ACD": "ACD",
+            "ACDE": "ACDE",
+            "ACDEF": "ACDEF",
+            "ACDEFG": "ACDEFG",
+        }
+        objectives = {
+            sequence: float(len(sequence))
+            for sequence in sequence_inputs
+        }
+
+        manager = SurrogateModelManager({
+            'custom_model': predictor,
+            'default_std': 0.25,
+        })
+
+        assert manager.optimize_hyperparameters(sequence_inputs, objectives) == {}
+        manager.initialize_model()
+
+        metrics = manager.train_with_validation_split(
+            embeddings=sequence_inputs,
+            objectives=objectives,
+            validation_size=None,
+        )
+        predictions = manager.predict(sequence_inputs)
+
+        assert predictor.fit_calls == 1
+        assert metrics['train_mse'] == pytest.approx(0.0)
+        assert predictions["ACD"] == (3.0, 0.25)
+        assert predictions["ACDEFG"] == (6.0, 0.25)
     
     def test_manager_single_objective_workflow(self):
         """Test complete single objective workflow with manager."""

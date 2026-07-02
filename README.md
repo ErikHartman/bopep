@@ -105,7 +105,7 @@ The core of the BoPep framework lies in searching large datasets for binders. It
 <p align="center">
   <img src="assets/bopep.png" width="1000", alt="BoPep">
 </p>
-
+I'm ge
 The run-scripts for the BoPep search presented in the paper is present in `/examples/run_scipts_bopep/`.
 
 ### Protein design with RFdiffusion + Relax + ProteinMPNN, followed by search (BoRF)
